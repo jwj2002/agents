@@ -1,0 +1,12 @@
+# Virtual environment
+.venv/
+
+# Downloaded files
+*.m4a
+*.mp3
+*.wav
+*.webm
+
+# Python
+__pycache__/
+*.pyc

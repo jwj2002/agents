@@ -1,0 +1,8 @@
+# Core dependencies (installed via install.sh)
+# yt-dlp          - YouTube download
+# ffmpeg          - Audio processing (system package)
+
+# Whisper backends (one of these, platform-dependent)
+# mlx-whisper     - Apple Silicon (installed via install.sh)
+# faster-whisper  - Linux/Intel (installed via install.sh)
+# whisper.cpp     - Via Homebrew (installed via install.sh)
