@@ -15,6 +15,20 @@ After a coding session, this agent parses the conversation and extracts:
 | **GitHub Refs** | Issues, PRs, commits mentioned |
 | **Files Touched** | Files read, created, or modified |
 | **Session Summary** | Brief overview of what happened |
+| **Knowledge** | Items tagged with `[CAPTURE]` |
+
+## Capturing Knowledge
+
+To capture concepts, diagrams, or reference material during a session, use the `[CAPTURE]` tag:
+
+```
+[CAPTURE] Agents should be stored in ~/agents/ for cross-project use.
+
+[CAPTURE] Agent data flow:
+Session → obsidian-agent → Vault → daily-standup → Report
+```
+
+Captured items are saved to `knowledge.md` and the session log.
 
 ## Vault Structure
 
@@ -27,6 +41,7 @@ MyVault/
         ├── decisions.md       # Technical decisions log
         ├── blockers.md        # Current impediments
         ├── github-refs.md     # Issue/PR references
+        ├── knowledge.md       # [CAPTURE] tagged concepts
         └── sessions/
             └── 2024-01-31.md  # Full session details
 ```

@@ -15,6 +15,54 @@ class SessionExtract:
     blockers: list[str]
     github_refs: list[str]
     files_touched: list[str]
+    knowledge: list[str]  # [CAPTURE] tagged items
+
+
+def extract_captures(conversation_text: str) -> list[str]:
+    """Extract [CAPTURE] tagged content from conversation."""
+    captures = []
+
+    # Split into lines and look for User:/Assistant: messages with [CAPTURE]
+    lines = conversation_text.split('\n')
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        # Only match explicit User: [CAPTURE] or Assistant: [CAPTURE]
+        is_user_capture = line.startswith('User: [CAPTURE]')
+        is_assistant_capture = line.startswith('Assistant: [CAPTURE]')
+
+        if is_user_capture or is_assistant_capture:
+            # Extract the capture content
+            if is_user_capture:
+                content = line[len('User: [CAPTURE]'):].strip()
+            else:
+                content = line[len('Assistant: [CAPTURE]'):].strip()
+
+            # Collect multiline content until next User:/Assistant: or empty line
+            i += 1
+            while i < len(lines):
+                next_line = lines[i]
+                # Stop at next speaker
+                if next_line.startswith('User:') or next_line.startswith('Assistant:'):
+                    break
+                if next_line.startswith('A:'):
+                    break
+                # Stop at empty line followed by content (paragraph break)
+                if not next_line.strip():
+                    # Check if this is end of capture
+                    if i + 1 >= len(lines) or lines[i + 1].startswith(('User:', 'Assistant:', 'A:', '[')):
+                        break
+                content += '\n' + next_line
+                i += 1
+
+            content = content.strip()
+            if content and len(content) > 10:  # Filter out noise
+                captures.append(content)
+        else:
+            i += 1
+
+    return captures
 
 
 EXTRACTION_PROMPT = '''You are a JSON extraction bot. Your ONLY job is to output valid JSON. No explanations. No markdown. No conversation. Just JSON.
@@ -93,6 +141,9 @@ def extract_with_claude(conversation_text: str) -> SessionExtract:
         else:
             raise ValueError(f"Could not parse Claude response as JSON: {output[:500]}")
 
+    # Extract [CAPTURE] tags directly from conversation (no LLM needed)
+    knowledge = extract_captures(conversation_text)
+
     return SessionExtract(
         summary=data.get("summary", "No summary available"),
         next_steps=data.get("next_steps", []),
@@ -100,5 +151,6 @@ def extract_with_claude(conversation_text: str) -> SessionExtract:
         decisions=data.get("decisions", []),
         blockers=data.get("blockers", []),
         github_refs=data.get("github_refs", []),
-        files_touched=data.get("files_touched", [])
+        files_touched=data.get("files_touched", []),
+        knowledge=knowledge
     )

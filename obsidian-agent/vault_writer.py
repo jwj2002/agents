@@ -135,6 +135,45 @@ def append_decisions(file_path: Path, items: list[str]):
     file_path.write_text(content)
 
 
+def append_knowledge(file_path: Path, items: list[str]):
+    """Append knowledge/capture items."""
+    if not items:
+        return
+
+    # Create file with header if it doesn't exist
+    if not file_path.exists():
+        content = "# Knowledge\n\n> Concepts and reference captured with [CAPTURE] tags.\n\n---\n"
+    else:
+        content = file_path.read_text()
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    today_header = f"## {today}"
+
+    if today_header not in content:
+        new_section = f"\n{today_header}\n\n"
+        for item in items:
+            # Preserve multiline content with proper indentation
+            new_section += f"{item}\n\n"
+        content = content.rstrip() + "\n" + new_section
+    else:
+        lines = content.split("\n")
+        insert_idx = None
+        for i, line in enumerate(lines):
+            if line.strip() == today_header:
+                insert_idx = i + 1
+                # Skip empty line after header
+                while insert_idx < len(lines) and lines[insert_idx].strip() == "":
+                    insert_idx += 1
+                break
+
+        if insert_idx:
+            new_items = [f"{item}\n" for item in items]
+            lines = lines[:insert_idx] + new_items + lines[insert_idx:]
+            content = "\n".join(lines)
+
+    file_path.write_text(content)
+
+
 def write_session_log(project_path: Path, extract: SessionExtract):
     """Write a session log file."""
     today = datetime.now().strftime("%Y-%m-%d")
@@ -188,6 +227,11 @@ def write_session_log(project_path: Path, extract: SessionExtract):
             content += f"- {ref}\n"
         content += "\n"
 
+    if extract.knowledge:
+        content += "## Knowledge Captured\n"
+        for item in extract.knowledge:
+            content += f"{item}\n\n"
+
     session_file.write_text(content)
 
 
@@ -201,6 +245,7 @@ def update_vault(project_name: str, extract: SessionExtract):
     append_decisions(project_path / "decisions.md", extract.decisions)
     append_to_file(project_path / "blockers.md", extract.blockers)
     append_decisions(project_path / "github-refs.md", extract.github_refs)
+    append_knowledge(project_path / "knowledge.md", extract.knowledge)
 
     # Write session log
     write_session_log(project_path, extract)

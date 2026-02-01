@@ -166,6 +166,7 @@ def main():
         print(f"\nBlockers: {extract.blockers}")
         print(f"\nGitHub Refs: {extract.github_refs}")
         print(f"\nFiles: {extract.files_touched}")
+        print(f"\nKnowledge: {extract.knowledge}")
         return
 
     # Update the vault
@@ -176,6 +177,7 @@ def main():
     print(f"  - Decisions: {len(extract.decisions)} items")
     print(f"  - Blockers: {len(extract.blockers)} items")
     print(f"  - GitHub refs: {len(extract.github_refs)} items")
+    print(f"  - Knowledge: {len(extract.knowledge)} items")
 
 
 if __name__ == "__main__":
