@@ -66,6 +66,24 @@ fi
 ln -sf "$SCRIPT_DIR/rules" "$CLAUDE_DIR/rules"
 echo "  ✓ Linked rules/"
 
+# Backup and symlink skills directory
+if [ -d "$CLAUDE_DIR/skills" ] && [ ! -L "$CLAUDE_DIR/skills" ]; then
+    mkdir -p "$BACKUP_DIR"
+    mv "$CLAUDE_DIR/skills" "$BACKUP_DIR/"
+    echo "  Backed up skills/"
+fi
+ln -sf "$SCRIPT_DIR/skills" "$CLAUDE_DIR/skills"
+echo "  ✓ Linked skills/"
+
+# Backup and symlink statusline.py
+if [ -f "$CLAUDE_DIR/statusline.py" ] && [ ! -L "$CLAUDE_DIR/statusline.py" ]; then
+    mkdir -p "$BACKUP_DIR"
+    mv "$CLAUDE_DIR/statusline.py" "$BACKUP_DIR/"
+    echo "  Backed up statusline.py"
+fi
+ln -sf "$SCRIPT_DIR/statusline.py" "$CLAUDE_DIR/statusline.py"
+echo "  ✓ Linked statusline.py"
+
 echo ""
 if [ -d "$BACKUP_DIR" ]; then
     echo "Backups saved to: $BACKUP_DIR"
@@ -74,8 +92,12 @@ echo ""
 echo "Installation complete!"
 echo ""
 echo "Installed:"
-echo "  - settings.local.json (hooks config)"
+echo "  - settings.local.json (hooks + statusline config)"
 echo "  - hooks/ (PreCompact, SessionStart scripts)"
 echo "  - commands/ (slash commands)"
 echo "  - agents/ (agent instructions)"
 echo "  - rules/ (global rules)"
+echo "  - skills/ (orchestrate, test-plan)"
+echo "  - statusline.py (custom status line)"
+echo ""
+echo "Note: settings.json (plugins, credentials) stays local and is not overwritten."

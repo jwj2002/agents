@@ -14,10 +14,6 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/precompact_checkpoint.py"
-          },
-          {
-            "type": "command",
-            "command": "python3 ~/agents/obsidian-agent/update_vault.py 2>&1 | tee -a /tmp/obsidian-agent.log"
           }
         ]
       }
@@ -33,5 +29,9 @@
         ]
       }
     ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "python3 ~/.claude/statusline.py"
   }
 }
