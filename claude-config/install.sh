@@ -57,6 +57,15 @@ fi
 ln -sf "$SCRIPT_DIR/agents" "$CLAUDE_DIR/agents"
 echo "  ✓ Linked agents/"
 
+# Backup and symlink rules directory
+if [ -d "$CLAUDE_DIR/rules" ] && [ ! -L "$CLAUDE_DIR/rules" ]; then
+    mkdir -p "$BACKUP_DIR"
+    mv "$CLAUDE_DIR/rules" "$BACKUP_DIR/"
+    echo "  Backed up rules/"
+fi
+ln -sf "$SCRIPT_DIR/rules" "$CLAUDE_DIR/rules"
+echo "  ✓ Linked rules/"
+
 echo ""
 if [ -d "$BACKUP_DIR" ]; then
     echo "Backups saved to: $BACKUP_DIR"
@@ -69,3 +78,4 @@ echo "  - settings.local.json (hooks config)"
 echo "  - hooks/ (PreCompact, SessionStart scripts)"
 echo "  - commands/ (slash commands)"
 echo "  - agents/ (agent instructions)"
+echo "  - rules/ (global rules)"

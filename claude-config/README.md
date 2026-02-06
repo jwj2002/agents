@@ -10,6 +10,7 @@ Portable Claude Code configuration that can be installed on any machine.
 | `hooks/` | PreCompact checkpoint, SessionStart restore |
 | `commands/` | Slash commands (/orchestrate, /obsidian, etc.) |
 | `agents/` | Agent instructions (map-plan, patch, prove, etc.) |
+| `rules/` | Global rules loaded across all projects |
 
 ## Installation
 
@@ -48,6 +49,13 @@ These stay local and are not tracked:
 | `/changelog` | Update changelog from merged PRs |
 | `/standup` | Generate daily standup report |
 | `/review` | Code review staged changes |
+| `/scaffold-module` | Scaffold FastAPI module (model, schema, repo, service, router, deps) |
+
+## Rules
+
+| Rule | Purpose |
+|------|---------|
+| `fastapi-layered-pattern.md` | Definitive reference for FastAPI layered architecture |
 
 ## Updating
 
