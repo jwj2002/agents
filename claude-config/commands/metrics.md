@@ -103,6 +103,19 @@ Displays performance metrics from accumulated outcome data.
 
 ## Implementation
 
+### Step 0: Check Dependencies
+
+```bash
+# Verify jq is available (required for JSON parsing)
+if ! command -v jq &>/dev/null; then
+  echo "Error: jq is required but not installed."
+  echo "  macOS:   brew install jq"
+  echo "  Ubuntu:  sudo apt install jq"
+  echo "  Windows: choco install jq  (or scoop install jq)"
+  exit 1
+fi
+```
+
 ### Step 1: Load Data
 
 ```bash
@@ -165,9 +178,10 @@ cat .claude/memory/failures.jsonl | \
 
 ```bash
 # Weekly trend (last 4 weeks)
+# Note: uses Python for cross-platform date math (date -d is GNU-only)
 for WEEK in 1 2 3 4; do
-  START_DATE=$(date -d "$WEEK weeks ago" +%Y-%m-%d)
-  END_DATE=$(date -d "$((WEEK-1)) weeks ago" +%Y-%m-%d)
+  START_DATE=$(python3 -c "from datetime import datetime,timedelta; print((datetime.now()-timedelta(weeks=$WEEK)).strftime('%Y-%m-%d'))")
+  END_DATE=$(python3 -c "from datetime import datetime,timedelta; print((datetime.now()-timedelta(weeks=$((WEEK-1)))).strftime('%Y-%m-%d'))")
   
   PASS=$(cat .claude/memory/metrics.jsonl | \
     jq -r "select(.date >= \"$START_DATE\" and .date < \"$END_DATE\" and .status == \"PASS\")" | wc -l)

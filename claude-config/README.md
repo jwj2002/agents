@@ -69,6 +69,14 @@ After installation, all commands and rules are immediately available in every Cl
 | `/feature` | `/feature "Add dark mode"` | Create feature issue via `gh issue create` with labels |
 | `/bug` | `/bug "Login fails on Safari"` | Create bug report via `gh issue create` with investigation |
 | `/spec-draft` | `/spec-draft "User auth"` | Interactive spec creation with codebase discovery |
+| `/feature-from-spec` | `/feature-from-spec` | Create feature issue from spec analysis (used by /spec-review) |
+
+### Review & Testing
+
+| Command | Usage | Description |
+|---------|-------|-------------|
+| `/test-plan` | `/test-plan 184` | Pre-implementation test planning with edge cases |
+| `/codex-review` | `/codex-review` | Second opinion from OpenAI Codex (requires OPENAI_API_KEY) |
 
 ### Learning System
 

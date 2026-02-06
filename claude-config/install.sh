@@ -26,7 +26,11 @@ if [[ "$(uname)" == "Darwin" ]]; then
     PLATFORM_LABEL="macOS"
 elif grep -qi microsoft /proc/version 2>/dev/null; then
     PLATFORM="wsl"
-    WIN_USER=$(cmd.exe /C "echo %USERNAME%" 2>/dev/null | tr -d '\r' || true)
+    if command -v cmd.exe &>/dev/null; then
+        WIN_USER=$(cmd.exe /C "echo %USERNAME%" 2>/dev/null | tr -d '\r' || true)
+    else
+        WIN_USER=""
+    fi
     PLATFORM_LABEL="WSL (Windows: ${WIN_USER:-unknown})"
 else
     PLATFORM="linux"
@@ -309,6 +313,15 @@ fi
 # Verify PyYAML
 if python3 -c "import yaml" 2>/dev/null; then
     echo "  ✓ PyYAML importable"
+fi
+
+# Verify python3 command (hooks and statusline require it)
+if command -v python3 &>/dev/null; then
+    echo "  ✓ python3 available"
+elif command -v python &>/dev/null; then
+    echo "  ⚠ python3 not found (hooks use python3). Suggestion:"
+    echo "    alias python3=python   # add to your shell profile"
+    echo "    Or: ln -s \$(which python) /usr/local/bin/python3"
 fi
 
 echo ""

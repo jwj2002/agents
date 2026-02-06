@@ -29,10 +29,11 @@ Get a second opinion from OpenAI Codex CLI on the current plan or specified file
      export $(grep OPENAI_API_KEY .env | xargs)
    fi
 
-   codex exec --skip-git-repo-check --sandbox read-only -o /tmp/codex-review-output.md "[PROMPT]"
+   REVIEW_OUTPUT="${TMPDIR:-/tmp}/codex-review-output.md"
+   codex exec --skip-git-repo-check --sandbox read-only -o "$REVIEW_OUTPUT" "[PROMPT]"
    ```
 
-4. **Read and summarize the output** from `/tmp/codex-review-output.md`
+4. **Read and summarize the output** from `$REVIEW_OUTPUT`
 
 5. **Present findings** with a clear recommendation on whether changes are needed
 

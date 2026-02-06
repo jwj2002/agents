@@ -193,7 +193,7 @@ Issue → MAP/MAP-PLAN → [TEST-PLANNER] → CONTRACT* → PATCH → PROVE
 
 ```bash
 # 1. Clone the agents repo
-git clone git@github.com:jwj2002/agents.git ~/agents
+git clone https://github.com/jwj2002/agents.git ~/agents
 
 # 2. Install Claude Code config (symlinks)
 cd ~/agents/claude-config && ./install.sh
@@ -202,11 +202,11 @@ cd ~/agents/claude-config && ./install.sh
 cd ~/agents/obsidian-agent && python3 -m obsidian_agent --init
 
 # 4. Install MCP server
-cd ~/agents/mcp-server && pip install -e .
+cd ~/agents/mcp-server && python3 -m pip install -e .
 
 # 5. Install standalone agent dependencies (as needed)
-pip install edge-tts    # doc-reader
-pip install yt-dlp      # youtube-summarizer
+python3 -m pip install edge-tts    # doc-reader
+python3 -m pip install yt-dlp      # youtube-summarizer
 ```
 
 ### Cross-System State

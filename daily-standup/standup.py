@@ -400,7 +400,14 @@ def main():
             print("(Copied to clipboard)")
         else:
             print("---")
-            print("(Could not copy to clipboard. Install xclip or xsel on Linux.)")
+            system = platform.system()
+            if system == "Darwin":
+                hint = "pbcopy should be available by default on macOS."
+            elif system == "Windows":
+                hint = "Install pyperclip, or use WSL with xclip."
+            else:
+                hint = "Install xclip or xsel (e.g. sudo apt install xclip)."
+            print(f"(Could not copy to clipboard. {hint})")
 
 
 if __name__ == "__main__":

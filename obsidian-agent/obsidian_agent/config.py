@@ -41,6 +41,8 @@ def _platform_default_vault() -> Path:
     system = platform.system()
     if system == "Darwin":
         return Path.home() / "Library" / "Mobile Documents" / "iCloud~md~obsidian" / "Documents" / "MyVault"
+    elif system == "Windows":
+        return Path.home() / "Documents" / "ObsidianVault"
     else:
         # Linux / WSL
         return Path.home() / "obsidian" / "MyVault"
