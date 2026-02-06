@@ -1,0 +1,24 @@
+# Obsidian Second Brain Agent — configuration
+#
+# Copy to: ~/.config/obsidian-agent/config.toml
+# Or run:  python -m obsidian_agent --init
+
+[vault]
+# Path to your Obsidian vault
+# macOS default: ~/Library/Mobile Documents/iCloud~md~obsidian/Documents/MyVault
+# Linux default: ~/obsidian/MyVault
+path = "~/obsidian/MyVault"
+
+# Subfolder inside vault for project notes
+projects_folder = "Projects"
+
+[claude]
+# Where Claude Code stores session logs
+projects_path = "~/.claude/projects"
+
+[extraction]
+# Model for extraction (haiku = fast + cheap, sonnet = more accurate)
+model = "haiku"
+
+# Max characters of conversation to send for extraction
+max_conversation_chars = 50000

@@ -1,7 +1,7 @@
-"""Parse Claude Code conversation logs."""
+"""Parse Claude Code conversation logs (.jsonl)."""
 import json
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 
@@ -23,6 +23,21 @@ class SessionInfo:
     project_name: str
     messages: list[ConversationMessage]
     git_branch: str = ""
+
+    @property
+    def date(self) -> str:
+        """Extract date (YYYY-MM-DD) from the first message timestamp.
+
+        Timestamps look like: '2026-02-06T14:23:45.123Z'
+        Falls back to empty string if no messages or unparseable.
+        """
+        if not self.messages:
+            return ""
+        ts = self.messages[0].timestamp
+        if not ts:
+            return ""
+        # ISO timestamps start with YYYY-MM-DD
+        return ts[:10] if len(ts) >= 10 else ""
 
 
 def extract_content(message_data: dict) -> tuple[str, Optional[str], Optional[dict]]:
@@ -57,7 +72,7 @@ def parse_session_log(log_path: Path) -> SessionInfo:
     project_path = ""
     git_branch = ""
 
-    with open(log_path, 'r') as f:
+    with open(log_path, "r") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -94,7 +109,7 @@ def parse_session_log(log_path: Path) -> SessionInfo:
                 content=content,
                 timestamp=timestamp,
                 tool_name=tool_name,
-                tool_input=tool_input
+                tool_input=tool_input,
             ))
 
     # Extract project name from path
@@ -105,7 +120,7 @@ def parse_session_log(log_path: Path) -> SessionInfo:
         project_path=project_path,
         project_name=project_name,
         messages=messages,
-        git_branch=git_branch
+        git_branch=git_branch,
     )
 
 
