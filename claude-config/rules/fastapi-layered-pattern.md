@@ -1,3 +1,7 @@
+---
+paths: ["**/backend/**", "**/api/**", "**/services/**"]
+---
+
 # FastAPI Layered Architecture Pattern
 
 **Version**: 1.0

@@ -10,12 +10,23 @@ Claude Code PreCompact hook (Optimized v2):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
+
+# File-based error logging
+_log_file = Path.home() / ".claude" / "hooks.log"
+_log_file.parent.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    filename=str(_log_file),
+    level=logging.WARNING,
+    format="%(asctime)s [precompact] %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 MAX_TAIL_LINES = 300  # Reduced from 600 - we extract structured state instead
 CHECKPOINT_RETENTION_DAYS = 7  # Auto-delete checkpoints older than this
@@ -219,9 +230,13 @@ def main() -> int:
         print(f"[precompact] Skipped PERSISTENT_STATE.yaml update (PyYAML not installed)")
 
     # 5) Cleanup old checkpoints
-    deleted = cleanup_old_checkpoints(out_dir, CHECKPOINT_RETENTION_DAYS)
-    if deleted > 0:
-        print(f"[precompact] Cleaned up {deleted} checkpoints older than {CHECKPOINT_RETENTION_DAYS} days")
+    try:
+        deleted = cleanup_old_checkpoints(out_dir, CHECKPOINT_RETENTION_DAYS)
+        if deleted > 0:
+            print(f"[precompact] Cleaned up {deleted} checkpoints older than {CHECKPOINT_RETENTION_DAYS} days")
+    except Exception as e:
+        logging.error(f"Failed to cleanup old checkpoints: {e}", exc_info=True)
+        print(f"[precompact] Warning: Checkpoint cleanup failed: {e}", file=sys.stderr)
 
     # PreCompact stdout is not injected into context; it's mostly for verbose logs.
     print(f"[precompact] Checkpointed transcript -> {raw_dst}")

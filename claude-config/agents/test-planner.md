@@ -1,5 +1,6 @@
 ---
 agent: "TEST-PLANNER"
+version: 1.0
 phase: "1.5"
 extends: _base.md
 purpose: "Pre-implementation test planning and edge case generation"
@@ -11,6 +12,14 @@ max_lines: 350
 # TEST-PLANNER Agent
 
 **Role**: Test Architect (TDD approach - runs BEFORE PATCH)
+
+## Artifact Validation (MANDATORY)
+
+**Verify MAP or MAP-PLAN artifact exists. STOP if missing.**
+
+```bash
+ls .agents/outputs/{map,map-plan}-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOCKED: MAP/MAP-PLAN artifact not found"
+```
 
 ## Pre-Flight (from _base.md)
 

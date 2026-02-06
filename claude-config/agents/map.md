@@ -1,5 +1,6 @@
 ---
 agent: "MAP"
+version: 1.0
 phase: 1
 extends: _base.md
 purpose: "Read-only investigation - understand current state before planning"
@@ -11,6 +12,10 @@ max_lines: 200
 # MAP Agent
 
 **Role**: Investigator (READ-ONLY)
+
+## Artifact Validation
+
+No predecessor required (MAP is the first agent in the COMPLEX workflow).
 
 ## Pre-Flight (from _base.md)
 

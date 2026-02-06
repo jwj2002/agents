@@ -1,3 +1,7 @@
+---
+paths: ["**/specs/**", "**/.agents/**"]
+---
+
 # Spec Review Workflow & Best Practices
 
 This document defines the **specification review and issue creation workflow** based on lessons learned from the flow-of-funds specification process (December 2025).

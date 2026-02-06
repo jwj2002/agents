@@ -14,6 +14,8 @@ Analyzes accumulated failures and successes to extract patterns and update the k
 /learn --since 2025-01-01   # Analyze outcomes since date
 /learn --dry-run            # Preview changes without updating files
 /learn --verbose            # Show detailed analysis
+/learn --cross-project      # Aggregate patterns across all projects
+/learn --validate           # Compare before/after success rates per pattern
 ```
 
 ---
@@ -275,6 +277,68 @@ brew install jq     # macOS
 ```bash
 # Validate JSONL format
 cat .claude/memory/failures.jsonl | jq -c '.' > /dev/null
+```
+
+---
+
+## Cross-Project Learning (`--cross-project`)
+
+Aggregates failure patterns and metrics across all projects:
+
+### Step 8: Scan All Projects
+
+```bash
+# Find all project memory directories
+for DIR in ~/projects/*/.claude/memory/; do
+  PROJECT=$(basename $(dirname $(dirname "$DIR")))
+  if [ -f "${DIR}failures.jsonl" ]; then
+    echo "Found failures.jsonl in $PROJECT"
+    cat "${DIR}failures.jsonl"
+  fi
+done
+```
+
+### Step 9: Merge Patterns
+
+- Group by `root_cause` across all projects
+- Note contributing projects for each pattern
+- Write to global `~/.claude/memory/patterns.md` (not project-local)
+- Merge same root_cause counts from different projects
+
+Example output:
+```markdown
+### ENUM_VALUE — Cross-Project Pattern
+**Frequency**: 18 total (12 from mymoney, 4 from VE-RAG, 2 from saas-starter)
+**Prevention**: [Same as single-project]
+```
+
+---
+
+## Pattern Validation (`--validate`)
+
+Compares success rates before and after pattern additions:
+
+### Step 10: Track Pattern Events
+
+Record when patterns are added/modified:
+
+```bash
+# Append to pattern-events.jsonl
+echo '{"date":"'$(date +%Y-%m-%d)'","pattern":"ENUM_VALUE","action":"added","success_rate_before":0.74,"agent_versions":{"map":"1.0","patch":"1.0"}}' >> .claude/memory/pattern-events.jsonl
+```
+
+### Step 11: Compare Before/After
+
+For each pattern in `pattern-events.jsonl`:
+1. Get success rate BEFORE pattern was added (from date field)
+2. Get success rate AFTER pattern was added (current)
+3. Report delta:
+
+```
+Pattern Validation Results:
+  ENUM_VALUE:      74% → 91% (+17%) ✅ Effective
+  COMPONENT_API:   81% → 85% (+4%)  ✅ Minor improvement
+  SCOPE_CREEP:     88% → 86% (-2%)  ⚠️ No improvement — review pattern
 ```
 
 ---

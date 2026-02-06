@@ -6,6 +6,12 @@
       "Bash(clawdbot models --help:*)"
     ]
   },
+  "mcpServers": {
+    "vault-metrics": {
+      "command": "python3",
+      "args": ["~/agents/mcp-server/server.py", "--mcp"]
+    }
+  },
   "hooks": {
     "PreCompact": [
       {

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import socket
 import sys
 import getpass
 from datetime import datetime
@@ -15,8 +16,9 @@ def main():
     GREEN = "\033[32m"
     RESET = "\033[0m"
 
-    # Server name simplified to DELLPRO (blue)
-    server = f"{BLUE}DELLPRO{RESET}"
+    # Server name from hostname (blue)
+    hostname = socket.gethostname().split(".")[0].upper()
+    server = f"{BLUE}{hostname}{RESET}"
 
     # Get username (pink)
     username = f"{PINK}{getpass.getuser()}{RESET}"

@@ -15,9 +15,28 @@ Run the obsidian vault update agent to extract and log:
 Execute this command:
 
 ```bash
-python3 /Users/jasonjob/agents/obsidian-agent/update_vault.py
+cd ~/agents/obsidian-agent && python3 -m obsidian_agent
+```
+
+### Options
+
+```bash
+# Preview without writing to vault
+cd ~/agents/obsidian-agent && python3 -m obsidian_agent --dry-run
+
+# First-time setup (creates config.toml)
+cd ~/agents/obsidian-agent && python3 -m obsidian_agent --init
+
+# Process all projects
+cd ~/agents/obsidian-agent && python3 -m obsidian_agent --all-projects
+
+# Generate weekly rollup
+cd ~/agents/obsidian-agent && python3 -m obsidian_agent --weekly
 ```
 
 After running, report what was extracted and saved to the vault.
 
-If the command fails, show the error and suggest fixes.
+If the command fails, check:
+1. Config exists: `~/.config/obsidian-agent/config.toml`
+2. If not, run `--init` first
+3. Vault path is correct in config

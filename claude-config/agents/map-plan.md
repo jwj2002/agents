@@ -1,5 +1,6 @@
 ---
 agent: "MAP-PLAN"
+version: 1.0
 phase: "1+2"
 extends: _base.md
 purpose: "Combined investigation + planning for TRIVIAL/SIMPLE tasks"
@@ -11,6 +12,10 @@ max_lines: 450
 # MAP-PLAN Agent
 
 **Role**: Investigator + Architect (TRIVIAL/SIMPLE only)
+
+## Artifact Validation
+
+No predecessor required (MAP-PLAN is the first agent in the TRIVIAL/SIMPLE workflow).
 
 ## Pre-Flight (from _base.md)
 

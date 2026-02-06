@@ -264,6 +264,43 @@ Based on metrics, generate actionable recommendations:
 
 ---
 
+## Schema Reference
+
+Metrics records follow the canonical schema from `_base.md` section 11:
+
+**Required fields**: `issue`, `date`, `status`, `complexity`, `stack`, `agents_run`, `agent_versions`
+
+**Validation** — before displaying metrics, check required fields:
+
+```bash
+# Validate all records have required fields
+cat .claude/memory/metrics.jsonl | jq -c 'select(.issue == null or .date == null or .status == null)' | head -5
+# If any output → records are malformed, flag for repair
+```
+
+---
+
+## Agent Version Correlation
+
+Group success rates by agent version to detect if updates help or hurt:
+
+```bash
+# Extract agent versions and correlate with success
+cat .claude/memory/metrics.jsonl | \
+  jq -r 'select(.agent_versions != null) | .agent_versions["patch"] + " " + .status' | \
+  sort | uniq -c | sort -rn
+```
+
+Example output:
+```
+  15 1.0 PASS
+   3 1.0 BLOCKED
+   8 1.1 PASS
+   0 1.1 BLOCKED    ← v1.1 update was effective
+```
+
+---
+
 ## Related Commands
 
 - `/learn` — Update patterns from failures

@@ -149,15 +149,35 @@ Routing:
 If the change impacts **both** backend and frontend:
 - Backend changes define the contract (routes, request/response, error semantics)
 - Frontend must follow the contract
+- **CONTRACT is MANDATORY** — not optional. PATCH will STOP if missing.
 
 **MANDATORY contract artifact for any fullstack change:**
 - `.agents/outputs/contract-{issue}-{date}.md`
+- PATCH agent validates this file exists before proceeding
 
 PATCH must treat the Contract Artifact as **authoritative** for:
 - Route paths, request/response schemas
 - Error semantics (401/403/404/422) and payload shapes
 - Account scoping (path prefix vs query param)
 - Frontend integration notes (how to call via `fetchData`)
+
+---
+
+## Step 3.5 — Parallel Execution (Optional Optimization)
+
+When `--with-tests` is used with COMPLEX issues, MAP and TEST-PLANNER can run concurrently:
+
+```
+# Both read issue context independently — no dependency between them
+Task(description='MAP for issue N', ...)           ← parallel
+Task(description='TEST-PLANNER for issue N', ...)  ← parallel
+```
+
+**Rules for parallel execution**:
+- Only parallelize agents with no artifact dependency on each other
+- Both agents must write to separate output files
+- Wait for both to complete before proceeding to PLAN
+- Sequential agents (PLAN → CONTRACT → PATCH → PROVE) must NOT be parallelized
 
 ---
 

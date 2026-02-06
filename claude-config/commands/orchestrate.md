@@ -9,6 +9,25 @@ argument-hint: [issue-number]
 
 ---
 
+## Table of Contents
+
+- [Usage](#usage)
+- [Agent Resolution](#agent-resolution-global--project-override)
+- [Workflow](#workflow)
+- [State Tracking](#state-tracking-critical-for-context-continuity)
+- [Process](#process)
+  - [Step 0: Verify Issue](#step-0-verify-issue)
+  - [Step 1: Classify Complexity](#step-1-classify-complexity)
+  - [Step 2: Create Feature Branch](#step-2-create-feature-branch)
+  - [Step 3: Spawn Agents](#step-3-spawn-agents-task-tool)
+  - [Step 4: Report Status](#step-4-report-status)
+- [Parallel Execution](#parallel-execution)
+- [Failure Handling](#failure-handling)
+- [Artifacts](#artifacts)
+- [Rules](#rules)
+
+---
+
 ## Usage
 
 ```bash
@@ -53,12 +72,12 @@ fi
 ## Workflow
 
 ```
-TRIVIAL/SIMPLE: MAP-PLAN → [TEST-PLANNER] → [CONTRACT] → PATCH → PROVE
-COMPLEX:        MAP → PLAN → [TEST-PLANNER] → [CONTRACT] → PATCH → PROVE
+TRIVIAL/SIMPLE: MAP-PLAN → [TEST-PLANNER] → CONTRACT* → PATCH → PROVE
+COMPLEX:        MAP → PLAN → [TEST-PLANNER] → CONTRACT* → PATCH → PROVE
 ```
 
 - `[TEST-PLANNER]` runs if `--with-tests` flag provided
-- `[CONTRACT]` required if fullstack
+- `CONTRACT*` **MANDATORY** if fullstack (not optional — PATCH will STOP without it)
 
 ---
 
@@ -231,7 +250,10 @@ End with AGENT_RETURN: test-plan-N-MMDDYY.md
 
 **Validate**: File exists, has test matrix, has AGENT_RETURN directive.
 
-#### CONTRACT (if fullstack)
+#### CONTRACT (MANDATORY if fullstack)
+
+**GATE**: If stack is fullstack, CONTRACT MUST run. PATCH will refuse to proceed without the contract artifact.
+
 ```
 Task(
   description='CONTRACT for issue N',
@@ -316,6 +338,27 @@ PROVE status: PASS ✅
 
 Next: /pr 184 to create pull request
 ```
+
+---
+
+## Parallel Execution
+
+When `--with-tests` is provided and the issue is COMPLEX, MAP and TEST-PLANNER can run concurrently since they both read the issue context independently:
+
+```
+# Parallel: MAP + TEST-PLANNER (both read issue, no dependency)
+Task(description='MAP for issue N', ...)      ← run in parallel
+Task(description='TEST-PLANNER for issue N', ...)  ← run in parallel
+
+# Then sequential: PLAN → CONTRACT → PATCH → PROVE
+```
+
+**Use parallel Task calls** (multiple Task invocations in a single message) when:
+- Both agents read from the same input (issue body)
+- Neither depends on the other's output
+- Both write to separate artifact files
+
+**Do NOT parallelize** agents that depend on predecessor artifacts (e.g., PATCH depends on PLAN).
 
 ---
 

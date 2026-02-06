@@ -1,5 +1,6 @@
 ---
 agent: "CONTRACT"
+version: 1.0
 phase: "2.5"
 extends: _base.md
 purpose: "Define backend↔frontend API contract for fullstack work"
@@ -19,6 +20,14 @@ max_lines: 250
 - **REQUIRED**: Any fullstack change
 
 ---
+
+## Artifact Validation (MANDATORY)
+
+**Verify PLAN or MAP-PLAN artifact exists. STOP if missing.**
+
+```bash
+ls .agents/outputs/{plan,map-plan}-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOCKED: PLAN/MAP-PLAN artifact not found"
+```
 
 ## Pre-Flight (from _base.md)
 

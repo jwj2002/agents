@@ -1,5 +1,6 @@
 ---
 agent: "SPEC-REVIEWER"
+version: 1.0
 extends: _base.md
 purpose: "Analyze specs against codebase, generate GitHub issues"
 output: ".agents/outputs/spec-review-{spec-name}-{mmddyy}.md"

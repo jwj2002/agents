@@ -325,17 +325,19 @@ All PATCH claims verified. No discrepancies found.
 
 If change touches both backend and frontend:
 1. PLAN defines implementation approach
-2. **CONTRACT agent (Phase 2)** defines API surface (MANDATORY)
+2. **CONTRACT agent (Phase 2)** defines API surface — **MANDATORY, not optional**
 3. PATCH implements both sides using CONTRACT as authoritative spec
+4. PATCH will **STOP** if CONTRACT artifact is missing
 
 **Workflow for fullstack**:
 ```
-MAP-PLAN → CONTRACT → PATCH → PROVE
+MAP-PLAN → CONTRACT (MANDATORY) → PATCH → PROVE
 ```
 
 **Contract Agent**: `.claude/agents/contract.md`
 **Output**: `.agents/outputs/contract-{issue}-{mmddyy}.md`
 **Timing**: After PLAN, before PATCH
+**Enforcement**: PATCH agent validates contract artifact exists before proceeding
 
 ---
 

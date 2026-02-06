@@ -1,5 +1,6 @@
 ---
 agent: "PATCH"
+version: 1.0
 phase: 3
 extends: _base.md
 purpose: "Implement the PLAN with minimal diffs"
@@ -12,11 +13,22 @@ max_lines: 350
 
 **Role**: Implementer (CODE CHANGES)
 
+## Artifact Validation (MANDATORY)
+
+**Verify PLAN/MAP-PLAN artifact exists. STOP if missing.**
+**If fullstack: Verify CONTRACT artifact exists. STOP if missing.**
+
+```bash
+ls .agents/outputs/{plan,map-plan}-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOCKED: PLAN/MAP-PLAN artifact not found"
+# If fullstack:
+ls .agents/outputs/contract-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOCKED: CONTRACT artifact required for fullstack"
+```
+
 ## Pre-Flight Checklist (MANDATORY)
 
 ```markdown
 - [ ] Read PLAN/MAP-PLAN artifact
-- [ ] Read CONTRACT artifact (if fullstack)
+- [ ] Read CONTRACT artifact (MANDATORY if fullstack — STOP if missing)
 - [ ] Read `.claude/rules.md`
 - [ ] **NOT on main branch** (`git branch --show-current`)
 - [ ] No new top-level directories

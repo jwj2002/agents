@@ -1,5 +1,6 @@
 ---
 agent: "PLAN"
+version: 1.0
 phase: 2
 extends: _base.md
 purpose: "Convert MAP findings into file-by-file implementation plan"
@@ -11,6 +12,14 @@ max_lines: 450
 # PLAN Agent
 
 **Role**: Architect (DESIGN-ONLY)
+
+## Artifact Validation (MANDATORY)
+
+**Verify MAP artifact exists. STOP if missing.**
+
+```bash
+ls .agents/outputs/map-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOCKED: MAP artifact not found"
+```
 
 ## Pre-Flight (from _base.md)
 
@@ -79,14 +88,15 @@ For each file:
 - Which dep to use: `require_account_access`, `require_account_owner`, etc.
 - Error semantics: 401/403/404/422
 
-### 6. Define Contract (if fullstack)
+### 6. Define Contract (MANDATORY if fullstack)
 
-Note: CONTRACT agent will create full contract. PLAN just flags requirement.
+**If fullstack → CONTRACT is MANDATORY. PATCH will STOP if CONTRACT artifact is missing.**
 
 ```markdown
-## Contract Required
-This is a fullstack change. CONTRACT agent must run before PATCH.
+## Contract Required: YES
+This is a fullstack change. CONTRACT agent MUST run before PATCH.
 Contract artifact: `.agents/outputs/contract-{issue}-{mmddyy}.md`
+PATCH will verify this artifact exists and refuse to proceed without it.
 ```
 
 ### 7. Define Acceptance Criteria

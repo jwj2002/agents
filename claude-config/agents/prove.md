@@ -1,5 +1,6 @@
 ---
 agent: "PROVE"
+version: 1.0
 phase: 4
 extends: _base.md
 purpose: "Verification, evidence capture, outcome recording"
@@ -11,6 +12,14 @@ max_lines: 300
 # PROVE Agent
 
 **Role**: Reviewer / QA (VERIFICATION + LEARNING)
+
+## Artifact Validation (MANDATORY)
+
+**Verify PATCH artifact exists. STOP if missing.**
+
+```bash
+ls .agents/outputs/patch-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOCKED: PATCH artifact not found"
+```
 
 ## Pre-Flight (from _base.md)
 
@@ -124,29 +133,18 @@ echo '{"issue":'$ISSUE',"date":"'$(date +%Y-%m-%d)'","status":"PASS","complexity
 
 ### If BLOCKED
 
-**Step 1**: Classify root cause
+**Step 1**: Classify root cause using canonical enum from `_base.md` section 10.
 
-| Code | Description |
-|------|-------------|
-| `API_MISMATCH` | Frontend/backend contract violation |
-| `ENUM_VALUE` | Used enum NAME instead of VALUE |
-| `COMPONENT_API` | Wrong props/hook usage |
-| `MISSING_TEST` | Untested code path |
-| `MULTI_MODEL` | Forgot model relationship |
-| `ACCESS_CONTROL` | Missing/wrong permission check |
-| `SQLITE_COMPAT` | PostgreSQL-only feature |
-| `STRUCTURE_VIOLATION` | Violated rules.md |
-| `SCOPE_CREEP` | Beyond issue scope |
-| `OTHER` | Document specifics |
+Common codes: `ENUM_VALUE`, `COMPONENT_API`, `MULTI_MODEL`, `API_MISMATCH`, `ACCESS_CONTROL`, `MISSING_TEST`, `SQLITE_COMPAT`, `STRUCTURE_VIOLATION`, `SCOPE_CREEP`, `VERIFICATION_GAP`, `OTHER`
 
-**Step 2**: Record failure
+**Step 2**: Record failure using canonical schemas from `_base.md` sections 11-12.
 
 ```bash
-# Append to failures
+# Append to failures (canonical schema)
 echo '{"issue":'$ISSUE',"date":"'$(date +%Y-%m-%d)'","agent":"PATCH","root_cause":"'$CAUSE'","details":"'$DETAILS'","fix":"'$FIX'","prevention":"'$PREVENTION'","files":['$FILES']}' >> .claude/memory/failures.jsonl
 
-# Append to metrics
-echo '{"issue":'$ISSUE',"date":"'$(date +%Y-%m-%d)'","status":"BLOCKED","complexity":"'$COMPLEXITY'","stack":"'$STACK'","blocking_agent":"PROVE","root_cause":"'$CAUSE'"}' >> .claude/memory/metrics.jsonl
+# Append to metrics (canonical schema)
+echo '{"issue":'$ISSUE',"date":"'$(date +%Y-%m-%d)'","status":"BLOCKED","complexity":"'$COMPLEXITY'","stack":"'$STACK'","agents_run":['$AGENTS'],"agent_versions":{'$VERSIONS'},"root_cause":"'$CAUSE'","blocking_agent":"PROVE"}' >> .claude/memory/metrics.jsonl
 ```
 
 ---

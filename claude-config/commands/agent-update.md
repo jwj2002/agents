@@ -23,69 +23,8 @@ Applies suggested improvements to agent definitions based on learned patterns.
 1. Reads `.claude/memory/patterns.md` for suggested updates
 2. Identifies patterns with 5+ occurrences (high impact)
 3. Generates specific text additions for agent definitions
-4. Applies changes with user confirmation
-
----
-
-## Suggested Update Format
-
-From `/learn` output, updates are structured as:
-
-```markdown
-### Suggested Update: MAP Agent — Enum VALUE Check
-
-**Pattern**: ENUM_VALUE (12 occurrences, 26%)
-**Target file**: `.claude/agents/map.md`
-**Location**: After "Document Enums" section
-
-**Addition**:
-```markdown
-### Enum VALUE Verification (MANDATORY for fullstack)
-
-**⚠️ This check prevents 26% of failures**
-
-1. Find enum definition:
-   ```bash
-   grep -A 10 "class.*Enum" backend/backend/*/enums.py
-   ```
-
-2. For each enum, document:
-   | Python Name | Python VALUE |
-   |-------------|--------------|
-   
-3. Flag mismatches: NAME ≠ VALUE (e.g., `CO_OWNER = "CO-OWNER"`)
-
-4. Add to risks if any mismatch found
-```
-
-**Impact**: Would have prevented 12 failures
-```
-
----
-
-## Interactive Mode
-
-```
-╔═══════════════════════════════════════════════════════════════╗
-║                    AGENT UPDATE                                ║
-╚═══════════════════════════════════════════════════════════════╝
-
-Found 3 suggested updates from patterns.md:
-
-1. MAP Agent — Enum VALUE Check
-   Pattern: ENUM_VALUE (12 occurrences)
-   Impact: High (26% of failures)
-
-2. PATCH Agent — Multi-Model Detection
-   Pattern: MULTI_MODEL (6 occurrences)
-   Impact: Medium (13% of failures)
-
-3. PROVE Agent — Component API Verification
-   Pattern: COMPONENT_API (8 occurrences)
-   Impact: High (17% of failures)
-
-Apply which updates? [all/1,2,3/none]: 
-```
+4. Applies changes using Claude Code's **Edit tool** (not sed)
+5. Increments agent version in frontmatter
 
 ---
 
@@ -93,17 +32,23 @@ Apply which updates? [all/1,2,3/none]:
 
 ### Step 1: Load Suggestions
 
+Read `.claude/memory/patterns.md` and look for sections titled "Suggested Update":
+
 ```bash
-# Extract suggestions from patterns.md
 grep -A 20 "Suggested Update" .claude/memory/patterns.md
 ```
 
 ### Step 2: Validate Target Files
 
+Check agent files exist using project-first resolution:
+
 ```bash
-# Check agent files exist
-for AGENT in map plan patch prove; do
-  if [ ! -f ".claude/agents/${AGENT}.md" ]; then
+for AGENT in map plan patch prove map-plan contract test-planner; do
+  if [ -f ".claude/agents/${AGENT}.md" ]; then
+    echo "Project: .claude/agents/${AGENT}.md"
+  elif [ -f "$HOME/.claude/agents/${AGENT}.md" ]; then
+    echo "Global: ~/.claude/agents/${AGENT}.md"
+  else
     echo "WARNING: Agent file not found: ${AGENT}.md"
   fi
 done
@@ -111,63 +56,78 @@ done
 
 ### Step 3: Preview Changes
 
-For each suggestion:
-1. Show current section (if exists)
-2. Show proposed addition
-3. Show expected location
-
-```
-Preview: MAP Agent — Enum VALUE Check
-─────────────────────────────────────
-
-File: .claude/agents/map.md
-Location: Line 85 (after "Document Enums" section)
-
-Current content at location:
-│ ### 5. Document Enums (MANDATORY for fullstack)
-│ ...
-│ ### 6. Identify Pattern to Mirror
-
-Proposed addition:
-│ ### 5.5 Enum VALUE Verification (AUTO-ADDED)
-│ 
-│ **⚠️ This check prevents 26% of failures**
-│ ...
-
-Apply this change? [y/n]: 
-```
+For each suggestion, show:
+1. Target file and location
+2. Current content at that location
+3. Proposed addition
 
 ### Step 4: Apply Changes
 
-Using `sed` or similar to insert at correct location:
+**Use Claude Code's Edit tool** to insert text at the correct location:
 
-```bash
-# Insert after line N
-sed -i "${LINE}r addition.md" .claude/agents/map.md
+```markdown
+Use the Edit tool with:
+- file_path: path to agent .md file
+- old_string: the section AFTER which to insert (enough context to be unique)
+- new_string: the original section + the new addition appended
 ```
 
-### Step 5: Verify Changes
+**If Edit tool is not available** (e.g., running outside Claude Code), use Python:
+
+```python
+from pathlib import Path
+
+agent_file = Path(".claude/agents/map.md")
+content = agent_file.read_text()
+
+# Find insertion point
+marker = "### 5. Document Enums (MANDATORY for fullstack)"
+idx = content.find(marker)
+if idx == -1:
+    print(f"Marker not found in {agent_file}")
+else:
+    # Find end of current section (next ### heading)
+    next_section = content.find("\n### ", idx + len(marker))
+    insertion_point = next_section if next_section != -1 else len(content)
+    new_content = content[:insertion_point] + "\n\n" + addition + "\n" + content[insertion_point:]
+    agent_file.write_text(new_content)
+```
+
+### Step 5: Increment Agent Version
+
+After modifying an agent, increment the minor version in its frontmatter:
+
+```markdown
+# Before
+version: 1.0
+
+# After
+version: 1.1
+```
+
+Use the Edit tool to update the version line.
+
+### Step 6: Verify Changes
 
 ```bash
-# Check file still valid markdown
+# Check file is still valid markdown
 head -20 .claude/agents/map.md
 tail -20 .claude/agents/map.md
+
+# Verify frontmatter
+head -10 .claude/agents/map.md
 ```
 
-### Step 6: Commit Changes
+### Step 7: Commit Changes
 
 ```bash
-# Create commit with clear message
 git add .claude/agents/
 git commit -m "feat(agents): apply learned patterns
 
 Applied automatic improvements from /learn analysis:
-- MAP: Added enum VALUE verification (ENUM_VALUE pattern)
-- PATCH: Added multi-model detection (MULTI_MODEL pattern)
-- PROVE: Added component API check (COMPONENT_API pattern)
+- [list agents modified and what patterns addressed]
 
-Based on analysis of 47 issues with 83% success rate.
-Patterns addressed account for 56% of failures."
+Based on analysis of N issues with X% success rate."
 ```
 
 ---
@@ -175,34 +135,10 @@ Patterns addressed account for 56% of failures."
 ## Dry Run Mode
 
 With `--dry-run`:
-
-```
-╔═══════════════════════════════════════════════════════════════╗
-║                    AGENT UPDATE (DRY RUN)                      ║
-╚═══════════════════════════════════════════════════════════════╝
-
-Would apply 3 updates:
-
-1. MAP Agent — Enum VALUE Check
-   File: .claude/agents/map.md
-   Lines added: 15
-   Location: After line 85
-
-2. PATCH Agent — Multi-Model Detection
-   File: .claude/agents/patch.md
-   Lines added: 22
-   Location: After line 120
-
-3. PROVE Agent — Component API Verification
-   File: .claude/agents/prove.md
-   Lines added: 18
-   Location: After line 95
-
-Total lines added: 55
-Files modified: 3
-
-Run without --dry-run to apply changes.
-```
+- Performs all analysis
+- Shows what WOULD change
+- Does NOT modify any files
+- Does NOT increment versions
 
 ---
 
@@ -226,10 +162,11 @@ Track applied updates in `.claude/memory/updates.jsonl`:
 
 ```json
 {
-  "date": "2025-01-03",
+  "date": "2026-02-06",
   "agent": "map",
   "pattern": "ENUM_VALUE",
-  "lines_added": 15,
+  "old_version": "1.0",
+  "new_version": "1.1",
   "commit": "abc123"
 }
 ```

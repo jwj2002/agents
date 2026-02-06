@@ -1,25 +1,111 @@
-# Obsidian Vault Update Agent
+# Obsidian Second Brain Agent
 
-Automatically captures and logs information from Claude Code sessions to your Obsidian vault.
+Captures Claude Code sessions as **project state** in your Obsidian vault. Overwrite current status, append daily logs, generate weekly/monthly rollups for contractor reporting.
 
-## What It Does
+## What Changed in v2
 
-After a coding session, this agent parses the conversation and extracts:
+| v1 (old) | v2 (new) |
+|----------|----------|
+| 6 append-only files per project | **STATUS.md** (overwritten) + **Daily log** (appended) |
+| Trusted sessions-index.json | **Filesystem mtime only** — no stale index bugs |
+| Hardcoded macOS paths | **TOML config** (`~/.config/obsidian-agent/config.toml`) |
+| Extracted file lists | Extracts **status, phase, deliverables** |
+| No rollups | **Weekly + Monthly** rollup generation |
+| No cross-project view | **DASHBOARD.md** — all projects at a glance |
 
-| Category | What It Captures |
-|----------|------------------|
-| **Next Steps** | Tasks identified but not yet done |
-| **Completed** | Work finished during the session |
-| **Decisions** | Technical choices and reasoning |
-| **Blockers** | Things preventing progress |
-| **GitHub Refs** | Issues, PRs, commits mentioned |
-| **Files Touched** | Files read, created, or modified |
-| **Session Summary** | Brief overview of what happened |
-| **Knowledge** | Items tagged with `[CAPTURE]` |
+## Vault Structure
+
+```
+MyVault/
+├── DASHBOARD.md                    # Cross-project overview (overwritten)
+└── Projects/
+    └── {project-name}/
+        ├── STATUS.md               # Current state (overwritten each session)
+        └── Log/
+            ├── Daily/
+            │   └── 2026-02-06.md   # Append-only daily log
+            ├── Weekly/
+            │   └── 2026-W06.md     # Generated on demand
+            └── Monthly/
+                └── 2026-02.md      # Generated on demand
+```
+
+## Quick Start
+
+```bash
+# 1. Install (clone or copy)
+git clone <repo-url> ~/agents/obsidian-agent
+
+# 2. Create config
+python -m obsidian_agent --init
+
+# 3. Run from any project directory
+cd ~/projects/my-project
+python -m obsidian_agent
+
+# 4. Preview without writing
+python -m obsidian_agent --dry-run
+```
+
+## CLI Reference
+
+```bash
+# Default: update current project (STATUS + Daily + DASHBOARD)
+python -m obsidian_agent
+
+# Specific project path
+python -m obsidian_agent --project /path/to/project
+
+# Specific session ID
+python -m obsidian_agent --session abc123-def456
+
+# Update all recently active projects
+python -m obsidian_agent --all-projects
+
+# Generate weekly rollup (current week)
+python -m obsidian_agent --weekly
+
+# Generate weekly rollup (specific week)
+python -m obsidian_agent --weekly 2026-W06
+
+# Generate monthly rollup
+python -m obsidian_agent --monthly
+python -m obsidian_agent --monthly 2026-02
+
+# Preview extraction (no vault writes)
+python -m obsidian_agent --dry-run
+
+# Create/update config interactively
+python -m obsidian_agent --init
+
+# Backward-compatible entry point (still works)
+python update_vault.py --dry-run
+```
+
+## Configuration
+
+Config lives at `~/.config/obsidian-agent/config.toml`. Run `--init` to create it, or copy `config.example.toml`.
+
+```toml
+[vault]
+path = "~/obsidian/MyVault"
+projects_folder = "Projects"
+
+[claude]
+projects_path = "~/.claude/projects"
+
+[extraction]
+model = "haiku"
+max_conversation_chars = 50000
+```
+
+**Precedence**: TOML config > environment variables > platform defaults.
+
+Environment variables: `OBSIDIAN_VAULT_PATH`, `CLAUDE_PROJECTS_PATH`.
 
 ## Capturing Knowledge
 
-To capture concepts, diagrams, or reference material during a session, use the `[CAPTURE]` tag:
+Tag items with `[CAPTURE]` during a Claude Code session:
 
 ```
 [CAPTURE] Agents should be stored in ~/agents/ for cross-project use.
@@ -28,135 +114,56 @@ To capture concepts, diagrams, or reference material during a session, use the `
 Session → obsidian-agent → Vault → daily-standup → Report
 ```
 
-Captured items are saved to `knowledge.md` and the session log.
+Captured items appear in the daily log under **Knowledge**.
 
-## Vault Structure
-
-```
-MyVault/
-└── Projects/
-    └── {repo-name}/
-        ├── next-steps.md      # Running list of pending tasks
-        ├── completed.md       # Finished items by date
-        ├── decisions.md       # Technical decisions log
-        ├── blockers.md        # Current impediments
-        ├── github-refs.md     # Issue/PR references
-        ├── knowledge.md       # [CAPTURE] tagged concepts
-        └── sessions/
-            └── 2024-01-31.md  # Full session details
-```
-
-## Usage
-
-### From Terminal
+## Cross-System Deployment
 
 ```bash
-# Update vault from current directory's project
-obsidian-update
+# Machine A (macOS)
+python -m obsidian_agent --init
+# → vault path: ~/Library/Mobile Documents/iCloud~md~obsidian/Documents/MyVault
 
-# Update vault for a specific project
-obsidian-update --project /path/to/project
-
-# Preview what would be extracted (no changes made)
-obsidian-update --dry-run
-
-# Update a specific session by ID
-obsidian-update --session abc123-def456
+# Machine B (Linux/WSL)
+python -m obsidian_agent --init
+# → vault path: ~/obsidian/MyVault
 ```
 
-### From Claude Code
+## Dependencies
 
-```
-/obsidian
-```
+- Python 3.11+ (uses stdlib `tomllib`)
+- Claude CLI (`claude` command in PATH)
+- No pip packages required
 
-### Automatic (Pre-Compact Hook)
-
-The agent runs automatically before Claude Code compacts conversation context, ensuring session information is captured before summarization.
-
-## Installation
-
-### 1. Dependencies
-
-- Python 3.10+
-- Claude CLI (`claude` command available in PATH)
-
-### 2. Shell Alias (Optional)
-
-Add to `~/.zshrc` or `~/.bashrc`:
+## Shell Alias
 
 ```bash
-alias obsidian-update="python3 ~/agents/obsidian-agent/update_vault.py"
-```
-
-### 3. Claude Code Hook (Optional)
-
-Add to `~/.claude/settings.local.json`:
-
-```json
-{
-  "hooks": {
-    "PreCompact": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ~/agents/obsidian-agent/update_vault.py"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-### 4. Slash Command (Optional)
-
-Create `~/.claude/commands/obsidian.md` with instructions to run the update script.
-
-## Configuration
-
-Edit `config.py` to customize paths:
-
-```python
-# Obsidian vault location
-VAULT_PATH = Path("~/Library/Mobile Documents/iCloud~md~obsidian/Documents/MyVault")
-
-# Claude Code projects directory
-CLAUDE_PROJECTS_PATH = Path("~/.claude/projects")
+# Add to ~/.bashrc or ~/.zshrc
+alias brain="python3 -m obsidian_agent --dry-run"
+alias brain-update="python3 -m obsidian_agent"
+alias brain-weekly="python3 -m obsidian_agent --weekly"
 ```
 
 ## How It Works
 
-1. **Finds session log** - Locates the `.jsonl` conversation file in `~/.claude/projects/`
-2. **Parses messages** - Extracts user and assistant messages, tool calls
-3. **Calls Claude (haiku)** - Sends conversation to Claude for structured extraction
-4. **Updates vault** - Writes to consolidated files and session log
+1. **Finds session** — locates most recent `.jsonl` by filesystem mtime
+2. **Parses messages** — extracts user/assistant messages and tool calls
+3. **Extracts state** — sends conversation to Claude (haiku) for structured extraction
+4. **Writes vault** — overwrites STATUS.md, appends to daily log, rebuilds DASHBOARD.md
 
 ## Files
 
-| File | Purpose |
-|------|---------|
-| `config.py` | Path configuration |
-| `parser.py` | Reads and parses Claude Code conversation logs |
-| `extractor.py` | Uses Claude to extract structured information |
-| `vault_writer.py` | Writes extracted data to Obsidian vault |
-| `update_vault.py` | Main entry point / CLI |
-
-## Troubleshooting
-
-### "No Claude project folder found"
-
-The agent looks for conversation logs based on your current directory. Make sure you're in a directory where you've used Claude Code, or specify `--project`.
-
-### Empty extraction results
-
-- Check `/tmp/obsidian-agent.log` for errors
-- Try `--dry-run` to see what would be extracted
-- Ensure the Claude CLI is working: `claude -p "hello" --output-format json`
-
-### Vault not updating
-
-- Verify vault path in `config.py` matches your Obsidian vault location
-- Check that the vault directory is accessible (iCloud sync may cause delays)
+```
+obsidian-agent/
+├── obsidian_agent/          # Package
+│   ├── __init__.py          # Version
+│   ├── __main__.py          # CLI entry point
+│   ├── config.py            # TOML config loader
+│   ├── session_finder.py    # Session discovery (mtime-based)
+│   ├── parser.py            # JSONL conversation parser
+│   ├── extractor.py         # Claude-powered state extraction
+│   ├── templates.py         # Markdown templates
+│   └── vault_writer.py      # Vault file writer
+├── config.example.toml      # Example config
+├── update_vault.py          # Backward-compat shim
+└── README.md
+```

@@ -10,9 +10,20 @@ Claude Code SessionStart hook (Optimized v2):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 from pathlib import Path
+
+# File-based error logging
+_log_file = Path.home() / ".claude" / "hooks.log"
+_log_file.parent.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    filename=str(_log_file),
+    level=logging.WARNING,
+    format="%(asctime)s [sessionstart] %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 try:
     import yaml
@@ -28,7 +39,8 @@ def get_active_work(yaml_content: str) -> dict:
     try:
         data = yaml.safe_load(yaml_content)
         return data.get("active_work", {}) if data else {}
-    except Exception:
+    except Exception as e:
+        logging.warning(f"Failed to parse YAML state: {e}", exc_info=True)
         return {}
 
 

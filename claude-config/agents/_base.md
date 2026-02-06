@@ -167,27 +167,127 @@ grep -A 20 "PropTypes" frontend/src/components/path/Component.jsx
 
 ---
 
-## 9. Outcome Recording (PROVE Agent Only)
+## 9. Artifact Validation (MANDATORY)
 
-After verification, record outcome:
+Before starting work, verify predecessor artifacts exist. **STOP and report** if required artifacts are missing.
+
+| Agent | Required Predecessor | Validation |
+|-------|---------------------|------------|
+| MAP | None (first agent) | — |
+| MAP-PLAN | None (first agent) | — |
+| PLAN | MAP artifact | `ls .agents/outputs/map-{issue}-*.md` |
+| TEST-PLANNER | MAP or MAP-PLAN artifact | `ls .agents/outputs/map*-{issue}-*.md` |
+| CONTRACT | PLAN or MAP-PLAN artifact | `ls .agents/outputs/{plan,map-plan}-{issue}-*.md` |
+| PATCH | PLAN or MAP-PLAN artifact. CONTRACT if fullstack | `ls .agents/outputs/{plan,map-plan}-{issue}-*.md` |
+| PROVE | PATCH artifact | `ls .agents/outputs/patch-{issue}-*.md` |
+
+**If missing**: `STOP. Report: "BLOCKED: Required artifact {name} not found for issue #{issue}"`
+
+---
+
+## 10. Root Cause Classification (Canonical Enum)
+
+When recording failures, use ONLY these root cause codes:
+
+| Code | Description | Typical Agent |
+|------|-------------|---------------|
+| `ENUM_VALUE` | Used enum NAME instead of VALUE | PATCH, PROVE |
+| `COMPONENT_API` | Wrong props/hook usage | PATCH |
+| `MULTI_MODEL` | Forgot model relationship | PATCH |
+| `API_MISMATCH` | Frontend/backend contract violation | PATCH, PROVE |
+| `ACCESS_CONTROL` | Missing/wrong permission check | PATCH |
+| `MISSING_TEST` | Untested code path | PROVE |
+| `SQLITE_COMPAT` | PostgreSQL-only feature used | PATCH |
+| `STRUCTURE_VIOLATION` | Violated rules.md constraints | PATCH |
+| `SCOPE_CREEP` | Beyond issue scope | MAP-PLAN, PATCH |
+| `VERIFICATION_GAP` | Assumptions not verified by reading code | MAP-PLAN |
+| `OTHER` | Document specifics in `details` field | Any |
+
+---
+
+## 11. Canonical metrics.jsonl Schema
+
+Every metrics record MUST include these required fields:
+
+```json
+{
+  "issue": 184,
+  "date": "2026-02-06",
+  "status": "PASS | BLOCKED",
+  "complexity": "TRIVIAL | SIMPLE | COMPLEX",
+  "stack": "backend | frontend | fullstack",
+  "agents_run": ["MAP-PLAN", "PATCH", "PROVE"],
+  "agent_versions": {"map-plan": "1.0", "patch": "1.0", "prove": "1.0"},
+  "root_cause": null,
+  "blocking_agent": null,
+  "duration_minutes": 15
+}
+```
+
+**Optional fields**: `recovery_attempts`, `notes`
+
+---
+
+## 12. Canonical failures.jsonl Schema
+
+Every failure record MUST include:
+
+```json
+{
+  "issue": 184,
+  "date": "2026-02-06",
+  "agent": "PATCH",
+  "root_cause": "ENUM_VALUE",
+  "details": "Frontend used CO_OWNER instead of CO-OWNER",
+  "fix": "Changed string literal to match backend enum VALUE",
+  "prevention": "MAP should document enum VALUES explicitly",
+  "files": ["frontend/src/components/MemberForm.jsx"]
+}
+```
+
+**Optional fields**: `severity`, `recovery_minutes`
+
+---
+
+## 13. Outcome Recording (PROVE Agent Only)
+
+After verification, record outcome using the canonical schemas above:
 
 ### If PASS
 ```bash
-echo '{"issue":'$ISSUE_NUMBER',"date":"'$(date +%Y-%m-%d)'","status":"PASS","complexity":"SIMPLE","stack":"backend"}' >> .claude/memory/metrics.jsonl
+echo '{"issue":'$ISSUE_NUMBER',"date":"'$(date +%Y-%m-%d)'","status":"PASS","complexity":"'$COMPLEXITY'","stack":"'$STACK'","agents_run":['$AGENTS'],"agent_versions":{'$VERSIONS'},"root_cause":null,"blocking_agent":null}' >> .claude/memory/metrics.jsonl
 ```
 
 ### If BLOCKED
 ```bash
-# Record failure with root cause
-echo '{"issue":'$ISSUE_NUMBER',"date":"'$(date +%Y-%m-%d)'","root_cause":"ENUM_VALUE","details":"...","fix":"..."}' >> .claude/memory/failures.jsonl
+# Record failure (canonical schema)
+echo '{"issue":'$ISSUE_NUMBER',"date":"'$(date +%Y-%m-%d)'","agent":"PATCH","root_cause":"'$CAUSE'","details":"'$DETAILS'","fix":"'$FIX'","prevention":"'$PREVENTION'","files":['$FILES']}' >> .claude/memory/failures.jsonl
 
-# Record metric
-echo '{"issue":'$ISSUE_NUMBER',"date":"'$(date +%Y-%m-%d)'","status":"BLOCKED","root_cause":"ENUM_VALUE"}' >> .claude/memory/metrics.jsonl
+# Record metric (canonical schema)
+echo '{"issue":'$ISSUE_NUMBER',"date":"'$(date +%Y-%m-%d)'","status":"BLOCKED","complexity":"'$COMPLEXITY'","stack":"'$STACK'","agents_run":['$AGENTS'],"agent_versions":{'$VERSIONS'},"root_cause":"'$CAUSE'","blocking_agent":"PROVE"}' >> .claude/memory/metrics.jsonl
 ```
 
 ---
 
-## 10. When to Escalate
+## 14. Agent Versioning
+
+All agents include `version: X.Y` in their YAML frontmatter.
+
+**Convention**:
+- **Minor** (1.0 → 1.1): Pattern additions, wording changes via `/agent-update`
+- **Major** (1.0 → 2.0): Manual restructure, new sections, workflow changes
+
+When recording outcomes, include agent versions in `agent_versions` field:
+
+```json
+"agent_versions": {"map-plan": "1.0", "patch": "1.0", "prove": "1.0"}
+```
+
+This enables `/metrics` to correlate success rates with specific agent versions.
+
+---
+
+## 15. When to Escalate
 
 **STOP and report to orchestrator** if:
 - Complexity seems wrong (SIMPLE issue is actually COMPLEX)

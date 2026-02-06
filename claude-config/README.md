@@ -1,11 +1,12 @@
 # Claude Code Configuration
 
-Portable Claude Code configuration that can be installed on any machine. Provides slash commands, agent workflows, hooks, and global rules that work across all projects.
+Portable Claude Code configuration that can be installed on any machine. Provides slash commands, agent workflows, hooks, MCP server, and global rules that work across all projects.
 
 ## Prerequisites
 
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed
 - Git
+- Python 3.10+ (for hooks, MCP server, statusline)
 
 ## Installation
 
@@ -15,16 +16,21 @@ git clone https://github.com/jwj2002/agents.git ~/agents
 
 # 2. Run the install script
 ~/agents/claude-config/install.sh
+
+# 3. (Optional) Install MCP server
+cd ~/agents/mcp-server && pip install -e .
 ```
 
 The install script creates symlinks from `~/.claude/` to this repo:
 
 ```
-~/.claude/commands/       → ~/agents/claude-config/commands/
-~/.claude/agents/         → ~/agents/claude-config/agents/
-~/.claude/hooks/          → ~/agents/claude-config/hooks/
-~/.claude/rules/          → ~/agents/claude-config/rules/
-~/.claude/settings.local.json → ~/agents/claude-config/settings.local.json
+~/.claude/commands/            → ~/agents/claude-config/commands/
+~/.claude/agents/              → ~/agents/claude-config/agents/
+~/.claude/hooks/               → ~/agents/claude-config/hooks/
+~/.claude/rules/               → ~/agents/claude-config/rules/
+~/.claude/skills/              → ~/agents/claude-config/skills/
+~/.claude/settings.local.json  → ~/agents/claude-config/settings.local.json
+~/.claude/statusline.py        → ~/agents/claude-config/statusline.py
 ```
 
 Existing files are backed up to `~/.claude/config-backup-{timestamp}/` before symlinking.
@@ -36,10 +42,12 @@ After installation, all commands and rules are immediately available in every Cl
 | Directory | Purpose |
 |-----------|---------|
 | `commands/` | Slash commands available in Claude Code |
-| `agents/` | Agent instructions for the orchestrate workflow |
-| `hooks/` | Lifecycle hooks (session start, pre-compact) |
-| `rules/` | Global rules loaded across all projects |
-| `settings.local.json` | Hooks configuration and permissions |
+| `agents/` | Agent instructions for the orchestrate workflow (versioned) |
+| `hooks/` | Lifecycle hooks (session start, pre-compact) with error logging |
+| `rules/` | Global rules — always-loaded core patterns + conditional loading |
+| `skills/` | Multi-step skill definitions (orchestrate, test-plan) |
+| `settings.local.json` | Hooks, permissions, MCP servers, statusline config |
+| `statusline.py` | Custom terminal status bar (dynamic hostname) |
 
 ## Commands
 
@@ -47,114 +55,77 @@ After installation, all commands and rules are immediately available in every Cl
 
 | Command | Usage | Description |
 |---------|-------|-------------|
-| `/orchestrate` | `/orchestrate 184` | Full issue workflow: MAP-PLAN → PATCH → PROVE |
+| `/orchestrate` | `/orchestrate 184` | Full issue workflow: MAP → PLAN → CONTRACT → PATCH → PROVE |
+| `/pr` | `/pr` | PR creation with checklist, merge strategy, post-merge cleanup |
 | `/review` | `/review` | Code review staged changes |
 | `/changelog` | `/changelog` | Generate changelog from merged PRs |
-| `/standup` | `/standup` | Generate daily standup report |
+| `/standup` | `/standup` | Generate daily standup report (v2 vault support) |
 | `/obsidian` | `/obsidian` | Update Obsidian vault with session info |
+
+### Issue Management
+
+| Command | Usage | Description |
+|---------|-------|-------------|
+| `/feature` | `/feature "Add dark mode"` | Create feature issue via `gh issue create` with labels |
+| `/bug` | `/bug "Login fails on Safari"` | Create bug report via `gh issue create` with investigation |
+| `/spec-draft` | `/spec-draft "User auth"` | Interactive spec creation with codebase discovery |
+
+### Learning System
+
+| Command | Usage | Description |
+|---------|-------|-------------|
+| `/learn` | `/learn --cross-project` | Analyze failures, extract patterns across projects |
+| `/learn --validate` | `/learn --validate` | A/B test pattern effectiveness (before/after rates) |
+| `/metrics` | `/metrics --week` | Agent performance dashboard with version correlation |
+| `/agent-update` | `/agent-update --agent patch` | Apply learned improvements (Edit tool, version++) |
+| `/postmortem-extract` | `/postmortem-extract` | Convert postmortems → structured failure records |
 
 ### FastAPI Scaffolding
 
 | Command | Usage | Description |
 |---------|-------|-------------|
 | `/scaffold-project` | `/scaffold-project myapp --with-auth` | Generate a complete FastAPI project from scratch |
-| `/scaffold-module` | `/scaffold-module items --fields "name:str, amount:Decimal"` | Add a module to an existing project |
-
-#### `/scaffold-project` — New Project
-
-Generates a complete FastAPI project with layered architecture:
-
-```bash
-# Basic project (postgres, no auth)
-/scaffold-project myapp
-
-# With JWT authentication and user management
-/scaffold-project myapp --with-auth
-
-# With SQLite instead of PostgreSQL
-/scaffold-project myapp --with-auth --db sqlite
-```
-
-**What gets generated** (24-33 files):
-
-```
-myapp/
-├── backend/
-│   ├── backend/              # Python package
-│   │   ├── main.py           # App factory
-│   │   ├── main_router.py    # Router aggregator
-│   │   ├── database.py       # Engine, session, Base, TimestampMixin
-│   │   ├── core/
-│   │   │   ├── config.py     # Pydantic Settings v2
-│   │   │   ├── repository.py # BaseRepository[T] with enhanced methods
-│   │   │   ├── exceptions.py # Domain exception hierarchy
-│   │   │   ├── error_handlers.py
-│   │   │   ├── cors.py
-│   │   │   └── hashing.py    # bcrypt
-│   │   └── auth/             # (if --with-auth)
-│   │       ├── models.py     # User model
-│   │       ├── oauth2.py     # JWT tokens
-│   │       ├── router.py     # Login, signup, refresh
-│   │       └── ...           # Full layered module
-│   ├── tests/conftest.py     # SQLite test fixtures
-│   ├── alembic/              # Migration setup
-│   ├── requirements.txt
-│   └── .env.example
-├── .gitignore
-└── README.md
-```
-
-#### `/scaffold-module` — Add Module
-
-Adds a domain module to an existing project:
-
-```bash
-# Account-scoped entity (default)
-/scaffold-module items --fields "name:str, amount:Decimal, is_active:bool"
-
-# Not tied to an account
-/scaffold-module notifications --fields "title:str, body:text, read:bool" --no-account-scoped
-
-# Custom target directory
-/scaffold-module items --fields "name:str" --parent-dir backend/backend
-```
-
-**What gets generated** (7 files):
-
-```
-module_name/
-├── __init__.py
-├── models.py       # SQLAlchemy model (UUID PK, TimestampMixin)
-├── schemas.py      # Pydantic Create/Update/Read
-├── repository.py   # BaseRepository subclass
-├── services.py     # Business logic, owns transactions
-├── deps.py         # FastAPI dependency factories
-└── router.py       # CRUD endpoints
-```
+| `/scaffold-module` | `/scaffold-module items --fields "name:str"` | Add a module to an existing project |
 
 ## Rules
 
-| File | Description |
-|------|-------------|
-| `fastapi-layered-pattern.md` | Definitive reference for the FastAPI layered architecture pattern |
+| File | Loading | Description |
+|------|---------|-------------|
+| `core-patterns.md` | Always (~10 lines) | Top 3 failure patterns with one-line prevention |
+| `fastapi-layered-pattern.md` | Conditional (`**/backend/**`, `**/api/**`) | Definitive FastAPI layered architecture reference |
+| `orchestrate-workflow.md` | Conditional (`.agents/**`) | Multi-phase workflow definition |
+| `spec-review-workflow.md` | Conditional (`**/specs/**`, `**/.agents/**`) | Spec finalization gate workflow |
 
-Rules in `~/.claude/rules/` are loaded globally across all Claude Code sessions, so Claude always knows the architecture conventions regardless of which project is open.
+**Optimization**: `core-patterns.md` is always loaded (~10 lines). Full FastAPI reference (~500 lines) only loads in backend contexts via `paths:` frontmatter.
 
 ## Agents (Orchestrate Workflow)
 
-Used by the `/orchestrate` command. Each agent has a specific role:
+Used by the `/orchestrate` command. Each agent has a specific role and version:
 
-| Agent | Role |
-|-------|------|
-| `_base.md` | Shared behaviors inherited by all agents |
-| `map-plan.md` | Combined analysis + implementation planning |
-| `map.md` | Codebase analysis (complex issues) |
-| `plan.md` | Implementation planning (complex issues) |
-| `patch.md` | Code implementation |
-| `prove.md` | Verification (lint, test, build) |
-| `contract.md` | Frontend-backend API contract (fullstack) |
-| `test-planner.md` | Test plan generation with edge cases |
-| `spec-reviewer.md` | Specification review and issue creation |
+```
+Issue → MAP/MAP-PLAN → [TEST-PLANNER] → CONTRACT* → PATCH → PROVE
+         investigate      test matrix      API spec     implement   verify
+
+* CONTRACT is MANDATORY for fullstack issues
+```
+
+| Agent | Version | Role |
+|-------|---------|------|
+| `_base.md` | 3.0 | Shared behaviors, canonical schemas, root cause enum |
+| `map.md` | 1.0 | Read-only codebase analysis (COMPLEX issues) |
+| `map-plan.md` | 1.0 | Combined analysis + planning (TRIVIAL/SIMPLE) |
+| `plan.md` | 1.0 | File-by-file implementation plan (COMPLEX) |
+| `contract.md` | 1.0 | Backend↔frontend API contract (MANDATORY fullstack) |
+| `test-planner.md` | 1.0 | Test matrix with edge cases (optional) |
+| `patch.md` | 1.0 | Implementation with minimal diffs |
+| `prove.md` | 1.0 | Verification, evidence capture, outcome recording |
+| `spec-reviewer.md` | 1.0 | Specification review and issue creation |
+
+**Artifact validation**: Each agent validates predecessor artifacts exist before starting. Stops if missing.
+
+**Agent versioning**: All agents have `version: X.Y` in frontmatter. `/agent-update` increments minor version. Metrics record `agent_versions` for correlation.
+
+**Parallel execution**: For COMPLEX issues with `--with-tests`, MAP + TEST-PLANNER run concurrently.
 
 ## Hooks
 
@@ -162,6 +133,64 @@ Used by the `/orchestrate` command. Each agent has a specific role:
 |------|---------|---------|
 | `precompact_checkpoint.py` | Before context compaction | Saves conversation state to YAML checkpoint |
 | `sessionstart_restore_state.py` | Session start | Restores context from most recent checkpoint |
+
+Both hooks log errors to `~/.claude/hooks.log` with timestamps.
+
+## MCP Server
+
+Provides tools for querying Obsidian vault and agent metrics from within Claude Code.
+
+| Tool | Description |
+|------|-------------|
+| `vault_status` | Read STATUS.md for a project → structured JSON |
+| `vault_search` | Search daily logs across projects |
+| `vault_dashboard` | Cross-project overview from DASHBOARD.md |
+| `agent_metrics` | Query metrics.jsonl → success rates, trends |
+| `failure_patterns` | Read failures.jsonl → top failure patterns |
+
+**Location**: `~/agents/mcp-server/`
+**Config**: `mcpServers` section in `settings.local.json`
+**Standalone**: `python3 server.py vault_dashboard` (works without MCP SDK)
+
+## Self-Learning System
+
+```
+/orchestrate (issue)
+    → MAP → PLAN → PATCH → PROVE
+                               │ Record outcome
+                   ┌───────────┴────────────┐
+             metrics.jsonl            failures.jsonl
+                   └───────────┬────────────┘
+                          /learn (weekly, --cross-project)
+                               │
+                         patterns.md
+                               │
+                       /agent-update (Edit tool, version++)
+                               │
+                        Next /orchestrate → agents read patterns.md
+```
+
+## Canonical Schemas
+
+### metrics.jsonl
+
+```json
+{
+  "issue": 184,
+  "date": "2026-02-06",
+  "status": "PASS | BLOCKED",
+  "complexity": "TRIVIAL | SIMPLE | COMPLEX",
+  "stack": "backend | frontend | fullstack",
+  "agents_run": ["MAP-PLAN", "PATCH", "PROVE"],
+  "agent_versions": {"map-plan": "1.0", "patch": "1.0"},
+  "root_cause": null,
+  "blocking_agent": null
+}
+```
+
+### Root Cause Codes
+
+`ENUM_VALUE`, `COMPONENT_API`, `MULTI_MODEL`, `API_MISMATCH`, `ACCESS_CONTROL`, `MISSING_TEST`, `SQLITE_COMPAT`, `STRUCTURE_VIOLATION`, `SCOPE_CREEP`, `VERIFICATION_GAP`, `OTHER`
 
 ## Updating
 
@@ -187,7 +216,9 @@ These stay local and are not included in this repo:
 - `~/.claude/history.jsonl` — Command history
 - `~/.claude/cache/`, `debug/`, `todos/` — Temp/state data
 - `~/.claude/.claude.json` — Auth tokens
+- `~/.claude/hooks.log` — Hook error logs (generated locally)
 
 ## Related
 
 - [fastapi-architect-agent](https://github.com/jwj2002/fastapi-architect-agent) — Standalone CLI + AI agent for the same FastAPI patterns (works without Claude Code)
+- [Full setup reference](../docs/CLAUDE-SETUP.md) — Comprehensive documentation of the entire system
