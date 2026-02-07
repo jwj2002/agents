@@ -55,7 +55,7 @@ class VaultWriter:
         return path
 
     def write_daily(self, project_name: str, extract: SessionExtract, date: str = "") -> Path:
-        """Append a session entry to the daily log."""
+        """Append a session entry to the daily log (skips if duplicate)."""
         date = date or datetime.now().strftime("%Y-%m-%d")
         log_dir = self._log_dir(project_name, "Daily")
         path = log_dir / f"{date}.md"
@@ -64,6 +64,15 @@ class VaultWriter:
             path.write_text(render_daily_header(date))
 
         entry = render_daily_entry(project_name, extract)
+
+        # Dedup: check if an entry with the same project + summary already exists
+        if path.exists():
+            existing = path.read_text()
+            summary_line = f"**Summary**: {extract.summary or '_No summary_'}"
+            project_header = f"— {project_name}"
+            if project_header in existing and summary_line in existing:
+                return path
+
         with open(path, "a") as f:
             f.write(entry)
 
