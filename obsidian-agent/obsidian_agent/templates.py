@@ -15,7 +15,13 @@ STATUS_TEMPLATE = """\
 ## Phase
 {phase}
 
-## Next Steps
+## Completed Today
+{completed_section}
+
+## Issues
+{issues_table}
+
+## Follow-up
 {next_steps}
 
 ## Decisions
@@ -26,6 +32,9 @@ STATUS_TEMPLATE = """\
 
 ## GitHub References
 {github_refs}
+
+## Notes
+{notes}
 """
 
 # ---------------------------------------------------------------------------
@@ -52,14 +61,26 @@ DAILY_ENTRY_TEMPLATE = """\
 
 **Summary**: {summary}
 
-**Completed**:
-{completed}
+## Completed Today
+{completed_section}
 
-**Decisions**:
+## Issues
+{issues_table}
+
+## Commits
+{commits_table}
+
+## Decisions
 {decisions}
 
-**Blockers**:
+## Blockers
 {blockers}
+
+## Follow-up
+{next_steps}
+
+## Notes
+{notes}
 
 **GitHub Refs**: {github_refs}
 
@@ -142,9 +163,59 @@ def _bullet_list(items: list[str], empty: str = "_None_") -> str:
     return "\n".join(f"- {item}" for item in items)
 
 
+def _checkbox_list(items: list[str], empty: str = "_None_") -> str:
+    """Format a list as markdown checkboxes. Returns empty marker if no items."""
+    if not items:
+        return empty
+    return "\n".join(f"- [ ] {item}" for item in items)
+
+
 def _first_or(items: list[str], fallback: str = "—") -> str:
     """Return first item or fallback (for dashboard table)."""
     return items[0] if items else fallback
+
+
+def _render_completed_section(extract) -> str:
+    """Render completed items grouped by topic, or flat if no groups."""
+    if extract.completed_groups:
+        lines = []
+        for group in extract.completed_groups:
+            lines.append(f"\n### {group.heading}")
+            for item in group.items:
+                lines.append(f"- [x] {item}")
+        return "\n".join(lines)
+    elif extract.completed:
+        return "\n".join(f"- [x] {item}" for item in extract.completed)
+    return "_None_"
+
+
+def _render_issues_table(extract) -> str:
+    """Render GitHub issues as a markdown table."""
+    if not extract.issues:
+        return "_None_"
+    lines = [
+        "| Issue | Title | Effort | Status |",
+        "|-------|-------|--------|--------|",
+    ]
+    for issue in extract.issues:
+        status_icon = {"Done": "Done", "Pending": "Pending", "In Progress": "In Progress"}.get(
+            issue.status, issue.status
+        )
+        lines.append(f"| {issue.number} | {issue.title} | {issue.effort} | {status_icon} |")
+    return "\n".join(lines)
+
+
+def _render_commits_table(extract) -> str:
+    """Render git commits as a markdown table."""
+    if not extract.commits:
+        return "_None_"
+    lines = [
+        "| Commit | Description |",
+        "|--------|-------------|",
+    ]
+    for commit in extract.commits:
+        lines.append(f"| {commit.hash} | {commit.message} |")
+    return "\n".join(lines)
 
 
 def render_status(project_name: str, extract, updated: str | None = None) -> str:
@@ -155,10 +226,13 @@ def render_status(project_name: str, extract, updated: str | None = None) -> str
         updated=updated,
         status=extract.status or "_Unknown_",
         phase=extract.phase or "_Not specified_",
-        next_steps=_bullet_list(extract.next_steps),
+        completed_section=_render_completed_section(extract),
+        issues_table=_render_issues_table(extract),
+        next_steps=_checkbox_list(extract.next_steps),
         decisions=_bullet_list(extract.decisions),
         blockers=_bullet_list(extract.blockers),
         github_refs=_bullet_list(extract.github_refs),
+        notes=_bullet_list(extract.notes),
     )
 
 
@@ -186,9 +260,13 @@ def render_daily_entry(project_name: str, extract, time: str | None = None) -> s
         time=time,
         project_name=project_name,
         summary=extract.summary or "_No summary_",
-        completed=_bullet_list(extract.completed),
+        completed_section=_render_completed_section(extract),
+        issues_table=_render_issues_table(extract),
+        commits_table=_render_commits_table(extract),
         decisions=_bullet_list(extract.decisions),
         blockers=_bullet_list(extract.blockers),
+        next_steps=_checkbox_list(extract.next_steps),
+        notes=_bullet_list(extract.notes),
         github_refs=", ".join(extract.github_refs) if extract.github_refs else "_None_",
         knowledge=_bullet_list(extract.knowledge),
     )

@@ -194,7 +194,17 @@ class VaultWriter:
             text = m.group(1).strip()
             if text in ("_None_", "_Unknown_", "_Not specified_"):
                 return []
-            return [line.lstrip("- ").strip() for line in text.splitlines() if line.strip().startswith("-")]
+            # Handle both "- " and "- [ ] " prefixed lines
+            items = []
+            for line in text.splitlines():
+                line = line.strip()
+                if line.startswith("- [ ] "):
+                    items.append(line[6:].strip())
+                elif line.startswith("- [x] "):
+                    items.append(line[6:].strip())
+                elif line.startswith("- "):
+                    items.append(line[2:].strip())
+            return items
 
         def _section_text(header: str) -> str:
             pattern = rf"## {header}\n(.*?)(?=\n## |\Z)"
@@ -208,7 +218,7 @@ class VaultWriter:
             status=_section_text("Status"),
             phase=_section_text("Phase"),
             summary="",
-            next_steps=_section("Next Steps"),
+            next_steps=_section("Follow-up") or _section("Next Steps"),
             decisions=_section("Decisions"),
             blockers=_section("Blockers"),
             github_refs=_section("GitHub References"),

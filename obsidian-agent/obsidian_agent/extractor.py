@@ -9,17 +9,44 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class CompletedGroup:
+    """A group of related completed items under a heading."""
+    heading: str
+    items: list[str]
+
+
+@dataclass
+class IssueRef:
+    """A GitHub issue reference with metadata."""
+    number: str
+    title: str
+    effort: str = ""
+    status: str = "Pending"
+
+
+@dataclass
+class CommitRef:
+    """A git commit reference."""
+    hash: str
+    message: str
+
+
+@dataclass
 class SessionExtract:
     """Extracted project state from a coding session."""
     status: str  # One-line current state
     phase: str  # Current phase/milestone
     summary: str  # 1-2 sentence session summary
-    completed: list[str] = field(default_factory=list)  # Deliverables finished
-    next_steps: list[str] = field(default_factory=list)  # Actionable items
+    completed: list[str] = field(default_factory=list)  # Flat list (legacy)
+    completed_groups: list[CompletedGroup] = field(default_factory=list)  # Grouped by topic
+    issues: list[IssueRef] = field(default_factory=list)  # Issue table data
+    commits: list[CommitRef] = field(default_factory=list)  # Git commits (injected, not from LLM)
+    next_steps: list[str] = field(default_factory=list)  # Actionable items (checkboxes)
     decisions: list[str] = field(default_factory=list)  # Technical choices
     blockers: list[str] = field(default_factory=list)  # What's stuck
     github_refs: list[str] = field(default_factory=list)  # Issue/PR numbers
     knowledge: list[str] = field(default_factory=list)  # [CAPTURE] tagged items
+    notes: list[str] = field(default_factory=list)  # Freeform context worth capturing
 
 
 def extract_captures(conversation_text: str) -> list[str]:
@@ -68,17 +95,19 @@ EXTRACTION_PROMPT = '''You are a JSON extraction bot. Output ONLY valid JSON. No
 Extract the current PROJECT STATE from the coding session below. Focus on deliverables and status, not file paths.
 
 Return this EXACT JSON structure:
-{"status":"<one-line current state, e.g. Implementing JWT auth for FastAPI backend>","phase":"<current phase/milestone, e.g. Phase 1: Authentication, or empty string if unclear>","summary":"<1-2 sentence session summary>","completed":["<deliverable finished, e.g. Added login endpoint with bcrypt hashing>"],"next_steps":["<actionable item with priority, e.g. [HIGH] Wire up refresh token rotation>"],"decisions":["<technical choice, e.g. Chose SQLite over PostgreSQL for zero-infrastructure deployment>"],"blockers":["<what is stuck, e.g. Blocked on Qdrant tag filtering API — docs unclear>"],"github_refs":["<issue or PR, e.g. #105, PR #42>"]}
+{"status":"<one-line current state, e.g. Implementing JWT auth for FastAPI backend>","phase":"<current phase/milestone, e.g. Phase 1: Authentication, or empty string if unclear>","summary":"<1-2 sentence session summary>","completed_groups":[{"heading":"<topic name, e.g. Background Reindex Worker>","items":["<specific deliverable>"]}],"issues":[{"number":"#123","title":"Short title","effort":"1.5d","status":"Pending"}],"next_steps":["<actionable item with priority, e.g. [HIGH] Wire up refresh token rotation>"],"decisions":["<technical choice, e.g. Chose SQLite over PostgreSQL for zero-infrastructure deployment>"],"blockers":["<what is stuck, e.g. Blocked on Qdrant tag filtering API — docs unclear>"],"github_refs":["<issue or PR, e.g. #105, PR #42>"],"notes":["<freeform context worth remembering, e.g. Expected 36s → <100ms for cached queries>"]}
 
 Extraction rules:
 - status: What is the project doing RIGHT NOW? One line, present tense
 - phase: Current milestone or sprint phase. Empty string if not clear
 - summary: Brief overview of what happened this session
-- completed: Finished DELIVERABLES (features, fixes, specs), not individual file edits
-- next_steps: Future tasks. Prefix with [HIGH], [MED], or [LOW] priority
+- completed_groups: Group related completed items under a descriptive heading. Each group has a heading (topic name) and items (specific deliverables). Prefer 2-5 groups over a flat list. If only 1-2 items, use a single group.
+- issues: GitHub issues created or worked on this session. Include number, title, effort estimate, and status (Done/Pending/In Progress). Empty array if no issues discussed.
+- next_steps: Future tasks as actionable items. Prefix with [HIGH], [MED], or [LOW] priority
 - decisions: Technical choices with reasoning ("chose X because Y")
 - blockers: Things preventing progress ("blocked by", "waiting on", "can't until")
-- github_refs: Issue/PR numbers (#123, PR #45)
+- github_refs: All issue/PR numbers mentioned (#123, PR #45)
+- notes: Important context, metrics, or explanations worth remembering (performance numbers, model comparisons, server status). NOT duplicates of completed items.
 - Empty array [] if none found for a category
 
 CRITICAL: Output ONLY the JSON object. Start with { and end with }
@@ -139,14 +168,45 @@ def extract_with_claude(conversation_text: str, model: str = "haiku") -> Session
     # Extract [CAPTURE] tags directly (no LLM needed)
     knowledge = extract_captures(conversation_text)
 
+    # Parse completed_groups
+    raw_groups = data.get("completed_groups", [])
+    completed_groups = []
+    for g in raw_groups:
+        if isinstance(g, dict) and g.get("heading"):
+            completed_groups.append(CompletedGroup(
+                heading=g["heading"],
+                items=g.get("items", []),
+            ))
+
+    # Parse issues
+    raw_issues = data.get("issues", [])
+    issues = []
+    for i in raw_issues:
+        if isinstance(i, dict) and i.get("number"):
+            issues.append(IssueRef(
+                number=i["number"],
+                title=i.get("title", ""),
+                effort=i.get("effort", ""),
+                status=i.get("status", "Pending"),
+            ))
+
+    # Backward compat: flatten completed_groups into completed
+    flat_completed = data.get("completed", [])
+    if not flat_completed and completed_groups:
+        for g in completed_groups:
+            flat_completed.extend(g.items)
+
     return SessionExtract(
         status=data.get("status", "Unknown"),
         phase=data.get("phase", ""),
         summary=data.get("summary", "No summary available"),
-        completed=data.get("completed", []),
+        completed=flat_completed,
+        completed_groups=completed_groups,
+        issues=issues,
         next_steps=data.get("next_steps", []),
         decisions=data.get("decisions", []),
         blockers=data.get("blockers", []),
         github_refs=data.get("github_refs", []),
         knowledge=knowledge,
+        notes=data.get("notes", []),
     )

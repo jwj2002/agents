@@ -2,37 +2,59 @@
 
 Update the Obsidian vault with information from this coding session.
 
+## Usage
+
+```
+/obsidian          → Update current project only
+/obsidian --all    → Update all recent projects
+/obsidian --dry-run → Preview without writing
+/obsidian --weekly → Generate weekly rollup
+/obsidian --init   → First-time setup
+```
+
 ## Instructions
 
-Run the obsidian vault update agent to extract and log:
+Parse the ARGUMENTS string to determine which flags were passed.
+
+IMPORTANT: The agent uses `os.getcwd()` to find the current project, but since we
+must `cd` into the agent directory to run it, always pass `--project` with the
+current working directory to ensure the correct project is updated.
+
+If ARGUMENTS contains `--all`:
+```bash
+cd ~/agents/obsidian-agent && python3 -m obsidian_agent --all-projects
+```
+
+If ARGUMENTS contains `--dry-run`:
+```bash
+cd ~/agents/obsidian-agent && python3 -m obsidian_agent --project "$CWD" --dry-run
+```
+
+If ARGUMENTS contains `--weekly`:
+```bash
+cd ~/agents/obsidian-agent && python3 -m obsidian_agent --project "$CWD" --weekly
+```
+
+If ARGUMENTS contains `--init`:
+```bash
+cd ~/agents/obsidian-agent && python3 -m obsidian_agent --init
+```
+
+Otherwise (no arguments, default):
+```bash
+cd ~/agents/obsidian-agent && python3 -m obsidian_agent --project "$CWD"
+```
+
+Replace `$CWD` with the actual current working directory path (the project you are
+working in, NOT the obsidian-agent directory). Use the working directory shown in
+the environment context (e.g., `/home/jjob/projects/VE-RAG-System`).
+
+The agent extracts and logs:
 - Next steps and action items
 - Completed tasks
 - Decisions made
 - Blockers encountered
 - GitHub references (issues, PRs)
-- Files touched
-
-Execute this command:
-
-```bash
-cd ~/agents/obsidian-agent && python3 -m obsidian_agent
-```
-
-### Options
-
-```bash
-# Preview without writing to vault
-cd ~/agents/obsidian-agent && python3 -m obsidian_agent --dry-run
-
-# First-time setup (creates config.toml)
-cd ~/agents/obsidian-agent && python3 -m obsidian_agent --init
-
-# Process all projects
-cd ~/agents/obsidian-agent && python3 -m obsidian_agent --all-projects
-
-# Generate weekly rollup
-cd ~/agents/obsidian-agent && python3 -m obsidian_agent --weekly
-```
 
 After running, report what was extracted and saved to the vault.
 

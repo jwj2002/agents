@@ -1,6 +1,7 @@
 """CLI entry point: python -m obsidian_agent"""
 import argparse
 import sys
+from datetime import datetime
 
 from . import __version__
 from .config import load_config, init_config
@@ -12,6 +13,7 @@ from .session_finder import (
     get_session_log_by_project,
     list_recent_projects,
 )
+from .git_helper import get_recent_commits
 from .vault_writer import VaultWriter
 
 
@@ -78,11 +80,27 @@ def _print_extract(extract):
     print(f"\n  Status:      {extract.status}")
     print(f"  Phase:       {extract.phase}")
     print(f"  Summary:     {extract.summary}")
-    print(f"  Completed:   {extract.completed}")
+    if extract.completed_groups:
+        print(f"  Completed Groups:")
+        for g in extract.completed_groups:
+            print(f"    {g.heading}:")
+            for item in g.items:
+                print(f"      - {item}")
+    else:
+        print(f"  Completed:   {extract.completed}")
+    if extract.issues:
+        print(f"  Issues:")
+        for i in extract.issues:
+            print(f"    {i.number} {i.title} ({i.effort}) [{i.status}]")
+    if extract.commits:
+        print(f"  Commits:")
+        for c in extract.commits:
+            print(f"    {c.hash} {c.message}")
     print(f"  Next Steps:  {extract.next_steps}")
     print(f"  Decisions:   {extract.decisions}")
     print(f"  Blockers:    {extract.blockers}")
     print(f"  GitHub Refs: {extract.github_refs}")
+    print(f"  Notes:       {extract.notes}")
     print(f"  Knowledge:   {extract.knowledge}")
 
 
@@ -100,13 +118,22 @@ def _process_session(log_path, config, dry_run: bool):
     print(f"  Extracting with Claude ({config.extraction_model})...")
     extract = extract_with_claude(conversation, model=config.extraction_model)
 
+    # Inject git commits (deterministic, no LLM)
+    if session.project_path:
+        today = datetime.now().strftime("%Y-%m-%d")
+        commits = get_recent_commits(session.project_path, since_date=today)
+        if commits:
+            extract.commits = commits
+            print(f"  Commits:  {len(commits)} found")
+
     if dry_run:
         print("\n=== DRY RUN — would write: ===")
         _print_extract(extract)
         return
 
     writer = VaultWriter(config)
-    paths = writer.update(session.project_name, extract, date=session.date)
+    today = datetime.now().strftime("%Y-%m-%d")
+    paths = writer.update(session.project_name, extract, date=today)
     print(f"\n  STATUS:    {paths['status']}")
     print(f"  Daily:     {paths['daily']}")
     print(f"  DASHBOARD: {paths['dashboard']}")
