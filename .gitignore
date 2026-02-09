@@ -13,3 +13,6 @@ venv/
 .idea/
 .vscode/
 *.swp
+
+# Local-only settings (not symlinked)
+claude-config/settings.local.json

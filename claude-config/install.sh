@@ -83,7 +83,7 @@ link_item() {
 echo "Phase 1: Symlinks"
 mkdir -p "$CLAUDE_DIR"
 
-link_item "$SCRIPT_DIR/settings.local.json" "$CLAUDE_DIR/settings.local.json" "settings.local.json"
+link_item "$SCRIPT_DIR/settings.json"       "$CLAUDE_DIR/settings.json"       "settings.json"
 link_item "$SCRIPT_DIR/hooks"               "$CLAUDE_DIR/hooks"               "hooks/"
 link_item "$SCRIPT_DIR/commands"            "$CLAUDE_DIR/commands"            "commands/"
 link_item "$SCRIPT_DIR/agents"              "$CLAUDE_DIR/agents"              "agents/"
@@ -287,7 +287,7 @@ echo "Phase 4: Verify"
 ERRORS=0
 
 # Verify symlinks resolve
-for link in settings.local.json hooks commands agents rules skills statusline.py; do
+for link in settings.json hooks commands agents rules skills statusline.py; do
     target="$CLAUDE_DIR/$link"
     if [ -L "$target" ] && [ -e "$target" ]; then
         : # OK
@@ -349,7 +349,7 @@ if [ "$BACKUP_CREATED" = true ]; then
 fi
 
 echo ""
-echo "  Note: settings.json (plugins, credentials) stays local and is not overwritten."
+echo "  Note: settings.json is symlinked from the repo. settings.local.json stays local per machine."
 echo ""
 
 if [ $ERRORS -gt 0 ]; then
