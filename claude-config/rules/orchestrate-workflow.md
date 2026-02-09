@@ -122,6 +122,7 @@ Use the orchestrate workflow when:
 - Read-only — no code changes
 
 **Always runs**: Before every PATCH invocation.
+**Parallel option**: Can run concurrently with TEST-PLANNER when `--with-tests` is used.
 
 **Key Checks**:
 - Every acceptance criterion maps to a planned task
@@ -359,10 +360,29 @@ If change touches both backend and frontend:
 MAP-PLAN → CONTRACT (MANDATORY) → PLAN-CHECK → PATCH → PROVE
 ```
 
+**Parallel fullstack PATCH**: When CONTRACT exists, PATCH can split into parallel backend+frontend tasks. CONTRACT is the synchronization point — both sides implement against it independently. See `commands/orchestrate.md` for spawn templates.
+
 **Contract Agent**: `.claude/agents/contract.md`
 **Output**: `.agents/outputs/contract-{issue}-{mmddyy}.md`
 **Timing**: After PLAN, before PATCH
 **Enforcement**: PATCH agent validates contract artifact exists before proceeding
+
+---
+
+## Swarm Patterns (Parallel Execution)
+
+The orchestrate workflow supports these fan-out patterns via parallel Task calls:
+
+| Pattern | When | Agents | Sync Point |
+|---------|------|--------|------------|
+| MAP fan-out | COMPLEX fullstack | Explore x3 (backend/frontend/tests) | MAP synthesizes |
+| MAP + TEST-PLANNER | COMPLEX + --with-tests | MAP, TEST-PLANNER | Both complete before PLAN |
+| PLAN-CHECK + TEST-PLANNER | --with-tests | PLAN-CHECK, TEST-PLANNER | Both complete before PATCH |
+| Speculative PATCH | TRIVIAL/SIMPLE backend | PLAN-CHECK, PATCH | PLAN-CHECK gates PATCH result |
+| Parallel fullstack PATCH | Fullstack + CONTRACT | PATCH-backend, PATCH-frontend | Merge into single artifact |
+| PROVE verification | Fullstack | lint, test, build sub-tasks | PROVE collects results |
+
+**Rule**: Only parallelize agents with independent inputs and disjoint outputs. CONTRACT is the synchronization boundary for fullstack splits.
 
 ---
 

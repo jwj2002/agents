@@ -69,6 +69,28 @@ See `backend/accounts/services.py:45-67` for existing pattern.
 | PATCH | 300 | 400 |
 | PROVE | 250 | 350 |
 
+### Size Compliance (MANDATORY)
+
+Before writing your final artifact, check line count:
+
+```bash
+# Self-check before submission
+wc -l < .agents/outputs/$ARTIFACT_NAME
+```
+
+| Outcome | Action |
+|---------|--------|
+| Under target | Submit |
+| Between target and max | Submit with note: "Artifact N lines (target: M)" |
+| Over max | **STOP**. Compress before submitting |
+
+**Compression checklist** (in priority order):
+1. Replace code quotes with line references (`See services.py:45-67`)
+2. Remove re-stated acceptance criteria (reference MAP-PLAN)
+3. Consolidate duplicate sections
+4. Remove appendices and "Future Enhancements"
+5. Use exceptions-only reporting (document failures, not successes)
+
 ---
 
 ## 4. Artifact Naming
@@ -298,3 +320,27 @@ This enables `/metrics` to correlate success rates with specific agent versions.
 - Issue scope is ambiguous
 
 **Do NOT** proceed with assumptions. Ask for clarification.
+
+---
+
+## 16. Failure Context Awareness
+
+When spawned with a `## Prior Failure` block in your prompt:
+1. Read the root cause and prevention fields carefully
+2. Apply the prevention recommendation BEFORE starting work
+3. Explicitly verify the prior failure point is addressed
+4. Note in artifact: "Prior failure (ROOT_CAUSE) addressed by: [action taken]"
+
+This is the **highest priority** context — a prior PATCH already failed on this exact issue.
+
+---
+
+## 17. Swarm-Aware Behavior
+
+When spawned as a **scoped sub-task** (e.g., PATCH-backend, PATCH-frontend, PROVE-backend):
+
+1. **Respect SCOPE**: Only touch files within your designated scope (backend/ or frontend/)
+2. **Use CONTRACT as boundary**: For parallel fullstack PATCH, CONTRACT is the authoritative API spec — both sides implement against it
+3. **Write scoped artifacts**: Use `{agent}-{scope}-{issue}-{mmddyy}.md` naming (e.g., `patch-backend-184-020826.md`)
+4. **No cross-scope changes**: If you discover a needed change outside your scope, document it in your artifact under "Cross-Scope Dependencies" — do NOT make the change
+5. **Report conflicts**: If a file appears in both scopes, flag it immediately in artifact

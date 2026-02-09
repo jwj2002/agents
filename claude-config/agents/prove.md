@@ -1,6 +1,6 @@
 ---
 agent: "PROVE"
-version: 1.1
+version: 1.3
 phase: 4
 extends: _base.md
 purpose: "Verification, evidence capture, outcome recording"
@@ -45,6 +45,59 @@ cd frontend && npm run build
 ```
 
 **Capture output verbatim** in artifact.
+
+### Parallel Verification (Fullstack)
+
+When both backend and frontend were touched, fan out verification using parallel Task calls for faster wall-clock time:
+
+```
+# Spawn in parallel (single message, multiple Task calls):
+Task(description='PROVE-backend: lint+test for issue N',
+  prompt='Run: cd backend && ruff check . && pytest -q
+  Return results as plain text with exit codes.')
+
+Task(description='PROVE-frontend: lint+build for issue N',
+  prompt='Run: cd frontend && npm run lint && npm run build
+  Return results as plain text with exit codes.')
+```
+
+**Collect results** from both tasks, then proceed to Verification Levels.
+
+**Skip parallel mode** when:
+- Backend-only or frontend-only change (no fan-out needed)
+- Total verification time is under 30s (overhead exceeds benefit)
+
+### Focused Test Strategy
+
+**Step 1**: Identify changed modules from PATCH artifact:
+```bash
+# Get changed files from PATCH
+CHANGED=$(git diff --name-only HEAD~1 -- backend/)
+MODULES=$(echo "$CHANGED" | grep -oP 'backend/backend/\K[^/]+' | sort -u)
+```
+
+**Step 2**: Run focused tests first (fast feedback):
+```bash
+# Run only affected module tests
+for mod in $MODULES; do
+  cd backend && pytest "backend/${mod}/tests/" -q 2>/dev/null
+done
+```
+
+**Step 3**: Run full suite (safety net):
+```bash
+cd backend && pytest -q
+cd frontend && npm run lint && npm run build
+```
+
+**Report both**:
+- Focused: X/X passing (Nms)
+- Full suite: Y/Y passing (Nms)
+
+**Skip focused mode** when:
+- Fullstack change (run full suite directly)
+- Refactoring or cross-module changes
+- Less than 50 total tests (full suite is fast enough)
 
 ---
 
@@ -168,10 +221,9 @@ status: PASS | BLOCKED
 
 ### Commands Run
 ```
+$ Focused: backend/accounts/tests/ — 12/12 passing (2.1s)
+$ Full: pytest -q — 45/45 passing (8.3s)
 $ cd backend && ruff check .
-[output]
-
-$ cd backend && pytest -q
 [output]
 ```
 

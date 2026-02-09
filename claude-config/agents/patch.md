@@ -1,6 +1,6 @@
 ---
 agent: "PATCH"
-version: 1.1
+version: 1.2
 phase: 3
 extends: _base.md
 purpose: "Implement the PLAN with minimal diffs"
@@ -101,6 +101,31 @@ cd frontend && npm run lint && npm run build
 
 ---
 
+## Pre-Submission Gates (MANDATORY)
+
+**Run BEFORE writing artifact.** If any gate fails, fix in-place — do NOT submit a failing artifact.
+
+### Backend (if touched)
+```bash
+cd backend && ruff check . --fix && ruff format <modified_files>
+cd backend && pytest -q
+```
+
+### Frontend (if touched)
+```bash
+cd frontend && npm run lint
+cd frontend && npm run build
+```
+
+**If a gate fails**:
+1. Fix the issue within this PATCH session
+2. Re-run the failing gate
+3. Only proceed to artifact when ALL gates pass
+
+**If unfixable**: Set artifact status to `Blocked`, document the failure, return to orchestrator.
+
+---
+
 ## Deviation Policy
 
 When implementation diverges from PLAN:
@@ -151,7 +176,7 @@ Before marking DONE:
 issue: {issue_number}
 agent: PATCH
 date: {YYYY-MM-DD}
-status: Complete | Blocked
+status: Complete | Blocked | Gates-Failed
 files_modified: N
 files_created: N
 tests_added: N

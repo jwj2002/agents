@@ -156,9 +156,36 @@ If not found, STOP.
 
 Report:
 ```
-Issue #184 classified as: SIMPLE
+Issue #184 classified as: SIMPLE (backend)
 Using workflow: MAP-PLAN → PATCH → PROVE
 ```
+
+### Step 1.5: Detect Stack
+
+After MAP-PLAN (or MAP) completes, scan its artifact for stack scope:
+
+```bash
+# Auto-detect stack from plan artifact
+PLAN_FILE=$(ls .agents/outputs/{map-plan,plan}-${ISSUE}-*.md 2>/dev/null | head -1)
+HAS_BACKEND=$(grep -l "backend/" "$PLAN_FILE" 2>/dev/null)
+HAS_FRONTEND=$(grep -l "frontend/" "$PLAN_FILE" 2>/dev/null)
+
+if [ -n "$HAS_BACKEND" ] && [ -n "$HAS_FRONTEND" ]; then
+  STACK="fullstack"
+elif [ -n "$HAS_FRONTEND" ]; then
+  STACK="frontend"
+else
+  STACK="backend"
+fi
+```
+
+**If STACK=fullstack**: CONTRACT is MANDATORY. Report to user:
+```
+Stack auto-detected: fullstack (plan touches backend/ and frontend/)
+CONTRACT agent will run before PLAN-CHECK.
+```
+
+**Override**: If user initially classified as backend-only but plan touches frontend, escalate to fullstack.
 
 ### Step 2: Create Feature Branch
 
@@ -193,6 +220,46 @@ All agent prompts MUST include this inherited context block to reduce re-reading
 ## Prior Artifacts
 - {list any prior artifacts for this issue}
 ```
+
+#### MAP Fan-Out (COMPLEX issues only)
+
+For COMPLEX issues, the MAP phase can fan out parallel exploration agents to investigate different subsystems concurrently. The MAP agent then synthesizes findings into a single artifact.
+
+```
+# Spawn in parallel (single message, multiple Task calls):
+Task(
+  description='Explore backend for issue N',
+  subagent_type='Explore',
+  prompt='''Investigate backend/ for issue #N: "{title}"
+  Find: relevant models, services, routes, schemas, enums, and dependencies.
+  Report: file paths, key functions, current behavior, and test coverage.
+  Focus on files that will need changes.'''
+)
+
+Task(
+  description='Explore frontend for issue N',
+  subagent_type='Explore',
+  prompt='''Investigate frontend/src/ for issue #N: "{title}"
+  Find: relevant components, hooks, API calls, routes, and state management.
+  Report: file paths, component APIs (PropTypes), current behavior.
+  Focus on files that will need changes.'''
+)
+
+Task(
+  description='Explore tests for issue N',
+  subagent_type='Explore',
+  prompt='''Investigate test coverage for issue #N: "{title}"
+  Find: existing tests for affected modules in backend/ and frontend/.
+  Report: test file paths, what is/isn't covered, test patterns used.'''
+)
+```
+
+**After all complete**: Feed combined findings into MAP agent prompt as `## Exploration Results`.
+This replaces MAP doing its own sequential exploration, saving investigation time.
+
+**Skip fan-out** when:
+- Backend-only or frontend-only issue (only 1 subsystem to explore)
+- TRIVIAL/SIMPLE classification (MAP-PLAN handles exploration inline)
 
 #### MAP-PLAN (or MAP + PLAN)
 ```
@@ -290,7 +357,26 @@ End with AGENT_RETURN: plan-check-N-MMDDYY.md
 **Validate**: File exists, has AGENT_RETURN directive.
 **If ISSUES_FOUND**: Report to user before proceeding to PATCH. User decides whether to continue or revise plan.
 
-#### PATCH
+#### Failure Context Injection (Before Re-running PATCH)
+
+If this issue has been attempted before (prior PROVE was BLOCKED), inject failure context into PATCH prompt:
+
+```bash
+# Check for prior failures on this issue
+PRIOR_FAILURE=$(grep "\"issue\":${ISSUE}" .claude/memory/failures.jsonl 2>/dev/null | tail -1)
+```
+
+If found, add to PATCH prompt's Inherited Context:
+
+```markdown
+## Prior Failure (CRITICAL — avoid repeating)
+- Root cause: {root_cause from failure record}
+- Details: {details}
+- Prevention: {prevention}
+- Failed files: {files}
+```
+
+#### PATCH (Single-Stack or Default)
 ```
 Task(
   description='PATCH for issue N',
@@ -312,6 +398,9 @@ Task(
 - CONTRACT: .agents/outputs/contract-N-MMDDYY.md (if fullstack)
 - PLAN-CHECK: .agents/outputs/plan-check-N-MMDDYY.md
 
+## Prior Failure (if re-attempt)
+{injected from failures.jsonl if this issue was previously BLOCKED, else "First attempt"}
+
 ## Instructions
 Read agent instructions (check .claude/agents/patch.md first, else ~/.claude/agents/patch.md).
 Implement changes per MAP-PLAN.
@@ -320,6 +409,77 @@ Write to .agents/outputs/patch-N-MMDDYY.md
 End with AGENT_RETURN: patch-N-MMDDYY.md
 '''
 )
+```
+
+#### PATCH (Parallel Fullstack — when CONTRACT exists)
+
+When STACK=fullstack and CONTRACT artifact exists, split PATCH into two parallel tasks.
+CONTRACT defines the API boundary — backend and frontend implement against it independently.
+
+```
+# Spawn in parallel (single message, two Task calls):
+Task(
+  description='PATCH-backend for issue N',
+  prompt='''You are PATCH agent (BACKEND ONLY).
+
+## Inherited Context
+- Issue: #N - {title}
+- Branch: feature/issue-N-description
+- Stack: fullstack (backend portion)
+- SCOPE: Only implement backend/ changes from MAP-PLAN
+
+## Prior Artifacts
+- MAP-PLAN: .agents/outputs/map-plan-N-MMDDYY.md
+- CONTRACT: .agents/outputs/contract-N-MMDDYY.md (AUTHORITATIVE for API surface)
+- TEST-PLAN: .agents/outputs/test-plan-N-MMDDYY.md (if exists)
+
+## Prior Failure (if re-attempt)
+{injected from failures.jsonl or "First attempt"}
+
+## Instructions
+Read agent instructions (check .claude/agents/patch.md first, else ~/.claude/agents/patch.md).
+Implement ONLY backend/ changes per MAP-PLAN. Use CONTRACT for API shapes.
+Run backend gates: ruff check . && pytest -q
+Write to .agents/outputs/patch-backend-N-MMDDYY.md
+End with AGENT_RETURN: patch-backend-N-MMDDYY.md
+'''
+)
+
+Task(
+  description='PATCH-frontend for issue N',
+  prompt='''You are PATCH agent (FRONTEND ONLY).
+
+## Inherited Context
+- Issue: #N - {title}
+- Branch: feature/issue-N-description
+- Stack: fullstack (frontend portion)
+- SCOPE: Only implement frontend/ changes from MAP-PLAN
+
+## Prior Artifacts
+- MAP-PLAN: .agents/outputs/map-plan-N-MMDDYY.md
+- CONTRACT: .agents/outputs/contract-N-MMDDYY.md (AUTHORITATIVE for API surface)
+
+## Critical Patterns
+1. ENUM_VALUE: Use VALUES from CONTRACT, not Python names
+2. COMPONENT_API: Read PropTypes before using existing components
+
+## Instructions
+Read agent instructions (check .claude/agents/patch.md first, else ~/.claude/agents/patch.md).
+Implement ONLY frontend/ changes per MAP-PLAN. Use CONTRACT for API shapes and enum VALUES.
+Run frontend gates: npm run lint && npm run build
+Write to .agents/outputs/patch-frontend-N-MMDDYY.md
+End with AGENT_RETURN: patch-frontend-N-MMDDYY.md
+'''
+)
+```
+
+**After both complete**: Validate no file conflicts between the two artifacts.
+Merge into single `patch-N-MMDDYY.md` summary artifact for PROVE.
+
+**Skip parallel PATCH** when:
+- Shared utility files appear in both backend and frontend plans (merge conflict risk)
+- Issue involves fewer than 3 files per side (overhead exceeds benefit)
+- No CONTRACT artifact exists (synchronization point missing)
 ```
 
 #### PROVE
@@ -381,8 +541,46 @@ Task(description='TEST-PLANNER for issue N', ...)  ← run in parallel
 # Then sequential: PLAN → CONTRACT → PLAN-CHECK → PATCH → PROVE
 ```
 
+### PLAN-CHECK + TEST-PLANNER (when --with-tests)
+
+When `--with-tests` is provided, PLAN-CHECK and TEST-PLANNER can run concurrently since both read the plan artifact but write to separate outputs:
+
+```
+# Parallel: PLAN-CHECK + TEST-PLANNER (both read plan, no dependency)
+Task(description='PLAN-CHECK for issue N', ...)      ← run in parallel
+Task(description='TEST-PLANNER for issue N', ...)     ← run in parallel
+
+# Then sequential: PATCH → PROVE
+```
+
+### Speculative PATCH (alongside PLAN-CHECK)
+
+PLAN-CHECK is read-only validation that passes ~90%+ of the time. Instead of waiting for it, start PATCH speculatively in parallel:
+
+```
+# Spawn in parallel:
+Task(description='PLAN-CHECK for issue N', ...)    ← validation
+Task(description='PATCH for issue N', ...)          ← speculative implementation
+```
+
+**After both complete**:
+- If PLAN-CHECK **passed**: PATCH result is valid. Proceed to PROVE. Saved one full agent cycle.
+- If PLAN-CHECK **found issues**: Discard PATCH result. Report PLAN-CHECK issues to user. Re-run PATCH after plan revision.
+
+**Enable speculative PATCH** when:
+- Issue is TRIVIAL or SIMPLE (low plan-rejection risk)
+- No prior PLAN-CHECK failures on this issue
+- Backend-only change (simpler, lower conflict risk)
+
+**Disable speculative PATCH** when:
+- COMPLEX issue or fullstack (plan rejection rate is higher)
+- Prior attempt on this issue was BLOCKED
+- User explicitly requests sequential execution
+
+### Parallel Execution Rules
+
 **Use parallel Task calls** (multiple Task invocations in a single message) when:
-- Both agents read from the same input (issue body)
+- Both agents read from the same input (issue body or plan artifact)
 - Neither depends on the other's output
 - Both write to separate artifact files
 

@@ -42,7 +42,13 @@ Issue → Classify → Branch → Agents → Verify → Record → PR
 
 **Recommended**: Use `--with-tests` for issues involving calculations, formulas, or complex business rules.
 
-**Parallel execution**: When `--with-tests` is used with COMPLEX issues, MAP and TEST-PLANNER can run concurrently via parallel Task calls.
+**Parallel execution**:
+- MAP fan-out: backend/frontend/tests exploration (COMPLEX)
+- MAP+TEST-PLANNER (COMPLEX)
+- PLAN-CHECK+TEST-PLANNER (with --with-tests)
+- Speculative PATCH alongside PLAN-CHECK (TRIVIAL/SIMPLE backend-only)
+- Parallel fullstack PATCH: backend+frontend via CONTRACT
+- PROVE verification fan-out: lint/test/build (fullstack)
 
 ## Learning Loop
 
