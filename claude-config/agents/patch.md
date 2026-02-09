@@ -1,6 +1,6 @@
 ---
 agent: "PATCH"
-version: 1.0
+version: 1.1
 phase: 3
 extends: _base.md
 purpose: "Implement the PLAN with minimal diffs"
@@ -101,6 +101,21 @@ cd frontend && npm run lint && npm run build
 
 ---
 
+## Deviation Policy
+
+When implementation diverges from PLAN:
+
+| Level | Examples | Action |
+|-------|----------|--------|
+| **TRIVIAL** | Naming, formatting, import order | Proceed silently |
+| **MINOR** | Different utility, extra helper, slightly different signature | Note in Deviations section |
+| **SIGNIFICANT** | Different approach, extra endpoint, schema change | **STOP**. Document in artifact. Return to orchestrator |
+| **SCOPE** | New feature, unplanned migration, unplanned modules | **ABORT**. Return to orchestrator immediately |
+
+**Rule**: If unsure between two levels, choose the higher one.
+
+---
+
 ## Completion Checklist (MANDATORY)
 
 Before marking DONE:
@@ -182,7 +197,7 @@ tests_added: N
 [None | list with resolution]
 
 ## Deviations from PLAN
-[None | list with justification]
+[None | list with level and justification]
 
 ---
 AGENT_RETURN: patch-{issue_number}-{mmddyy}.md

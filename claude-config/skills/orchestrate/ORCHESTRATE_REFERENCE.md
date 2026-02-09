@@ -50,12 +50,14 @@ Naming convention:
 
 **TRIVIAL/SIMPLE (MAP-PLAN workflow):**
 - `map-plan-{issue}-{date}.md`
+- `plan-check-{issue}-{date}.md`
 - `patch-{issue}-{date}.md`
 - `prove-{issue}-{date}.md`
 
 **COMPLEX (Full workflow):**
 - `map-{issue}-{date}.md`
 - `plan-{issue}-{date}.md`
+- `plan-check-{issue}-{date}.md`
 - `patch-{issue}-{date}.md`
 - `prove-{issue}-{date}.md`
 
@@ -106,6 +108,7 @@ Filenames:
 - `PLAN_FILE       = .agents/outputs/plan-${ISSUE_NUMBER}-${RUN_DATE}.md`
 - `MAP_PLAN_FILE   = .agents/outputs/map-plan-${ISSUE_NUMBER}-${RUN_DATE}.md`
 - `CONTRACT_FILE   = .agents/outputs/contract-${ISSUE_NUMBER}-${RUN_DATE}.md`
+- `PLAN_CHECK_FILE = .agents/outputs/plan-check-${ISSUE_NUMBER}-${RUN_DATE}.md`
 - `PATCH_FILE      = .agents/outputs/patch-${ISSUE_NUMBER}-${RUN_DATE}.md`
 - `PROVE_FILE      = .agents/outputs/prove-${ISSUE_NUMBER}-${RUN_DATE}.md`
 
@@ -132,15 +135,17 @@ Routing:
 ### Path A: TRIVIAL/SIMPLE
 1) Run **MAP-PLAN agent** (`.claude/agents/map-plan.md`) → `MAP_PLAN_FILE`
 2) If the task is **fullstack** (backend + frontend), run **CONTRACT agent** (`.claude/agents/contract.md`) → `CONTRACT_FILE`
-3) Run **PATCH agent** (`.claude/agents/patch.md`) → `PATCH_FILE`
-4) Run **PROVE agent** (`.claude/agents/prove.md`) → `PROVE_FILE`
+3) Run **PLAN-CHECK agent** (`.claude/agents/plan-checker.md`) → `PLAN_CHECK_FILE`
+4) Run **PATCH agent** (`.claude/agents/patch.md`) → `PATCH_FILE`
+5) Run **PROVE agent** (`.claude/agents/prove.md`) → `PROVE_FILE`
 
 ### Path B: COMPLEX
 1) Run **MAP agent** (`.claude/agents/map.md`) → `MAP_FILE`
 2) Run **PLAN agent** (`.claude/agents/plan.md`) → `PLAN_FILE`
 3) If the task is **fullstack** (backend + frontend), run **CONTRACT agent** (`.claude/agents/contract.md`) → `CONTRACT_FILE`
-4) Run **PATCH agent** (`.claude/agents/patch.md`) → `PATCH_FILE`
-5) Run **PROVE agent** (`.claude/agents/prove.md`) → `PROVE_FILE`
+4) Run **PLAN-CHECK agent** (`.claude/agents/plan-checker.md`) → `PLAN_CHECK_FILE`
+5) Run **PATCH agent** (`.claude/agents/patch.md`) → `PATCH_FILE`
+6) Run **PROVE agent** (`.claude/agents/prove.md`) → `PROVE_FILE`
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 agent: "PROVE"
-version: 1.0
+version: 1.1
 phase: 4
 extends: _base.md
 purpose: "Verification, evidence capture, outcome recording"
@@ -59,44 +59,45 @@ cd frontend && npm run build
 | Frontend lint | `npm run lint` | No errors |
 | Frontend build | `npm run build` | Success |
 
-### 2. Pattern-Based Checks (from patterns.md)
+### 2. Verification Levels
 
-#### ENUM_VALUE Check (if fullstack)
+#### Level 1: EXISTS
 
-```bash
-# Find enum strings in frontend
-grep -rn "CO_OWNER\|CO-OWNER" frontend/src/
-
-# Compare with backend enum VALUES
-grep -A 10 "class AccountMemberRole" backend/backend/accounts/enums.py
-```
-
-**Pass**: Frontend uses VALUES (e.g., `"CO-OWNER"`)
-**Fail**: Frontend uses NAMES (e.g., `"CO_OWNER"`)
-
-#### COMPONENT_API Check (if reusing components)
+Verify every file listed in PATCH artifact exists on disk.
 
 ```bash
-# Verify props used match PropTypes
-grep "PropTypes" frontend/src/components/used/Component.jsx
-grep "Component" frontend/src/components/new/Implementation.jsx
+# Check files from PATCH artifact
+for f in <files_from_patch>; do [ -f "$f" ] || echo "MISSING: $f"; done
 ```
 
-**Pass**: Props match PropTypes
-**Fail**: Invented or wrong props
+**Fail**: Any file from PATCH artifact missing.
 
-#### TODO/STUB Check
+#### Level 2: SUBSTANTIVE (no stubs)
 
 ```bash
-# Search for incomplete code
-grep -rn "TODO\|FIXME\|HACK" backend/backend/ frontend/src/ --include="*.py" --include="*.jsx" --include="*.js"
-
-# Search for stub implementations
-grep -rn "pass$\|return False$" backend/backend/ --include="*.py"
+# Extended stub detection in new/modified files
+grep -rn "TODO\|FIXME\|HACK\|PLACEHOLDER" <modified_files>
+grep -rn "pass$\|return False$\|return \[\]$\|return \{\}$\|raise NotImplementedError" <backend_files>
+grep -rn "onClick={() => {}}\|onChange={() => {}}\|return <div>Placeholder\|return null$" <frontend_files>
 ```
 
-**Pass**: No TODOs or stubs in new code
-**Fail**: Incomplete implementations found
+**Fail**: Stubs or placeholders in new/modified files.
+
+#### Level 3: WIRED (integration)
+
+```bash
+# New components imported somewhere
+# New endpoints called from frontend
+# New repos injected into services
+# ENUM_VALUE check (if fullstack)
+# COMPONENT_API check (if reusing components)
+```
+
+**Fail**: Isolated artifacts with no integration, wrong enum values/props.
+
+#### Level 4: FUNCTIONAL
+
+Standard Gates from Section 1 (`ruff check`, `pytest`, `npm run lint`, `npm run build`).
 
 ### 3. Acceptance Criteria
 
@@ -174,10 +175,11 @@ $ cd backend && pytest -q
 [output]
 ```
 
-### Pattern Checks
-- ENUM_VALUE: ✅ N/A | ✅ Pass | ❌ Fail
-- COMPONENT_API: ✅ N/A | ✅ Pass | ❌ Fail
-- TODO/STUB: ✅ Pass | ❌ Fail
+### Verification Levels
+- Level 1 EXISTS: ✅ All N files present
+- Level 2 SUBSTANTIVE: ✅ No stubs | ❌ [detail]
+- Level 3 WIRED: ✅ Pass | ❌ [detail]
+- Level 4 FUNCTIONAL: ✅ All gates pass | ❌ [detail]
 
 ### Acceptance Criteria
 | Criterion | Status |
@@ -218,11 +220,12 @@ Verification:
 - [ ] Ran npm lint (if frontend)
 - [ ] Ran npm build (if frontend)
 
-Validation:
-- [ ] Checked enum VALUES (not names) used
-- [ ] Checked component props match PropTypes
-- [ ] Checked for TODO/FIXME/HACK
-- [ ] Checked for inline permission checks
+Levels:
+- [ ] Level 1: All PATCH files exist
+- [ ] Level 2: No stubs/TODOs/placeholders
+- [ ] Level 3: New code wired (imports, routes, injection)
+- [ ] Level 3: Enum VALUES correct (if fullstack)
+- [ ] Level 3: Component APIs correct (if reusing)
 
 Recording:
 - [ ] Appended to metrics.jsonl

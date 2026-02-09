@@ -65,6 +65,7 @@ See `backend/accounts/services.py:45-67` for existing pattern.
 | PLAN | 400 | 500 |
 | TEST-PLANNER | 250 | 350 |
 | CONTRACT | 200 | 300 |
+| PLAN-CHECK | 80 | 120 |
 | PATCH | 300 | 400 |
 | PROVE | 250 | 350 |
 
@@ -178,7 +179,8 @@ Before starting work, verify predecessor artifacts exist. **STOP and report** if
 | PLAN | MAP artifact | `ls .agents/outputs/map-{issue}-*.md` |
 | TEST-PLANNER | MAP or MAP-PLAN artifact | `ls .agents/outputs/map*-{issue}-*.md` |
 | CONTRACT | PLAN or MAP-PLAN artifact | `ls .agents/outputs/{plan,map-plan}-{issue}-*.md` |
-| PATCH | PLAN or MAP-PLAN artifact. CONTRACT if fullstack | `ls .agents/outputs/{plan,map-plan}-{issue}-*.md` |
+| PLAN-CHECK | PLAN or MAP-PLAN artifact. CONTRACT if fullstack | `ls .agents/outputs/{plan,map-plan}-{issue}-*.md` |
+| PATCH | PLAN or MAP-PLAN artifact. CONTRACT if fullstack. PLAN-CHECK | `ls .agents/outputs/{plan,map-plan}-{issue}-*.md` |
 | PROVE | PATCH artifact | `ls .agents/outputs/patch-{issue}-*.md` |
 
 **If missing**: `STOP. Report: "BLOCKED: Required artifact {name} not found for issue #{issue}"`

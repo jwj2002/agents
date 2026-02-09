@@ -27,16 +27,18 @@ Issue → Classify → Branch → Agents → Verify → Record → PR
 1. MAP-PLAN → `.agents/outputs/map-plan-{issue}-{date}.md`
 2. TEST-PLANNER (if `--with-tests`) → `.agents/outputs/test-plan-{issue}-{date}.md`
 3. CONTRACT (MANDATORY if fullstack) → `.agents/outputs/contract-{issue}-{date}.md`
-4. PATCH → `.agents/outputs/patch-{issue}-{date}.md`
-5. PROVE → `.agents/outputs/prove-{issue}-{date}.md`
+4. PLAN-CHECK → `.agents/outputs/plan-check-{issue}-{date}.md`
+5. PATCH → `.agents/outputs/patch-{issue}-{date}.md`
+6. PROVE → `.agents/outputs/prove-{issue}-{date}.md`
 
 **COMPLEX**:
 1. MAP → `.agents/outputs/map-{issue}-{date}.md`
 2. PLAN → `.agents/outputs/plan-{issue}-{date}.md`
 3. TEST-PLANNER (if `--with-tests`) → `.agents/outputs/test-plan-{issue}-{date}.md`
 4. CONTRACT (MANDATORY if fullstack)
-5. PATCH
-6. PROVE
+5. PLAN-CHECK → `.agents/outputs/plan-check-{issue}-{date}.md`
+6. PATCH
+7. PROVE
 
 **Recommended**: Use `--with-tests` for issues involving calculations, formulas, or complex business rules.
 

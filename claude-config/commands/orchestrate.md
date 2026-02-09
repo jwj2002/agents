@@ -72,8 +72,8 @@ fi
 ## Workflow
 
 ```
-TRIVIAL/SIMPLE: MAP-PLAN → [TEST-PLANNER] → CONTRACT* → PATCH → PROVE
-COMPLEX:        MAP → PLAN → [TEST-PLANNER] → CONTRACT* → PATCH → PROVE
+TRIVIAL/SIMPLE: MAP-PLAN → [TEST-PLANNER] → CONTRACT* → PLAN-CHECK → PATCH → PROVE
+COMPLEX:        MAP → PLAN → [TEST-PLANNER] → CONTRACT* → PLAN-CHECK → PATCH → PROVE
 ```
 
 - `[TEST-PLANNER]` runs if `--with-tests` flag provided
@@ -263,6 +263,33 @@ Task(
 )
 ```
 
+#### PLAN-CHECK (Always runs before PATCH)
+```
+Task(
+  description='PLAN-CHECK for issue N',
+  prompt='''You are PLAN-CHECK agent.
+
+## Inherited Context
+- Issue: #N - {title}
+- Stack: {backend|frontend|fullstack}
+- Complexity: {TRIVIAL|SIMPLE|COMPLEX}
+
+## Prior Artifacts
+- MAP-PLAN: .agents/outputs/map-plan-N-MMDDYY.md
+- CONTRACT: .agents/outputs/contract-N-MMDDYY.md (if fullstack)
+
+## Instructions
+Read agent instructions (check .claude/agents/plan-checker.md first, else ~/.claude/agents/plan-checker.md).
+Validate plan completeness. Do NOT modify any files.
+Write to .agents/outputs/plan-check-N-MMDDYY.md
+End with AGENT_RETURN: plan-check-N-MMDDYY.md
+'''
+)
+```
+
+**Validate**: File exists, has AGENT_RETURN directive.
+**If ISSUES_FOUND**: Report to user before proceeding to PATCH. User decides whether to continue or revise plan.
+
 #### PATCH
 ```
 Task(
@@ -283,6 +310,7 @@ Task(
 - MAP-PLAN: .agents/outputs/map-plan-N-MMDDYY.md
 - TEST-PLAN: .agents/outputs/test-plan-N-MMDDYY.md (if exists)
 - CONTRACT: .agents/outputs/contract-N-MMDDYY.md (if fullstack)
+- PLAN-CHECK: .agents/outputs/plan-check-N-MMDDYY.md
 
 ## Instructions
 Read agent instructions (check .claude/agents/patch.md first, else ~/.claude/agents/patch.md).
@@ -350,7 +378,7 @@ When `--with-tests` is provided and the issue is COMPLEX, MAP and TEST-PLANNER c
 Task(description='MAP for issue N', ...)      ← run in parallel
 Task(description='TEST-PLANNER for issue N', ...)  ← run in parallel
 
-# Then sequential: PLAN → CONTRACT → PATCH → PROVE
+# Then sequential: PLAN → CONTRACT → PLAN-CHECK → PATCH → PROVE
 ```
 
 **Use parallel Task calls** (multiple Task invocations in a single message) when:
@@ -380,6 +408,7 @@ All outputs to `.agents/outputs/`:
 - `plan-{issue}-{mmddyy}.md`
 - `test-plan-{issue}-{mmddyy}.md` (if --with-tests)
 - `contract-{issue}-{mmddyy}.md`
+- `plan-check-{issue}-{mmddyy}.md`
 - `patch-{issue}-{mmddyy}.md`
 - `prove-{issue}-{mmddyy}.md`
 

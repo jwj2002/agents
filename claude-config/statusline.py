@@ -14,6 +14,7 @@ def main():
     PINK = "\033[95m"
     ORANGE = "\033[38;5;214m"
     GREEN = "\033[32m"
+    RED = "\033[31m"
     RESET = "\033[0m"
 
     # Server name from hostname (blue)
@@ -30,9 +31,10 @@ def main():
     context_window = input_data.get("context_window", {})
     used_percentage = context_window.get("used_percentage")
 
-    # Format context display
+    # Format context display (red when >75% — compaction danger zone)
     if used_percentage is not None:
-        context_display = f"{GREEN}{used_percentage:.1f}%{RESET}"
+        ctx_color = RED if used_percentage > 75 else GREEN
+        context_display = f"{ctx_color}{used_percentage:.1f}%{RESET}"
     else:
         context_display = f"{GREEN}0.0%{RESET}"
 

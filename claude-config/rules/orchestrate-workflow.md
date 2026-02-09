@@ -11,7 +11,7 @@ This rule applies to all agent outputs in .agents/outputs/.
 The orchestrate workflow implements a **MAP → PLAN → PATCH → PROVE** pattern for issue-driven development.
 
 ```
-GitHub Issue → MAP-PLAN → PATCH → PROVE → PR → Merge
+GitHub Issue → MAP-PLAN → PLAN-CHECK → PATCH → PROVE → PR → Merge
 ```
 
 ### When to Use
@@ -107,7 +107,31 @@ Use the orchestrate workflow when:
 
 **Target Length**: 200-300 lines
 
-**Timing**: Run AFTER PLAN, BEFORE PATCH
+**Timing**: Run AFTER PLAN, BEFORE PLAN-CHECK
+
+---
+
+### Phase 2.8: PLAN-CHECK (Plan Validation)
+
+**Agent**: `.claude/agents/plan-checker.md`
+**Output**: `.agents/outputs/plan-check-{issue}-{mmddyy}.md`
+
+**Purpose**:
+- Validate plan completeness before PATCH burns context implementing it
+- Check requirement coverage, scope containment, pattern pre-checks, wiring
+- Read-only — no code changes
+
+**Always runs**: Before every PATCH invocation.
+
+**Key Checks**:
+- Every acceptance criterion maps to a planned task
+- File count matches complexity classification
+- Fullstack plans have explicit enum VALUES
+- Multi-layer plans have integration steps
+
+**Target Length**: 80-120 lines
+
+**Timing**: After CONTRACT (if fullstack) or PLAN/MAP-PLAN, before PATCH
 
 ---
 
@@ -316,6 +340,7 @@ All PATCH claims verified. No discrepancies found.
 - `patch-26-122225.md`
 - `prove-26-122225.md`
 - `contract-26-122225.md` (for fullstack coordination)
+- `plan-check-26-122225.md`
 
 **Location**: `.agents/outputs/`
 
@@ -331,7 +356,7 @@ If change touches both backend and frontend:
 
 **Workflow for fullstack**:
 ```
-MAP-PLAN → CONTRACT (MANDATORY) → PATCH → PROVE
+MAP-PLAN → CONTRACT (MANDATORY) → PLAN-CHECK → PATCH → PROVE
 ```
 
 **Contract Agent**: `.claude/agents/contract.md`
