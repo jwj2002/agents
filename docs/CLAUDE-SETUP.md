@@ -342,3 +342,15 @@ All 21 items from the initial audit have been resolved:
 **Next improvements**:
 4. Weekly rollup automation: obsidian-agent `--weekly` → standup-style report → shareable
 5. Monthly rollup with hours, deliverables, decisions — contractor invoice support
+
+## Unified Claude + Codex Bootstrap
+
+For current multi-machine setup and maintenance workflows, see:
+
+- `docs/CONFIG-BOOTSTRAP.md`
+
+That guide covers:
+- new computer setup (WSL/macOS/Windows)
+- one-command dual install (`~/agents/install-all.sh`)
+- new project local bootstrap (`~/agents/claude-config/new-project-claude.sh`)
+- update workflow for shared config changes

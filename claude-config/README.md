@@ -29,7 +29,7 @@ The install script creates symlinks from `~/.claude/` to this repo:
 ~/.claude/hooks/               → ~/agents/claude-config/hooks/
 ~/.claude/rules/               → ~/agents/claude-config/rules/
 ~/.claude/skills/              → ~/agents/claude-config/skills/
-~/.claude/settings.local.json  → ~/agents/claude-config/settings.local.json
+~/.claude/settings.json        → ~/agents/claude-config/settings.json
 ~/.claude/statusline.py        → ~/agents/claude-config/statusline.py
 ```
 
@@ -46,7 +46,7 @@ After installation, all commands and rules are immediately available in every Cl
 | `hooks/` | Lifecycle hooks (session start, pre-compact) with error logging |
 | `rules/` | Global rules — always-loaded core patterns + conditional loading |
 | `skills/` | Multi-step skill definitions (orchestrate, test-plan) |
-| `settings.local.json` | Hooks, permissions, MCP servers, statusline config |
+| `settings.json` | Hooks, permissions, MCP servers, statusline config |
 | `statusline.py` | Custom terminal status bar (dynamic hostname) |
 
 ## Commands
@@ -157,7 +157,7 @@ Provides tools for querying Obsidian vault and agent metrics from within Claude 
 | `failure_patterns` | Read failures.jsonl → top failure patterns |
 
 **Location**: `~/agents/mcp-server/`
-**Config**: `mcpServers` section in `settings.local.json`
+**Config**: `mcpServers` section in `settings.json`
 **Standalone**: `python3 server.py vault_dashboard` (works without MCP SDK)
 
 ## Self-Learning System
@@ -230,3 +230,26 @@ These stay local and are not included in this repo:
 
 - [fastapi-architect-agent](https://github.com/jwj2002/fastapi-architect-agent) — Standalone CLI + AI agent for the same FastAPI patterns (works without Claude Code)
 - [Full setup reference](../docs/CLAUDE-SETUP.md) — Comprehensive documentation of the entire system
+
+## New Project Bootstrap
+
+Use the built-in project template to add project-local `.claude` config in one command:
+
+```bash
+# From anywhere
+~/agents/claude-config/new-project-claude.sh /path/to/new-project
+
+# Or run inside a repo
+cd /path/to/new-project
+~/agents/claude-config/new-project-claude.sh
+```
+
+This creates missing files from `claude-config/project-template/` without overwriting existing files.
+
+## Unified Claude + Codex Install
+
+To install/update both configurations in one step:
+
+```bash
+~/agents/install-all.sh
+```
