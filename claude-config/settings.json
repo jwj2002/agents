@@ -6,12 +6,6 @@
       "Bash(clawdbot models --help:*)"
     ]
   },
-  "mcpServers": {
-    "apple-mcp": {
-      "command": "bunx",
-      "args": ["--no-cache", "apple-mcp@latest"]
-    }
-  },
   "hooks": {
     "PreCompact": [
       {
@@ -39,5 +33,18 @@
   "statusLine": {
     "type": "command",
     "command": "python3 ~/.claude/statusline.py"
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true
+  },
+  "skipDangerousModePermissionPrompt": true,
+  "mcpServers": {
+    "apple-mcp": {
+      "command": "bunx",
+      "args": [
+        "--no-cache",
+        "apple-mcp@latest"
+      ]
+    }
   }
 }
