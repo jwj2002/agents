@@ -1,0 +1,2 @@
+# Shared codex rules tracked in git.
+# Keep machine-specific approvals in ~/.codex/rules/default.rules.
