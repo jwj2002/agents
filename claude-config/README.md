@@ -43,7 +43,7 @@ After installation, all commands and rules are immediately available in every Cl
 |-----------|---------|
 | `commands/` | Slash commands available in Claude Code |
 | `agents/` | Agent instructions for the orchestrate workflow (versioned) |
-| `hooks/` | Lifecycle hooks (session start, pre-compact) with error logging |
+| `hooks/` | Lifecycle hooks (session start, pre-compact, stop verification) |
 | `rules/` | Global rules — always-loaded core patterns + conditional loading |
 | `skills/` | Multi-step skill definitions (orchestrate, test-plan) |
 | `settings.json` | Hooks, permissions, MCP servers, statusline config |
@@ -58,9 +58,6 @@ After installation, all commands and rules are immediately available in every Cl
 | `/orchestrate` | `/orchestrate 184` | Full issue workflow: MAP → PLAN → CONTRACT → PATCH → PROVE |
 | `/pr` | `/pr` | PR creation with checklist, merge strategy, post-merge cleanup |
 | `/review` | `/review` | Code review staged changes |
-| `/changelog` | `/changelog` | Generate changelog from merged PRs |
-| `/standup` | `/standup` | Generate daily standup report (v2 vault support) |
-| `/obsidian` | `/obsidian` | Update Obsidian vault with session info |
 
 ### Issue Management
 
@@ -76,7 +73,6 @@ After installation, all commands and rules are immediately available in every Cl
 | Command | Usage | Description |
 |---------|-------|-------------|
 | `/test-plan` | `/test-plan 184` | Pre-implementation test planning with edge cases |
-| `/codex-review` | `/codex-review` | Second opinion from OpenAI Codex (requires OPENAI_API_KEY) |
 
 ### Learning System
 
@@ -85,8 +81,6 @@ After installation, all commands and rules are immediately available in every Cl
 | `/learn` | `/learn --cross-project` | Analyze failures, extract patterns across projects |
 | `/learn --validate` | `/learn --validate` | A/B test pattern effectiveness (before/after rates) |
 | `/metrics` | `/metrics --week` | Agent performance dashboard with version correlation |
-| `/agent-update` | `/agent-update --agent patch` | Apply learned improvements (Edit tool, version++) |
-| `/postmortem-extract` | `/postmortem-extract` | Convert postmortems → structured failure records |
 
 ### FastAPI Scaffolding
 
@@ -128,10 +122,11 @@ Issue → MAP/MAP-PLAN → [TEST-PLANNER] → CONTRACT* → PATCH → PROVE
 | `patch.md` | 1.0 | Implementation with minimal diffs |
 | `prove.md` | 1.0 | Verification, evidence capture, outcome recording |
 | `spec-reviewer.md` | 1.0 | Specification review and issue creation |
+| `code-reviewer.md` | 1.0 | Proactive code reviewer (runs automatically after changes, uses Haiku) |
 
 **Artifact validation**: Each agent validates predecessor artifacts exist before starting. Stops if missing.
 
-**Agent versioning**: All agents have `version: X.Y` in frontmatter. `/agent-update` increments minor version. Metrics record `agent_versions` for correlation.
+**Agent versioning**: All agents have `version: X.Y` in frontmatter. Metrics record `agent_versions` for correlation.
 
 **Parallel execution**: For COMPLEX issues with `--with-tests`, MAP + TEST-PLANNER run concurrently.
 
@@ -141,24 +136,30 @@ Issue → MAP/MAP-PLAN → [TEST-PLANNER] → CONTRACT* → PATCH → PROVE
 |------|---------|---------|
 | `precompact_checkpoint.py` | Before context compaction | Saves conversation state to YAML checkpoint |
 | `sessionstart_restore_state.py` | Session start | Restores context from most recent checkpoint |
+| `verify_completion.py` | Stop | Anti-rationalization gate — blocks premature completion if uncommitted changes or TODOs exist |
 
-Both hooks log errors to `~/.claude/hooks.log` with timestamps.
+All hooks log errors to `~/.claude/hooks.log` with timestamps.
 
-## MCP Server
+## MCP Servers
 
-Provides tools for querying Obsidian vault and agent metrics from within Claude Code.
+| Server | Purpose |
+|--------|---------|
+| `context7` | Injects current, version-specific library documentation into context (eliminates stale API hallucinations) |
+| `apple-mcp` | Apple platform integration |
+| `mcp-server` (local) | Agent metrics and failure pattern queries |
+
+## Agent Metrics MCP
+
+Provides tools for querying agent metrics from within Claude Code.
 
 | Tool | Description |
 |------|-------------|
-| `vault_status` | Read STATUS.md for a project → structured JSON |
-| `vault_search` | Search daily logs across projects |
-| `vault_dashboard` | Cross-project overview from DASHBOARD.md |
 | `agent_metrics` | Query metrics.jsonl → success rates, trends |
 | `failure_patterns` | Read failures.jsonl → top failure patterns |
 
 **Location**: `~/agents/mcp-server/`
 **Config**: `mcpServers` section in `settings.json`
-**Standalone**: `python3 server.py vault_dashboard` (works without MCP SDK)
+**Standalone**: `python3 server.py` (works without MCP SDK)
 
 ## Self-Learning System
 
@@ -172,8 +173,6 @@ Provides tools for querying Obsidian vault and agent metrics from within Claude 
                           /learn (weekly, --cross-project)
                                │
                          patterns.md
-                               │
-                       /agent-update (Edit tool, version++)
                                │
                         Next /orchestrate → agents read patterns.md
 ```
@@ -230,6 +229,16 @@ These stay local and are not included in this repo:
 
 - [fastapi-architect-agent](https://github.com/jwj2002/fastapi-architect-agent) — Standalone CLI + AI agent for the same FastAPI patterns (works without Claude Code)
 - [Full setup reference](../docs/CLAUDE-SETUP.md) — Comprehensive documentation of the entire system
+
+## PR Review Setup
+
+Uses GitHub Copilot's built-in code review (no API keys needed):
+
+```
+Repo Settings → Copilot → Code Review → Enable automatic reviews
+```
+
+See `templates/github-actions/copilot-review-setup.md` for full setup options.
 
 ## New Project Bootstrap
 

@@ -298,8 +298,8 @@ echo '{"issue":'$ISSUE_NUMBER',"date":"'$(date +%Y-%m-%d)'","status":"BLOCKED","
 All agents include `version: X.Y` in their YAML frontmatter.
 
 **Convention**:
-- **Minor** (1.0 → 1.1): Pattern additions, wording changes via `/agent-update`
-- **Major** (1.0 → 2.0): Manual restructure, new sections, workflow changes
+- **Minor** (1.0 → 1.1): Pattern additions, wording changes
+- **Major** (1.0 → 2.0): Restructure, new sections, workflow changes
 
 When recording outcomes, include agent versions in `agent_versions` field:
 

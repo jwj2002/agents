@@ -224,7 +224,7 @@ Suggested agent updates (5+ occurrence patterns):
 
 Next steps:
   • Review updated patterns.md
-  • Run `/agent-update` to apply suggestions
+  • Manually apply suggested agent updates
   • Continue using /orchestrate to gather more data
 ═══════════════════════════════════════════════════════════
 ```
@@ -346,5 +346,4 @@ Pattern Validation Results:
 ## Related Commands
 
 - `/metrics` — View performance dashboard
-- `/agent-update` — Apply suggested agent changes
 - `/orchestrate` — Run issues (generates outcome data)

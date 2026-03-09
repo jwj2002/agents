@@ -172,4 +172,3 @@ cd frontend && npm run build
 
 - `/orchestrate` — Generate implementation with artifacts
 - `/review` — Pre-commit code review
-- `/changelog` — Update changelog after merge

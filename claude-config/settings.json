@@ -28,6 +28,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/verify_completion.py"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
@@ -45,7 +56,13 @@
         "--no-cache",
         "apple-mcp@latest"
       ]
+    },
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ]
     }
-  },
-  "effortLevel": "medium"
+  }
 }

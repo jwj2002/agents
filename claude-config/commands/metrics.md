@@ -319,4 +319,3 @@ Example output:
 
 - `/learn` — Update patterns from failures
 - `/orchestrate` — Run issues (generates metrics data)
-- `/agent-update` — Apply suggested improvements
