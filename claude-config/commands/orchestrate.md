@@ -34,12 +34,14 @@ argument-hint: [issue-number]
 /orchestrate 184
 /orchestrate #184
 /orchestrate 184 --with-tests    # Include TEST-PLANNER phase
+/orchestrate 184 --resume        # Resume from last completed phase
 ```
 
 If no issue provided, instruct user to create one with `/feature` or `/bug`.
 
 **Flags**:
 - `--with-tests`: Run TEST-PLANNER agent after MAP-PLAN (recommended for calculations/formulas)
+- `--resume`: Resume an interrupted workflow from the last completed phase
 
 ---
 
@@ -72,10 +74,12 @@ fi
 ## Workflow
 
 ```
-TRIVIAL/SIMPLE: MAP-PLAN → [TEST-PLANNER] → CONTRACT* → PLAN-CHECK → PATCH → PROVE
+TRIVIAL:        MAP-PLAN → PATCH → PROVE-lite
+SIMPLE:         MAP-PLAN → [TEST-PLANNER] → CONTRACT* → PLAN-CHECK → PATCH → PROVE
 COMPLEX:        MAP → PLAN → [TEST-PLANNER] → CONTRACT* → PLAN-CHECK → PATCH → PROVE
 ```
 
+- `TRIVIAL` skips PLAN-CHECK and uses PROVE-lite (gates only, no Level 2-3 checks)
 - `[TEST-PLANNER]` runs if `--with-tests` flag provided
 - `CONTRACT*` **MANDATORY** if fullstack (not optional — PATCH will STOP without it)
 
@@ -107,6 +111,42 @@ After workflow completes successfully:
 ```bash
 python3 -c "import sys; sys.path.insert(0, '$HOME/.claude/hooks'); from state_manager import clear_active; from pathlib import Path; clear_active(Path('.'), $ISSUE)"
 ```
+
+---
+
+## Resume Mode (`--resume`)
+
+When `--resume` is provided, skip already-completed phases:
+
+1. Load state:
+   ```bash
+   python3 -c "import sys, json; sys.path.insert(0, '$HOME/.claude/hooks'); from state_manager import load_state; from pathlib import Path; print(json.dumps(load_state(Path('.')), indent=2))"
+   ```
+
+2. Read `completed_phases` from state. If empty, start from beginning.
+
+3. Determine next phase:
+
+   | Last Completed | Next Phase |
+   |----------------|------------|
+   | None | MAP-PLAN (or MAP) |
+   | MAP-PLAN | PLAN-CHECK (or CONTRACT if fullstack) |
+   | PLAN-CHECK | PATCH |
+   | PATCH | PROVE |
+   | PROVE | Done — report status |
+
+4. Verify artifacts exist for all completed phases before skipping:
+   ```bash
+   # Check each completed phase has its artifact
+   for PHASE in $COMPLETED_PHASES; do
+     ls .agents/outputs/${PHASE,,}-${ISSUE}-*.md 2>/dev/null || echo "WARNING: Missing artifact for $PHASE"
+   done
+   ```
+
+5. Resume from the next incomplete phase. Report:
+   ```
+   Resuming issue #184 from PATCH phase (MAP-PLAN, PLAN-CHECK already complete)
+   ```
 
 ---
 
@@ -160,6 +200,28 @@ CONTRACT agent will run before PLAN-CHECK.
 ```
 
 **Override**: If user initially classified as backend-only but plan touches frontend, escalate to fullstack.
+
+### Step 1.6: CONTRACT Weight Assessment (fullstack only)
+
+If STACK=fullstack, decide whether to spawn the full CONTRACT agent or use an inline contract:
+
+| Signal | CONTRACT-lite (inline) | CONTRACT-full (agent) |
+|--------|------------------------|----------------------|
+| New endpoints | 0 | 1+ |
+| Enum changes | 0-1 | 2+ |
+| Breaking API changes | No | Yes |
+| Frontend files touched | 1-2 | 3+ |
+
+**CONTRACT-lite**: Skip the CONTRACT agent. Instead, add an inline contract section to the PATCH prompt:
+
+```markdown
+## API Contract (inline — no new endpoints)
+- Enum VALUES: [extract from MAP-PLAN enum documentation]
+- Changed response fields: [from MAP-PLAN]
+- No new endpoints. Existing endpoints modified: [list]
+```
+
+**CONTRACT-full**: Spawn CONTRACT agent as documented in Step 3.
 
 ### Step 1.7: Check for File Conflicts with Open PRs
 
@@ -325,7 +387,10 @@ Task(
 )
 ```
 
-#### PLAN-CHECK (Always runs before PATCH)
+#### PLAN-CHECK (Skip if TRIVIAL)
+
+**If TRIVIAL**: Skip PLAN-CHECK entirely. Proceed directly to PATCH.
+**If SIMPLE or COMPLEX**: Run PLAN-CHECK as documented below.
 ```
 Task(
   description='PLAN-CHECK for issue N',
@@ -477,7 +542,8 @@ Merge into single `patch-N-MMDDYY.md` summary artifact for PROVE.
 - No CONTRACT artifact exists (synchronization point missing)
 ```
 
-#### PROVE
+#### PROVE (full) — SIMPLE and COMPLEX
+
 ```
 Task(
   description='PROVE for issue N',
@@ -501,6 +567,32 @@ Read agent instructions (check .claude/agents/prove.md first, else ~/.claude/age
 Run verification commands (ruff, pytest, npm lint, npm build).
 Record outcome to .claude/memory/metrics.jsonl
 If BLOCKED, record to .claude/memory/failures.jsonl
+Write to .agents/outputs/prove-N-MMDDYY.md
+End with AGENT_RETURN: prove-N-MMDDYY.md
+'''
+)
+```
+
+#### PROVE-lite — TRIVIAL only
+
+For TRIVIAL issues, use a reduced verification prompt:
+
+```
+Task(
+  description='PROVE-lite for issue N',
+  prompt='''You are PROVE agent (lite mode for TRIVIAL issues).
+
+## Inherited Context
+- Issue: #N - {title}
+- Stack: {backend|frontend|fullstack}
+- Complexity: TRIVIAL
+
+## Instructions
+Run verification gates ONLY (skip Level 2 SUBSTANTIVE and Level 3 WIRED checks):
+- If backend touched: cd backend && ruff check . && pytest -q
+- If frontend touched: cd frontend && npm run lint && npm run build
+
+Record outcome to .claude/memory/metrics.jsonl
 Write to .agents/outputs/prove-N-MMDDYY.md
 End with AGENT_RETURN: prove-N-MMDDYY.md
 '''
@@ -552,6 +644,11 @@ Task(description='TEST-PLANNER for issue N', ...)     ← run in parallel
 
 PLAN-CHECK is read-only validation that passes ~90%+ of the time. Instead of waiting for it, start PATCH speculatively in parallel:
 
+**Pre-condition**: Create a save point before speculative execution:
+```bash
+SPECULATIVE_BASE=$(git rev-parse HEAD)
+```
+
 ```
 # Spawn in parallel:
 Task(description='PLAN-CHECK for issue N', ...)    ← validation
@@ -560,14 +657,20 @@ Task(description='PATCH for issue N', ...)          ← speculative implementati
 
 **After both complete**:
 - If PLAN-CHECK **passed**: PATCH result is valid. Proceed to PROVE. Saved one full agent cycle.
-- If PLAN-CHECK **found issues**: Discard PATCH result. Report PLAN-CHECK issues to user. Re-run PATCH after plan revision.
+- If PLAN-CHECK **found issues**: Rollback speculative PATCH, then re-run after plan revision:
+  ```bash
+  # Rollback speculative PATCH changes
+  git checkout -- .
+  git clean -fd
+  ```
 
 **Enable speculative PATCH** when:
-- Issue is TRIVIAL or SIMPLE (low plan-rejection risk)
+- Issue is SIMPLE (low plan-rejection risk)
 - No prior PLAN-CHECK failures on this issue
 - Backend-only change (simpler, lower conflict risk)
 
 **Disable speculative PATCH** when:
+- TRIVIAL (no PLAN-CHECK to run, so no speculation needed)
 - COMPLEX issue or fullstack (plan rejection rate is higher)
 - Prior attempt on this issue was BLOCKED
 - User explicitly requests sequential execution
