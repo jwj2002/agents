@@ -14,12 +14,30 @@ All agents inherit these behaviors. Read this FIRST before your agent-specific i
 
 **BEFORE investigating or planning**, load accumulated knowledge:
 
-### Always Load (Critical Patterns ~50 lines)
+### Preferred: MCP Tools (if vault-metrics MCP available)
+
+Use MCP tools for structured, up-to-date pattern data:
+
+```
+# Get failure patterns (structured, with frequency and recent examples)
+failure_patterns()
+
+# Get metrics overview (success rates by complexity/stack)
+agent_metrics(period="30d")
+```
+
+**Why MCP**: Returns parsed JSON with counts, percentages, and recent examples — more actionable than raw markdown files.
+
+### Fallback: File-Based Loading
+
+If MCP tools are not available (tool call fails or returns error), fall back to files:
+
+#### Always Load (Critical Patterns ~50 lines)
 ```bash
 cat .claude/memory/patterns-critical.md
 ```
 
-### Load If Needed (Full Patterns ~660 lines)
+#### Load If Needed (Full Patterns ~660 lines)
 Only load `.claude/memory/patterns-full.md` when:
 - Issue is COMPLEX classification
 - Issue involves pattern not in critical file

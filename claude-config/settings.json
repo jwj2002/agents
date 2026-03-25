@@ -50,6 +50,13 @@
   },
   "skipDangerousModePermissionPrompt": true,
   "mcpServers": {
+    "vault-metrics": {
+      "command": "python3",
+      "args": [
+        "~/agents/mcp-server/server.py",
+        "--mcp"
+      ]
+    },
     "apple-mcp": {
       "command": "bunx",
       "args": [
