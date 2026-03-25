@@ -165,28 +165,20 @@ This signals successful completion to the orchestrator.
 
 ## 8. High-Frequency Failure Prevention
 
-These patterns cause >50% of failures. Check proactively:
+**Canonical definitions**: See `~/.claude/rules/core-patterns.md` (auto-loaded).
 
-### ENUM_VALUE (26% of failures)
-**Trigger**: Fullstack issue with role/status/type fields
-**Check**: Read backend enum, verify VALUES not names
+Use these verification commands when patterns apply:
+
 ```bash
+# ENUM_VALUE: verify VALUES not names
 grep -A 10 "class.*Enum" backend/backend/*/enums.py
-```
-**Prevention**: Frontend must use VALUE string (e.g., `"CO-OWNER"` not `"CO_OWNER"`)
 
-### COMPONENT_API (17% of failures)
-**Trigger**: Reusing existing frontend component/hook
-**Check**: Read actual source, extract PropTypes/return type
-```bash
+# COMPONENT_API: extract PropTypes/return type
 grep -A 20 "PropTypes" frontend/src/components/path/Component.jsx
-```
-**Prevention**: Document API explicitly before using
 
-### MULTI_MODEL (13% of failures)
-**Trigger**: CRUD operation with 5+ fields
-**Check**: Map each field to its owning model
-**Prevention**: Service layer must coordinate all model updates atomically
+# MULTI_MODEL: map fields to owning models
+grep -rn "class.*Model" backend/backend/*/models.py
+```
 
 ---
 

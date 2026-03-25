@@ -92,20 +92,7 @@ COMPLEX:        MAP → PLAN → [TEST-PLANNER] → CONTRACT* → PLAN-CHECK →
 **MUST** run this command BEFORE spawning each agent:
 
 ```bash
-python3 -c "
-import yaml
-from pathlib import Path
-state_file = Path('.agents/outputs/claude_checkpoints/PERSISTENT_STATE.yaml')
-if state_file.exists():
-    data = yaml.safe_load(state_file.read_text())
-    data['active_work'] = {
-        'issue': $ISSUE,
-        'branch': '$BRANCH',
-        'phase': '$PHASE',
-        'last_action': 'Starting $PHASE phase'
-    }
-    state_file.write_text(yaml.safe_dump(data, default_flow_style=False, sort_keys=False))
-"
+python3 -c "import sys; sys.path.insert(0, '$HOME/.claude/hooks'); from state_manager import update_phase; from pathlib import Path; update_phase(Path('.'), $ISSUE, '$BRANCH', '$PHASE', 'Starting $PHASE phase')"
 ```
 
 Replace variables:
@@ -118,20 +105,7 @@ Replace variables:
 After workflow completes successfully:
 
 ```bash
-python3 -c "
-import yaml
-from pathlib import Path
-state_file = Path('.agents/outputs/claude_checkpoints/PERSISTENT_STATE.yaml')
-if state_file.exists():
-    data = yaml.safe_load(state_file.read_text())
-    data['active_work'] = {
-        'issue': None,
-        'branch': 'main',
-        'phase': None,
-        'last_action': 'Completed issue #$ISSUE'
-    }
-    state_file.write_text(yaml.safe_dump(data, default_flow_style=False, sort_keys=False))
-"
+python3 -c "import sys; sys.path.insert(0, '$HOME/.claude/hooks'); from state_manager import clear_active; from pathlib import Path; clear_active(Path('.'), $ISSUE)"
 ```
 
 ---
@@ -187,6 +161,28 @@ CONTRACT agent will run before PLAN-CHECK.
 
 **Override**: If user initially classified as backend-only but plan touches frontend, escalate to fullstack.
 
+### Step 1.7: Check for File Conflicts with Open PRs
+
+Before branching, check if open PRs touch files this issue will affect:
+
+```bash
+# Get files from open PRs
+OPEN_PR_FILES=$(gh pr list --state open --json files --jq '.[].files[].path' 2>/dev/null | sort -u)
+
+# After MAP-PLAN, compare planned files against open PR files
+PLAN_FILES=$(grep -oP '`[^`]+\.(py|jsx?|tsx?|md|json)`' .agents/outputs/{map-plan,plan}-${ISSUE}-*.md 2>/dev/null | tr -d '`' | sort -u)
+
+CONFLICTS=$(comm -12 <(echo "$OPEN_PR_FILES") <(echo "$PLAN_FILES"))
+
+if [ -n "$CONFLICTS" ]; then
+  echo "WARNING: File conflicts with open PRs:"
+  echo "$CONFLICTS"
+  echo "Consider serializing or rebasing after those PRs merge."
+fi
+```
+
+**Note**: This runs after MAP-PLAN produces the file list. If conflicts are found, warn but don't block — user decides whether to proceed.
+
 ### Step 2: Create Feature Branch
 
 ```bash
@@ -213,9 +209,8 @@ All agent prompts MUST include this inherited context block to reduce re-reading
 - Complexity: {TRIVIAL|SIMPLE|COMPLEX}
 
 ## Critical Patterns (Always Apply)
-1. VERIFICATION_GAP: Verify assumptions by reading actual code
-2. ENUM_VALUE: Use VALUES not Python names ("CO-OWNER" not "CO_OWNER")
-3. COMPONENT_API: Read PropTypes before using components
+Loaded from rules/core-patterns.md (auto-loaded by Claude Code).
+Apply VERIFICATION_GAP, ENUM_VALUE, and COMPONENT_API checks as relevant.
 
 ## Prior Artifacts
 - {list any prior artifacts for this issue}
