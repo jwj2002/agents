@@ -23,7 +23,7 @@ ls .agents/outputs/{map,map-plan}-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOC
 
 ## Pre-Flight (from _base.md)
 
-1. `cat .claude/memory/patterns.md` — Load learned patterns (identify past test failures)
+1. Load patterns via MCP `failure_patterns()` (fallback: `cat .claude/memory/patterns.md`) — Identify past test failures
 2. Read issue/spec — Extract ALL testable requirements
 3. Read MAP-PLAN artifact — Understand implementation scope
 
