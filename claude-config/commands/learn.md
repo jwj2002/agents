@@ -14,6 +14,8 @@ Analyzes accumulated failures and successes to extract patterns and update the k
 /learn --since 2025-01-01   # Analyze outcomes since date
 /learn --dry-run            # Preview changes without updating files
 /learn --verbose            # Show detailed analysis
+/learn --apply              # Analyze + write prevention checklists into agent files
+/learn --apply --dry-run    # Preview what --apply would write without modifying files
 /learn --cross-project      # Aggregate patterns across all projects
 /learn --validate           # Compare before/after success rates per pattern
 ```
@@ -192,6 +194,56 @@ If issue is fullstack and involves role/status/type fields:
 **Impact**: Would have prevented 12 failures
 ```
 
+### Step 6.5: Apply Updates (if `--apply`)
+
+For each suggested agent update from Step 6:
+
+1. **Read the target agent file** (resolve project-local first, then global):
+   ```bash
+   AGENT_FILE=".claude/agents/${AGENT}.md"
+   [ ! -f "$AGENT_FILE" ] && AGENT_FILE="$HOME/.claude/agents/${AGENT}.md"
+   ```
+
+2. **Find insertion point**: After the "Pre-Flight" section, before the "Process" or "Implementation" section.
+
+3. **Generate prevention checklist**:
+   ```markdown
+   ## Learned Prevention: {ROOT_CAUSE} ({count} failures)
+
+   **Added by /learn --apply on {YYYY-MM-DD}**
+
+   - [ ] {prevention action from failure records}
+   - [ ] {second prevention if multiple failure details}
+   ```
+
+4. **Show diff to user**:
+   ```
+   === Proposed change to agents/{agent}.md ===
+   + ## Learned Prevention: ENUM_VALUE (12 failures)
+   + **Added by /learn --apply on 2026-03-25**
+   + - [ ] Read backend enum definition BEFORE writing frontend code
+   + - [ ] Document VALUE strings in MAP-PLAN artifact
+   ```
+
+5. **Apply changes**:
+   - If `--dry-run`: Show diff only, do NOT write
+   - If `--apply`: Write changes, bump agent version (minor increment in YAML frontmatter)
+   - Record application in `.claude/memory/pattern-events.jsonl`:
+     ```json
+     {"date":"YYYY-MM-DD","pattern":"ENUM_VALUE","action":"applied","target":"agents/map-plan.md","version_before":"1.0","version_after":"1.1"}
+     ```
+
+6. **After all updates applied**, report:
+   ```
+   Applied N agent updates:
+     agents/map-plan.md (1.0 -> 1.1): Added ENUM_VALUE prevention
+     agents/patch.md (1.2 -> 1.3): Added MULTI_MODEL prevention
+
+   Review changes: git diff --stat
+   ```
+
+**Idempotency**: Before inserting, check if a `## Learned Prevention: {ROOT_CAUSE}` section already exists. If so, update the count and date rather than duplicating.
+
 ### Step 7: Output Summary
 
 ```
@@ -287,13 +339,26 @@ Aggregates failure patterns and metrics across all projects:
 
 ### Step 8: Scan All Projects
 
+Derive project paths from `~/.claude/rules/github-accounts.md` (if available):
+
 ```bash
-# Find all project memory directories
-for DIR in ~/projects/*/.claude/memory/; do
-  PROJECT=$(basename $(dirname $(dirname "$DIR")))
-  if [ -f "${DIR}failures.jsonl" ]; then
+# Extract project paths from github-accounts.md table
+ACCOUNTS_FILE="$HOME/.claude/rules/github-accounts.md"
+if [ -f "$ACCOUNTS_FILE" ]; then
+  PROJECT_PATHS=$(grep -oP '~/[a-zA-Z0-9_/-]+' "$ACCOUNTS_FILE" | sort -u)
+else
+  # Fallback: scan common locations
+  PROJECT_PATHS=$(echo ~/projects/* ~/agents)
+fi
+
+# Expand ~ and scan each for failure data
+for RAW_PATH in $PROJECT_PATHS; do
+  DIR="${RAW_PATH/#\~/$HOME}"
+  MEMORY_DIR="${DIR}/.claude/memory"
+  if [ -f "${MEMORY_DIR}/failures.jsonl" ]; then
+    PROJECT=$(basename "$DIR")
     echo "Found failures.jsonl in $PROJECT"
-    cat "${DIR}failures.jsonl"
+    cat "${MEMORY_DIR}/failures.jsonl"
   fi
 done
 ```

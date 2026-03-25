@@ -319,100 +319,60 @@ This replaces MAP doing its own sequential exploration, saving investigation tim
 - TRIVIAL/SIMPLE classification (MAP-PLAN handles exploration inline)
 
 #### MAP-PLAN (or MAP + PLAN)
-```
-Task(
-  description='MAP-PLAN for issue N',
-  prompt='''You are MAP-PLAN agent.
 
-## Inherited Context
-- Issue: #N - {title}
-- Branch: feature/issue-N-description
-- Stack: {backend|frontend|fullstack}
+Use prompt template from `templates/agent-prompt.md` with:
 
-## Critical Patterns (Always Apply)
-1. VERIFICATION_GAP: Verify assumptions by reading actual code
-2. ENUM_VALUE: Use VALUES not Python names
-3. COMPONENT_API: Read PropTypes before using
-
-## Issue Body
-{issue body}
-
-## Instructions
-Read agent instructions (check .claude/agents/map-plan.md first, else ~/.claude/agents/map-plan.md).
-Write artifact to .agents/outputs/map-plan-N-MMDDYY.md
-End with AGENT_RETURN: map-plan-N-MMDDYY.md
-'''
-)
-```
+| Variable | Value |
+|----------|-------|
+| AGENT_NAME | MAP-PLAN |
+| AGENT_FILE | map-plan.md |
+| ARTIFACT_NAME | map-plan-{ISSUE}-{MMDDYY}.md |
+| ARTIFACT_LIST | (none — first agent) |
+| AGENT_INSTRUCTIONS | Investigate and plan. Include `## Issue Body` with full issue body. |
 
 **Validate**: File exists, has AGENT_RETURN directive.
 
 #### TEST-PLANNER (if --with-tests)
-```
-Task(
-  description='TEST-PLANNER for issue N',
-  prompt='''You are TEST-PLANNER agent.
 
-## Inherited Context
-- Issue: #N - {title}
-- Stack: {backend|frontend|fullstack}
-- MAP-PLAN: .agents/outputs/map-plan-N-MMDDYY.md
+Use prompt template with:
 
-## Critical Patterns
-1. VERIFICATION_GAP: Verify assumptions by reading actual code
-2. Derive edge cases systematically from formulas
-
-## Instructions
-Read agent instructions (check .claude/agents/test-planner.md first, else ~/.claude/agents/test-planner.md).
-Read MAP-PLAN artifact for implementation context.
-Generate test matrix, edge cases, and test signatures.
-Write to .agents/outputs/test-plan-N-MMDDYY.md
-End with AGENT_RETURN: test-plan-N-MMDDYY.md
-'''
-)
-```
+| Variable | Value |
+|----------|-------|
+| AGENT_NAME | TEST-PLANNER |
+| AGENT_FILE | test-planner.md |
+| ARTIFACT_NAME | test-plan-{ISSUE}-{MMDDYY}.md |
+| ARTIFACT_LIST | - MAP-PLAN: .agents/outputs/map-plan-{ISSUE}-{MMDDYY}.md |
+| AGENT_INSTRUCTIONS | Read MAP-PLAN artifact. Generate test matrix, edge cases, and test signatures. |
 
 **Validate**: File exists, has test matrix, has AGENT_RETURN directive.
 
-#### CONTRACT (MANDATORY if fullstack)
+#### CONTRACT (MANDATORY if fullstack — see Step 1.6 for lite path)
 
-**GATE**: If stack is fullstack, CONTRACT MUST run. PATCH will refuse to proceed without the contract artifact.
+**GATE**: If stack is fullstack and CONTRACT-full selected, spawn CONTRACT agent. PATCH will refuse to proceed without the contract artifact.
 
-```
-Task(
-  description='CONTRACT for issue N',
-  prompt='You are CONTRACT agent. Read agent instructions (check .claude/agents/contract.md first, else ~/.claude/agents/contract.md).
-  Read PLAN artifact.
-  Write to .agents/outputs/contract-N-MMDDYY.md'
-)
-```
+Use prompt template with:
+
+| Variable | Value |
+|----------|-------|
+| AGENT_NAME | CONTRACT |
+| AGENT_FILE | contract.md |
+| ARTIFACT_NAME | contract-{ISSUE}-{MMDDYY}.md |
+| ARTIFACT_LIST | - MAP-PLAN: .agents/outputs/map-plan-{ISSUE}-{MMDDYY}.md |
+| AGENT_INSTRUCTIONS | Define backend/frontend API contract. Document enum VALUES explicitly. |
 
 #### PLAN-CHECK (Skip if TRIVIAL)
 
 **If TRIVIAL**: Skip PLAN-CHECK entirely. Proceed directly to PATCH.
 **If SIMPLE or COMPLEX**: Run PLAN-CHECK as documented below.
-```
-Task(
-  description='PLAN-CHECK for issue N',
-  prompt='''You are PLAN-CHECK agent.
+Use prompt template with:
 
-## Inherited Context
-- Issue: #N - {title}
-- Stack: {backend|frontend|fullstack}
-- Complexity: {TRIVIAL|SIMPLE|COMPLEX}
-
-## Prior Artifacts
-- MAP-PLAN: .agents/outputs/map-plan-N-MMDDYY.md
-- CONTRACT: .agents/outputs/contract-N-MMDDYY.md (if fullstack)
-
-## Instructions
-Read agent instructions (check .claude/agents/plan-checker.md first, else ~/.claude/agents/plan-checker.md).
-Validate plan completeness. Do NOT modify any files.
-Write to .agents/outputs/plan-check-N-MMDDYY.md
-End with AGENT_RETURN: plan-check-N-MMDDYY.md
-'''
-)
-```
+| Variable | Value |
+|----------|-------|
+| AGENT_NAME | PLAN-CHECK |
+| AGENT_FILE | plan-checker.md |
+| ARTIFACT_NAME | plan-check-{ISSUE}-{MMDDYY}.md |
+| ARTIFACT_LIST | - MAP-PLAN: .agents/outputs/map-plan-{ISSUE}-{MMDDYY}.md<br>- CONTRACT: (if fullstack) |
+| AGENT_INSTRUCTIONS | Validate plan completeness. Do NOT modify any files. |
 
 **Validate**: File exists, has AGENT_RETURN directive.
 **If ISSUES_FOUND**: Report to user before proceeding to PATCH. User decides whether to continue or revise plan.
@@ -437,167 +397,67 @@ If found, add to PATCH prompt's Inherited Context:
 ```
 
 #### PATCH (Single-Stack or Default)
-```
-Task(
-  description='PATCH for issue N',
-  prompt='''You are PATCH agent.
 
-## Inherited Context
-- Issue: #N - {title}
-- Branch: feature/issue-N-description
-- Stack: {backend|frontend|fullstack}
+Use prompt template with:
 
-## Critical Patterns (Always Apply)
-1. VERIFICATION_GAP: Verify component APIs by reading actual code
-2. ENUM_VALUE: Use VALUES not Python names
-3. COMPONENT_API: Read PropTypes, never invent props
-
-## Prior Artifacts
-- MAP-PLAN: .agents/outputs/map-plan-N-MMDDYY.md
-- TEST-PLAN: .agents/outputs/test-plan-N-MMDDYY.md (if exists)
-- CONTRACT: .agents/outputs/contract-N-MMDDYY.md (if fullstack)
-- PLAN-CHECK: .agents/outputs/plan-check-N-MMDDYY.md
-
-## Prior Failure (if re-attempt)
-{injected from failures.jsonl if this issue was previously BLOCKED, else "First attempt"}
-
-## Instructions
-Read agent instructions (check .claude/agents/patch.md first, else ~/.claude/agents/patch.md).
-Implement changes per MAP-PLAN.
-Implement tests following TEST-PLAN signatures (if exists).
-Write to .agents/outputs/patch-N-MMDDYY.md
-End with AGENT_RETURN: patch-N-MMDDYY.md
-'''
-)
-```
+| Variable | Value |
+|----------|-------|
+| AGENT_NAME | PATCH |
+| AGENT_FILE | patch.md |
+| ARTIFACT_NAME | patch-{ISSUE}-{MMDDYY}.md |
+| ARTIFACT_LIST | - MAP-PLAN, TEST-PLAN (if exists), CONTRACT (if fullstack), PLAN-CHECK |
+| PRIOR_FAILURE_BLOCK | Injected from failures.jsonl or "First attempt" |
+| AGENT_INSTRUCTIONS | Implement changes per MAP-PLAN. Implement tests following TEST-PLAN signatures (if exists). |
 
 #### PATCH (Parallel Fullstack — when CONTRACT exists)
 
-When STACK=fullstack and CONTRACT artifact exists, split PATCH into two parallel tasks.
-CONTRACT defines the API boundary — backend and frontend implement against it independently.
+When STACK=fullstack and CONTRACT artifact exists, split PATCH into two parallel tasks using the scoped variant from `templates/agent-prompt.md`.
 
-```
-# Spawn in parallel (single message, two Task calls):
-Task(
-  description='PATCH-backend for issue N',
-  prompt='''You are PATCH agent (BACKEND ONLY).
+Spawn in parallel (single message, two Task calls):
 
-## Inherited Context
-- Issue: #N - {title}
-- Branch: feature/issue-N-description
-- Stack: fullstack (backend portion)
-- SCOPE: Only implement backend/ changes from MAP-PLAN
+**PATCH-backend**:
 
-## Prior Artifacts
-- MAP-PLAN: .agents/outputs/map-plan-N-MMDDYY.md
-- CONTRACT: .agents/outputs/contract-N-MMDDYY.md (AUTHORITATIVE for API surface)
-- TEST-PLAN: .agents/outputs/test-plan-N-MMDDYY.md (if exists)
+| Variable | Value |
+|----------|-------|
+| AGENT_NAME | PATCH (BACKEND ONLY) |
+| SCOPE | backend/ |
+| ARTIFACT_NAME | patch-backend-{ISSUE}-{MMDDYY}.md |
+| ARTIFACT_LIST | - MAP-PLAN, CONTRACT (AUTHORITATIVE), TEST-PLAN (if exists) |
+| AGENT_INSTRUCTIONS | Implement ONLY backend/ changes. Run gates: ruff check . && pytest -q |
 
-## Prior Failure (if re-attempt)
-{injected from failures.jsonl or "First attempt"}
+**PATCH-frontend**:
 
-## Instructions
-Read agent instructions (check .claude/agents/patch.md first, else ~/.claude/agents/patch.md).
-Implement ONLY backend/ changes per MAP-PLAN. Use CONTRACT for API shapes.
-Run backend gates: ruff check . && pytest -q
-Write to .agents/outputs/patch-backend-N-MMDDYY.md
-End with AGENT_RETURN: patch-backend-N-MMDDYY.md
-'''
-)
-
-Task(
-  description='PATCH-frontend for issue N',
-  prompt='''You are PATCH agent (FRONTEND ONLY).
-
-## Inherited Context
-- Issue: #N - {title}
-- Branch: feature/issue-N-description
-- Stack: fullstack (frontend portion)
-- SCOPE: Only implement frontend/ changes from MAP-PLAN
-
-## Prior Artifacts
-- MAP-PLAN: .agents/outputs/map-plan-N-MMDDYY.md
-- CONTRACT: .agents/outputs/contract-N-MMDDYY.md (AUTHORITATIVE for API surface)
-
-## Critical Patterns
-1. ENUM_VALUE: Use VALUES from CONTRACT, not Python names
-2. COMPONENT_API: Read PropTypes before using existing components
-
-## Instructions
-Read agent instructions (check .claude/agents/patch.md first, else ~/.claude/agents/patch.md).
-Implement ONLY frontend/ changes per MAP-PLAN. Use CONTRACT for API shapes and enum VALUES.
-Run frontend gates: npm run lint && npm run build
-Write to .agents/outputs/patch-frontend-N-MMDDYY.md
-End with AGENT_RETURN: patch-frontend-N-MMDDYY.md
-'''
-)
-```
+| Variable | Value |
+|----------|-------|
+| AGENT_NAME | PATCH (FRONTEND ONLY) |
+| SCOPE | frontend/ |
+| ARTIFACT_NAME | patch-frontend-{ISSUE}-{MMDDYY}.md |
+| ARTIFACT_LIST | - MAP-PLAN, CONTRACT (AUTHORITATIVE), TEST-PLAN (if exists) |
+| AGENT_INSTRUCTIONS | Implement ONLY frontend/ changes. Use CONTRACT for enum VALUES. Run gates: npm run lint && npm run build |
 
 **After both complete**: Validate no file conflicts between the two artifacts.
-Merge into single `patch-N-MMDDYY.md` summary artifact for PROVE.
+Merge into single `patch-{ISSUE}-{MMDDYY}.md` summary artifact for PROVE.
 
 **Skip parallel PATCH** when:
 - Shared utility files appear in both backend and frontend plans (merge conflict risk)
 - Issue involves fewer than 3 files per side (overhead exceeds benefit)
 - No CONTRACT artifact exists (synchronization point missing)
-```
 
 #### PROVE (full) — SIMPLE and COMPLEX
 
-```
-Task(
-  description='PROVE for issue N',
-  prompt='''You are PROVE agent.
+Use prompt template with:
 
-## Inherited Context
-- Issue: #N - {title}
-- Stack: {backend|frontend|fullstack}
-
-## Critical Patterns to Verify
-1. ENUM_VALUE: grep for enum strings, verify VALUES used
-2. COMPONENT_API: grep PropTypes, verify props match
-3. TODO/STUB: grep for incomplete code
-
-## Prior Artifacts
-- PATCH: .agents/outputs/patch-N-MMDDYY.md
-- MAP-PLAN: .agents/outputs/map-plan-N-MMDDYY.md
-
-## Instructions
-Read agent instructions (check .claude/agents/prove.md first, else ~/.claude/agents/prove.md).
-Run verification commands (ruff, pytest, npm lint, npm build).
-Record outcome to .claude/memory/metrics.jsonl
-If BLOCKED, record to .claude/memory/failures.jsonl
-Write to .agents/outputs/prove-N-MMDDYY.md
-End with AGENT_RETURN: prove-N-MMDDYY.md
-'''
-)
-```
+| Variable | Value |
+|----------|-------|
+| AGENT_NAME | PROVE |
+| AGENT_FILE | prove.md |
+| ARTIFACT_NAME | prove-{ISSUE}-{MMDDYY}.md |
+| ARTIFACT_LIST | - PATCH: .agents/outputs/patch-{ISSUE}-{MMDDYY}.md<br>- MAP-PLAN: .agents/outputs/map-plan-{ISSUE}-{MMDDYY}.md |
+| AGENT_INSTRUCTIONS | Run verification commands (ruff, pytest, npm lint, npm build). Record outcome to metrics.jsonl. If BLOCKED, record to failures.jsonl. |
 
 #### PROVE-lite — TRIVIAL only
 
-For TRIVIAL issues, use a reduced verification prompt:
-
-```
-Task(
-  description='PROVE-lite for issue N',
-  prompt='''You are PROVE agent (lite mode for TRIVIAL issues).
-
-## Inherited Context
-- Issue: #N - {title}
-- Stack: {backend|frontend|fullstack}
-- Complexity: TRIVIAL
-
-## Instructions
-Run verification gates ONLY (skip Level 2 SUBSTANTIVE and Level 3 WIRED checks):
-- If backend touched: cd backend && ruff check . && pytest -q
-- If frontend touched: cd frontend && npm run lint && npm run build
-
-Record outcome to .claude/memory/metrics.jsonl
-Write to .agents/outputs/prove-N-MMDDYY.md
-End with AGENT_RETURN: prove-N-MMDDYY.md
-'''
-)
-```
+Use the PROVE-lite variant from `templates/agent-prompt.md`. Gates only, no Level 2-3 checks.
 
 ### Step 4: Report Status
 
