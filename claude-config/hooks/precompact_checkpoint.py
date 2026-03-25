@@ -111,41 +111,15 @@ def extract_state_from_transcript(transcript_lines: list[str]) -> dict:
     return state
 
 
-def update_persistent_state(state_file: Path, extracted: dict) -> None:
-    """Update PERSISTENT_STATE.yaml with extracted info."""
-    import yaml  # Only import if needed
-
-    if not state_file.exists():
-        return
-
+def update_persistent_state(project_dir: Path, extracted: dict) -> None:
+    """Update PERSISTENT_STATE.yaml with extracted info via state_manager."""
     try:
-        content = state_file.read_text(encoding="utf-8")
-        data = yaml.safe_load(content) or {}
-
-        # Update active_work section
-        if "active_work" not in data:
-            data["active_work"] = {}
-
-        if extracted["last_issue"]:
-            data["active_work"]["issue"] = extracted["last_issue"]
-        if extracted["last_phase"]:
-            data["active_work"]["phase"] = extracted["last_phase"]
-
-        # Update with last action description
-        if extracted["artifacts_created"]:
-            data["active_work"]["last_action"] = f"Created {extracted['artifacts_created'][-1]}"
-
-        # Update timestamp
-        if "meta" not in data:
-            data["meta"] = {}
-        data["meta"]["updated"] = datetime.now().strftime("%Y-%m-%d")
-
-        # Write back
-        with state_file.open("w", encoding="utf-8") as f:
-            yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
-
+        from state_manager import update_from_extracted
+        update_from_extracted(project_dir, extracted)
+    except ImportError:
+        # state_manager not on path, skip
+        print("[precompact] Warning: state_manager not found, skipping state update", file=sys.stderr)
     except Exception as e:
-        # Don't fail the hook if YAML update fails
         print(f"[precompact] Warning: Could not update PERSISTENT_STATE.yaml: {e}", file=sys.stderr)
 
 
@@ -221,13 +195,11 @@ def main() -> int:
     md_dst.write_text(summary, encoding="utf-8")
 
     # 4) Update PERSISTENT_STATE.yaml with extracted info
-    state_yaml = out_dir / "PERSISTENT_STATE.yaml"
     try:
-        update_persistent_state(state_yaml, extracted)
-        print(f"[precompact] Updated PERSISTENT_STATE.yaml")
-    except ImportError:
-        # PyYAML not available, skip update
-        print(f"[precompact] Skipped PERSISTENT_STATE.yaml update (PyYAML not installed)")
+        update_persistent_state(project_dir, extracted)
+        print("[precompact] Updated PERSISTENT_STATE.yaml")
+    except Exception as e:
+        print(f"[precompact] Skipped PERSISTENT_STATE.yaml update: {e}")
 
     # 5) Cleanup old checkpoints
     try:

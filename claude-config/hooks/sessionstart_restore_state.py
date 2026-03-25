@@ -31,9 +31,16 @@ try:
 except ImportError:
     HAS_YAML = False
 
+# Try to import centralized state manager
+try:
+    from state_manager import get_active_work as _sm_get_active_work
+    HAS_STATE_MANAGER = True
+except ImportError:
+    HAS_STATE_MANAGER = False
+
 
 def get_active_work(yaml_content: str) -> dict:
-    """Extract active_work from YAML content."""
+    """Extract active_work from YAML content (fallback when state_manager unavailable)."""
     if not HAS_YAML:
         return {}
     try:
@@ -62,7 +69,10 @@ def main() -> int:
     active_work = {}
     if yaml_state.exists():
         yaml_content = yaml_state.read_text(encoding="utf-8")
-        active_work = get_active_work(yaml_content)
+        if HAS_STATE_MANAGER:
+            active_work = _sm_get_active_work(project_dir)
+        else:
+            active_work = get_active_work(yaml_content)
         print("### Project State\n")
         print("```yaml")
         print(yaml_content)
@@ -82,13 +92,20 @@ def main() -> int:
         print(patterns_critical.read_text(encoding="utf-8"))
         print()
     else:
-        # Fallback: print inline critical patterns
-        print("### Critical Patterns\n")
-        print("1. **VERIFICATION_GAP**: Read spec/code before assuming")
-        print("2. **ENUM_VALUE**: Use VALUES not Python names (CO-OWNER not CO_OWNER)")
-        print("3. **COMPONENT_API**: Read PropTypes before using components")
-        print()
-        print("Full patterns: `.claude/memory/patterns-full.md`\n")
+        # Fallback: try reading rules/core-patterns.md (canonical source)
+        core_patterns = global_claude_dir / "rules" / "core-patterns.md"
+        if core_patterns.exists():
+            print("### Critical Patterns (Always Apply)\n")
+            print(core_patterns.read_text(encoding="utf-8"))
+            print()
+        else:
+            # Last resort: minimal inline reminder
+            print("### Critical Patterns\n")
+            print("1. **VERIFICATION_GAP**: Read spec/code before assuming")
+            print("2. **ENUM_VALUE**: Use VALUES not Python names (CO-OWNER not CO_OWNER)")
+            print("3. **COMPONENT_API**: Read PropTypes before using components")
+            print()
+            print("Full patterns: `.claude/memory/patterns-full.md`\n")
 
     # 3. Check for active orchestrate workflow and provide continue instructions
     issue = active_work.get("issue")

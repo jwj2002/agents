@@ -152,6 +152,13 @@ git checkout main && git pull
 # Delete local feature branch
 git branch -d feature/issue-${ISSUE}-description
 
+# Archive artifacts for the merged issue
+ARCHIVE_DIR=".agents/outputs/archive"
+mkdir -p "$ARCHIVE_DIR"
+for f in .agents/outputs/*-${ISSUE}-*.md; do
+  [ -f "$f" ] && mv "$f" "$ARCHIVE_DIR/"
+done
+
 # Verify main is green
 cd backend && pytest -q
 cd frontend && npm run build
