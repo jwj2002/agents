@@ -23,10 +23,15 @@ Issue → Classify → Branch → Agents → Verify → Record → PR
 
 ## Agent Sequence
 
-**TRIVIAL/SIMPLE**:
+**TRIVIAL**:
+1. MAP-PLAN → `.agents/outputs/map-plan-{issue}-{date}.md`
+2. PATCH → `.agents/outputs/patch-{issue}-{date}.md`
+3. PROVE-lite → `.agents/outputs/prove-{issue}-{date}.md`
+
+**SIMPLE**:
 1. MAP-PLAN → `.agents/outputs/map-plan-{issue}-{date}.md`
 2. TEST-PLANNER (if `--with-tests`) → `.agents/outputs/test-plan-{issue}-{date}.md`
-3. CONTRACT (MANDATORY if fullstack) → `.agents/outputs/contract-{issue}-{date}.md`
+3. CONTRACT (MANDATORY if fullstack, or CONTRACT-lite if simple fullstack) → `.agents/outputs/contract-{issue}-{date}.md`
 4. PLAN-CHECK → `.agents/outputs/plan-check-{issue}-{date}.md`
 5. PATCH → `.agents/outputs/patch-{issue}-{date}.md`
 6. PROVE → `.agents/outputs/prove-{issue}-{date}.md`
