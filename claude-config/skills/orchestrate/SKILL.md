@@ -55,6 +55,23 @@ Issue → Classify → Branch → Agents → Verify → Record → PR
 - Parallel fullstack PATCH: backend+frontend via CONTRACT
 - PROVE verification fan-out: lint/test/build (fullstack)
 
+## Worktree Isolation (`--parallel`)
+
+Run multiple orchestrate sessions simultaneously:
+
+```bash
+/orchestrate 42 --parallel    # Session 1: worktree at .worktrees/issue-42/
+/orchestrate 57 --parallel    # Session 2: worktree at .worktrees/issue-57/
+```
+
+Each session gets its own:
+- Working directory (`.worktrees/issue-{N}/`)
+- Git index (no staging conflicts)
+- Artifacts (`.agents/outputs/` inside worktree)
+- Feature branch
+
+Post-merge cleanup: `/pr --merge` removes the worktree automatically.
+
 ## Learning Loop
 
 After each issue:
@@ -75,6 +92,8 @@ After each issue:
 ```bash
 /orchestrate 184
 /orchestrate 184 --with-tests    # Include TEST-PLANNER phase
+/orchestrate 184 --parallel      # Run in isolated worktree
+/orchestrate 184 --parallel --resume  # Resume in existing worktree
 ```
 
 See `.claude/commands/orchestrate.md` for full details.

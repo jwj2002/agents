@@ -159,6 +159,18 @@ for f in .agents/outputs/*-${ISSUE}-*.md; do
   [ -f "$f" ] && mv "$f" "$ARCHIVE_DIR/"
 done
 
+# If this issue used a worktree (--parallel mode), clean it up
+python3 -c "
+import sys
+sys.path.insert(0, '$HOME/.claude/hooks')
+from worktree_manager import remove_worktree
+result = remove_worktree(${ISSUE})
+if result:
+    print('Worktree cleaned up: .worktrees/issue-${ISSUE}/')
+else:
+    print('No worktree found for issue ${ISSUE} (not using --parallel)')
+"
+
 # Verify main is green
 cd backend && pytest -q
 cd frontend && npm run build

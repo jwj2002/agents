@@ -56,8 +56,13 @@ def _write_state(project_dir: Path, data: dict) -> None:
         yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
 
 
-def update_phase(project_dir: Path, issue: int, branch: str, phase: str, action: str) -> None:
-    """Update active_work with current phase. Tracks completed phases for --resume."""
+def update_phase(project_dir: Path, issue: int, branch: str, phase: str, action: str,
+                  worktree_path: str | None = None) -> None:
+    """Update active_work with current phase. Tracks completed phases for --resume.
+
+    Args:
+        worktree_path: Absolute path to worktree (--parallel mode only). None for normal mode.
+    """
     data = load_state(project_dir)
     active = data.get("active_work", {})
 
@@ -67,12 +72,17 @@ def update_phase(project_dir: Path, issue: int, branch: str, phase: str, action:
     if prev_phase and prev_phase != phase and prev_phase not in completed:
         completed.append(prev_phase)
 
+    # Preserve existing worktree_path if not explicitly provided
+    if worktree_path is None:
+        worktree_path = active.get("worktree_path")
+
     data["active_work"] = {
         "issue": issue,
         "branch": branch,
         "phase": phase,
         "last_action": action,
         "completed_phases": completed,
+        "worktree_path": worktree_path,
     }
 
     if "meta" not in data:
@@ -91,6 +101,7 @@ def clear_active(project_dir: Path, issue: int) -> None:
         "phase": None,
         "last_action": f"Completed issue #{issue}",
         "completed_phases": [],
+        "worktree_path": None,
     }
 
     if "meta" not in data:
@@ -107,6 +118,15 @@ def get_completed_phases(project_dir: Path, issue: int) -> list[str]:
     if active.get("issue") != issue:
         return []
     return active.get("completed_phases", [])
+
+
+def get_worktree_for_issue(project_dir: Path, issue: int) -> str | None:
+    """Get worktree path for an issue from persisted state. Used by --resume."""
+    data = load_state(project_dir)
+    active = data.get("active_work", {})
+    if active.get("issue") != issue:
+        return None
+    return active.get("worktree_path")
 
 
 def get_active_work(project_dir: Path) -> dict:
