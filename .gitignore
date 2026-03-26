@@ -14,5 +14,8 @@ venv/
 .vscode/
 *.swp
 
+# Git worktrees (parallel orchestrate sessions)
+.worktrees/
+
 # Local-only settings (not symlinked)
 claude-config/settings.local.json

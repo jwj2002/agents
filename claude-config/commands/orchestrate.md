@@ -35,6 +35,8 @@ argument-hint: [issue-number]
 /orchestrate #184
 /orchestrate 184 --with-tests    # Include TEST-PLANNER phase
 /orchestrate 184 --resume        # Resume from last completed phase
+/orchestrate 184 --parallel      # Run in isolated worktree
+/orchestrate 184 --parallel --resume  # Resume in existing worktree
 ```
 
 If no issue provided, instruct user to create one with `/feature` or `/bug`.
@@ -42,6 +44,7 @@ If no issue provided, instruct user to create one with `/feature` or `/bug`.
 **Flags**:
 - `--with-tests`: Run TEST-PLANNER agent after MAP-PLAN (recommended for calculations/formulas)
 - `--resume`: Resume an interrupted workflow from the last completed phase
+- `--parallel`: Run workflow in an isolated git worktree (`.worktrees/issue-{N}/`). Enables concurrent orchestrate sessions on independent issues.
 
 ---
 
@@ -150,6 +153,69 @@ When `--resume` is provided, skip already-completed phases:
 
 ---
 
+## Parallel Worktree Mode (`--parallel`)
+
+When `--parallel` is provided, the workflow runs inside an isolated git worktree.
+
+### Setup Phase
+
+1. Create worktree:
+   ```bash
+   python3 -c "
+   import sys; sys.path.insert(0, '$HOME/.claude/hooks')
+   from worktree_manager import create_worktree
+   path = create_worktree($ISSUE, 'feature/issue-$ISSUE-slug')
+   print(f'Worktree created: {path}')
+   "
+   ```
+
+2. If `WorktreeExistsError`:
+   - If `--resume` also provided: use the existing worktree path
+   - Otherwise: report error, suggest adding `--resume`
+
+3. Track worktree in state (use **repo root** as `project_dir`, NOT worktree CWD):
+   ```bash
+   REPO_ROOT=$(git rev-parse --show-toplevel)
+   python3 -c "
+   import sys; sys.path.insert(0, '$HOME/.claude/hooks')
+   from state_manager import update_phase
+   from pathlib import Path
+   update_phase(Path('$REPO_ROOT'), $ISSUE, '$BRANCH', 'SETUP', 'Created worktree', worktree_path='$WORKTREE_PATH')
+   "
+   ```
+
+### Agent Execution
+
+All Task() spawns set working directory to the worktree path.
+Artifacts are written to `{worktree}/.agents/outputs/`.
+
+**State tracking**: All `update_phase()` calls MUST use the **repo root** as `project_dir`, not the worktree CWD. Use `get_repo_root()` from `worktree_manager` to resolve the correct path:
+
+```bash
+REPO_ROOT=$(python3 -c "import sys; sys.path.insert(0, '$HOME/.claude/hooks'); from worktree_manager import get_repo_root; print(get_repo_root())")
+python3 -c "... update_phase(Path('$REPO_ROOT'), $ISSUE, '$BRANCH', '$PHASE', 'Starting $PHASE phase', worktree_path='$WORKTREE_PATH')"
+```
+
+### Auto-Detect Worktree on Resume
+
+When `--resume` is provided (with or without `--parallel`):
+1. Load worktree path from state: `get_worktree_for_issue(project_dir, issue)`
+2. If state has a `worktree_path`:
+   - If path still exists on disk: use it as CWD for remaining phases (auto-detect parallel mode)
+   - If path is gone (cleaned up): re-create worktree and restart from beginning
+3. If state has no `worktree_path`: resume normally (non-parallel mode)
+
+### Post-Workflow
+
+After PROVE completes, report worktree path for PR creation:
+```
+Worktree: .worktrees/issue-42/
+Next: cd .worktrees/issue-42 && /pr 42
+```
+Do NOT auto-remove worktree -- user may need it for PR revisions.
+
+---
+
 ## Process
 
 ### Step 0: Verify Issue
@@ -243,10 +309,31 @@ if [ -n "$CONFLICTS" ]; then
 fi
 ```
 
+Also check active worktrees for file overlap:
+
+```bash
+# Check worktrees for file conflicts (especially in --parallel mode)
+python3 -c "
+import sys, json
+sys.path.insert(0, '$HOME/.claude/hooks')
+from worktree_manager import check_file_conflicts
+planned = json.loads('$PLAN_FILES_JSON')  # list of planned file paths
+conflicts = check_file_conflicts(planned)
+if conflicts:
+    print('WARNING: File conflicts with active worktrees:')
+    for c in conflicts:
+        print(f'  {c[\"file\"]} (worktree: issue-{c[\"issue\"]})')
+    print('Consider serializing or waiting for the other issue to complete.')
+"
+```
+
 **Note**: This runs after MAP-PLAN produces the file list. If conflicts are found, warn but don't block — user decides whether to proceed.
 
 ### Step 2: Create Feature Branch
 
+If `--parallel`: Branch was already created by worktree setup. Skip this step.
+
+Otherwise:
 ```bash
 BRANCH=$(git branch --show-current)
 if [ "$BRANCH" = "main" ]; then
