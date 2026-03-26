@@ -17,5 +17,12 @@ venv/
 # Git worktrees (parallel orchestrate sessions)
 .worktrees/
 
+# macOS
+.DS_Store
+
+# Orchestrate artifacts and metrics (project-specific, not config)
+.agents/
+.claude/
+
 # Local-only settings (not symlinked)
 claude-config/settings.local.json
