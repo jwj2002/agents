@@ -47,6 +47,33 @@ After routing the primary workflow, identify work that Codex should handle. Code
 └──────────────────────────────────────────────────────────────┘
 ```
 
+### Codex Prompt Construction (MANDATORY for all delegations)
+
+When constructing `/codex:rescue` prompts, ALWAYS use XML prompt blocks from the Codex recipe library. Read these reference files on first delegation in a session:
+
+```bash
+# Read once per session, before first Codex delegation
+cat ~/.claude/plugins/cache/openai-codex/codex/*/skills/gpt-5-4-prompting/references/prompt-blocks.md
+cat ~/.claude/plugins/cache/openai-codex/codex/*/skills/gpt-5-4-prompting/references/codex-prompt-recipes.md
+```
+
+**Minimum blocks for every delegation prompt:**
+
+1. `<task>` — concrete job description with expected end state
+2. `<completeness_contract>` — don't stop at first plausible answer
+3. `<verification_loop>` — verify result before finalizing
+
+**Add based on task type:**
+
+| Task Type | Additional Blocks |
+|-----------|------------------|
+| Bug fix / implementation | `<action_safety>`, `<default_follow_through_policy>` |
+| Review / analysis | `<grounding_rules>`, `<dig_deeper_nudge>` |
+| Research | `<research_mode>`, `<citation_rules>` |
+| Write-capable tasks | `<action_safety>` (scope changes tightly) |
+
+**Never delegate with plain language alone.** Structured prompts produce dramatically better Codex output.
+
 ### Delegation Patterns
 
 #### Pattern 1: Parallel Fullstack Split
