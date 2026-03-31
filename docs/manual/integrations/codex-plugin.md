@@ -268,6 +268,113 @@ PROVE passes → /codex:adversarial-review --background
 2. `/codex:rescue --effort xhigh` (different model perspective)
 3. Escalate to human
 
+## Prompt Engineering for Codex Tasks
+
+The Codex plugin ships with a **prompt recipes library** — reusable XML blocks and end-to-end templates that dramatically improve task quality. These are used internally by the plugin and available for your own `/codex:rescue` prompts.
+
+### Prompt Blocks (Building Blocks)
+
+Wrap each block in its XML tag. Combine blocks to build task prompts.
+
+| Block | When to Use | What It Does |
+|-------|------------|-------------|
+| `<task>` | Every prompt | Defines the concrete job and expected end state |
+| `<structured_output_contract>` | Response shape matters | Forces specific output format (findings, evidence, next steps) |
+| `<compact_output_contract>` | Want concise prose | Prevents verbose scene-setting and recap |
+| `<default_follow_through_policy>` | Codex should act without asking | "Default to reasonable interpretation, keep going" |
+| `<completeness_contract>` | Multi-step tasks | "Don't stop at first plausible answer, check for follow-on fixes" |
+| `<verification_loop>` | Correctness matters | "Verify result against requirements before finalizing" |
+| `<missing_context_gating>` | Codex might guess | "Don't guess missing facts — retrieve or state what's unknown" |
+| `<grounding_rules>` | Review or analysis | "Ground every claim in context, label hypotheses" |
+| `<action_safety>` | Write-capable tasks | "Keep changes scoped, no unrelated refactors" |
+| `<dig_deeper_nudge>` | Adversarial review | "Check second-order failures, empty-state, retries, rollback" |
+
+### Ready-Made Recipes
+
+Copy the smallest recipe that fits, then trim what you don't need.
+
+#### Diagnosis Recipe
+
+```bash
+/codex:rescue "
+<task>
+Diagnose why tests in backend/auth/tests/ are failing.
+Use repository context and tools to identify root cause.
+</task>
+<compact_output_contract>
+Return: 1. root cause  2. evidence  3. smallest safe next step
+</compact_output_contract>
+<default_follow_through_policy>
+Keep going until root cause is confident. Only stop if missing detail changes correctness.
+</default_follow_through_policy>
+<verification_loop>
+Verify proposed root cause matches observed evidence before finalizing.
+</verification_loop>"
+```
+
+#### Narrow Fix Recipe
+
+```bash
+/codex:rescue --write "
+<task>
+Implement the smallest safe fix for the failing payment validation.
+Preserve existing behavior outside the failing path.
+</task>
+<completeness_contract>
+Resolve fully. Don't stop after identifying the issue without applying the fix.
+</completeness_contract>
+<verification_loop>
+Verify fix matches requirements and changed code is coherent.
+</verification_loop>
+<action_safety>
+Keep changes scoped. No unrelated refactors or cleanup.
+</action_safety>"
+```
+
+#### Root-Cause Review Recipe
+
+```bash
+/codex:adversarial-review "
+<task>
+Analyze this change for correctness and regression risks.
+</task>
+<grounding_rules>
+Ground every claim in repository context. Label inferences clearly.
+</grounding_rules>
+<dig_deeper_nudge>
+Check second-order failures, empty-state handling, retries, stale state, rollback paths.
+</dig_deeper_nudge>"
+```
+
+#### Research Recipe
+
+```bash
+/codex:rescue "
+<task>
+Research options for migrating from REST to GraphQL in this codebase.
+</task>
+<structured_output_contract>
+Return: 1. observed facts  2. recommendation  3. tradeoffs  4. open questions
+</structured_output_contract>
+<grounding_rules>
+Back claims with references to inspected sources. Prefer primary sources.
+</grounding_rules>"
+```
+
+### Anti-Patterns to Avoid
+
+| Anti-Pattern | Problem | Better Approach |
+|-------------|---------|-----------------|
+| `"Take a look at this"` | Vague, no direction | Use `<task>` with concrete job description |
+| `"Investigate and report back"` | No output format | Add `<structured_output_contract>` with expected fields |
+| `"Debug this failure"` | No follow-through | Add `<default_follow_through_policy>` to keep going |
+| `"Think harder"` | Reasoning ≠ better contracts | Add `<verification_loop>` for quality |
+| Mixing review + fix + docs in one prompt | Too many jobs | Run review first, then fix, then docs separately |
+| `"Tell me exactly why production failed"` | Demands certainty | Add `<grounding_rules>` to separate facts from inference |
+
+!!! tip "Applying recipes to your delegation patterns"
+    When delegating tasks via the [delegation patterns](#delegation-patterns) above, wrap your task description in the appropriate recipe. For example, the "Test Writing" pattern becomes much more reliable when you add `<completeness_contract>` (don't stop after happy path) and `<verification_loop>` (run the tests before finalizing).
+
 ## Review Gate
 
 !!! warning "Experimental Feature"
