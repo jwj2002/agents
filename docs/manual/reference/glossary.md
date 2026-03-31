@@ -1,10 +1,106 @@
 # Glossary
 
-!!! note "Coming Soon"
-    This section is under construction.
+Terms used throughout this documentation, defined in the context of the agentic engineering workflow.
 
-All terms defined — agent, artifact, CONTRACT, hook, MCP, pattern, rule, skill.
+## A
 
----
+**Agent**
+A specialized AI role with a defined purpose, input requirements, output format, and verification gates. Each agent in the pipeline (MAP, PLAN, PATCH, PROVE) performs one phase of work and produces a named artifact. Agent definitions are markdown files in `~/.claude/agents/`. All agents inherit from `_base.md` which provides pre-flight checklists, artifact naming, and the AGENT_RETURN directive.
 
-*Content will be consolidated from existing documentation in Phase 2/3.*
+**Artifact**
+A markdown file produced by an agent during the orchestrate pipeline. Named with the pattern `{agent}-{issue}-{mmddyy}.md` and stored in `.agents/outputs/`. Each agent validates that its required predecessor artifacts exist before starting. After PR merge, artifacts are moved to the `archive/` subdirectory.
+
+**Anti-Rationalization**
+A failure mode where AI agents declare a task complete when it is not. The `verify_completion.py` Stop hook combats this by checking for uncommitted changes and TODO/FIXME markers before allowing session completion.
+
+## C
+
+**Context Window**
+The agent's working memory --- everything it can "see" at once, including instructions, conversation history, file contents, and tool results. When the context fills up, older content gets compressed or dropped. Every token of instructions competes with code context.
+
+**CONTRACT**
+An agent phase (phase 2.5) that defines the interface between frontend and backend before implementation begins. Specifies endpoint schemas, enum VALUES, authentication requirements, and authorization patterns. Mandatory for fullstack issues.
+
+**CONTRACT-lite**
+An inline version of CONTRACT used for simple fullstack issues (0 new endpoints, 2 or fewer frontend files). Skips spawning a separate agent and documents the contract within the MAP-PLAN artifact instead.
+
+**Complexity Classification**
+The system for categorizing issues before routing them through the pipeline. TRIVIAL (1-2 files, obvious change), SIMPLE (3-5 files, clear pattern), or COMPLEX (6+ files, architectural decisions). The MAP agent determines complexity after investigating the codebase.
+
+## F
+
+**Failure Taxonomy**
+The set of 12 canonical root cause codes used to classify agent failures: VERIFICATION_GAP, ENUM_VALUE, COMPONENT_API, MULTI_MODEL, SQLITE_COMPAT, ACCESS_CONTROL, API_MISMATCH, MISSING_TEST, STRUCTURE_VIOLATION, SCOPE_CREEP, LINT_ERROR, and OTHER. Every failure is classified into exactly one code, enabling automated pattern analysis.
+
+## H
+
+**Hook**
+A Python script attached to a Claude Code lifecycle event. Hooks fire at specific moments --- SessionStart, PreCompact, Stop --- to manage state persistence, inject context, and enforce quality gates. Configured in `settings.json`.
+
+## L
+
+**Learning Loop**
+The continuous improvement cycle: `/orchestrate` executes issues, PROVE records outcomes to `metrics.jsonl` and `failures.jsonl`, `/learn` extracts patterns from failures, `/learn --apply` writes prevention checklists into agent files, and the next `/orchestrate` session loads the updated agents. This cycle runs weekly.
+
+## M
+
+**MAP**
+The investigation agent for COMPLEX issues (phase 1). Read-only --- it explores the codebase, reads specs, and documents component APIs, enum values, and file structures. Produces a 150-200 line artifact used by the PLAN agent.
+
+**MAP-PLAN**
+A combined investigation and planning phase for TRIVIAL and SIMPLE issues. Merges the MAP (investigation) and PLAN (architecture) phases into a single agent pass, reducing overhead for straightforward changes. Produces a 350-450 line artifact.
+
+**MCP (Model Context Protocol)**
+A protocol for providing AI agents with structured access to external data sources. In this system, the custom `vault-metrics` MCP server exposes five tools: `vault_status`, `vault_search`, `vault_dashboard`, `agent_metrics`, and `failure_patterns`.
+
+**Metrics**
+Structured outcome data recorded as JSON lines in `metrics.jsonl`. Each completed issue gets one record containing: issue number, date, status (PASS/BLOCKED), complexity, stack type, agents run, agent versions, root cause (if failed), and duration. Analyzed by `/learn` and `/metrics`.
+
+## O
+
+**Orchestrate**
+The primary workflow command (`/orchestrate`) that takes a GitHub issue number and executes a multi-agent pipeline: MAP, PLAN, CONTRACT, PATCH, PROVE. Supports flags for test planning (`--with-tests`), session resumption (`--resume`), and parallel execution (`--parallel`).
+
+## P
+
+**PATCH**
+The implementation agent (phase 3) and the only agent in the pipeline that modifies code. Reads the plan and contract artifacts, runs pre-flight checklists, implements changes, and runs pre-submission gates (lint, format, tests). If fullstack work is detected without a CONTRACT artifact, PATCH stops immediately.
+
+**Pattern**
+A documented failure mode with trigger conditions and prevention steps. Patterns are extracted from `failures.jsonl` by the `/learn` command and stored in tiered files: `patterns-critical.md` (always loaded, ~50 lines), `patterns-full.md` (loaded for COMPLEX issues, ~660 lines), and `core-patterns.md` (always-loaded rule, 12 lines).
+
+**PERSISTENT_STATE**
+A YAML file (`.agents/outputs/claude_checkpoints/PERSISTENT_STATE.yaml`) that tracks the current workflow state: active issue, branch, phase, completed phases, and worktree path. Managed by `state_manager.py` and used by hooks, orchestrate, `--resume`, and `--parallel`.
+
+**PROVE**
+The final agent phase (phase 4) that verifies implementation, records outcomes to `metrics.jsonl` and `failures.jsonl`, and classifies any failures by root cause code. Uses multi-level verification: EXISTS, SUBSTANTIVE, WIRED, FUNCTIONAL.
+
+**PROVE-lite**
+A reduced verification pass for TRIVIAL issues. Runs only the basic verification gates (file exists, lint passes, tests pass) without the full multi-level review that PROVE performs on SIMPLE and COMPLEX issues.
+
+**Prompt Template**
+A markdown file with variable placeholders used to generate agent spawn prompts. The shared template at `templates/agent-prompt.md` accepts variables like `{AGENT_ROLE}`, `{ISSUE_NUMBER}`, and `{PREDECESSOR_ARTIFACTS}` to produce consistent prompts across all agents.
+
+## R
+
+**Rule**
+A markdown file in `~/.claude/rules/` that provides instructions to agents. Rules can be always-loaded (`alwaysApply: true`) or conditionally loaded based on file path globs. Rules encode failure prevention, architectural patterns, and workflow constraints.
+
+## S
+
+**Skill**
+A multi-step workflow defined in `~/.claude/skills/`. Skills are more complex than single commands and include their own reference documentation. Current skills: `orchestrate` (multi-agent pipeline), `test-plan` (test matrix generation), and `spec-review` (spec analysis and issue creation).
+
+**Slash Command**
+A user-invokable command defined as a markdown file in `~/.claude/commands/`. Examples: `/orchestrate`, `/pr`, `/learn`, `/metrics`, `/scaffold-project`. Commands encode workflow logic and can spawn agents, create PRs, or analyze data.
+
+**State Manager**
+The centralized Python module (`hooks/state_manager.py`) that handles all reads and writes to `PERSISTENT_STATE.yaml`. Used by orchestrate (update phase), precompact hook (save transcript state), sessionstart hook (restore context), and the `--resume`/`--parallel` flags.
+
+## W
+
+**Worktree**
+A git worktree created for parallel issue processing. The `--parallel` flag on `/orchestrate` creates an isolated worktree at `.worktrees/issue-{N}/` branched from `origin/main`. Each worktree has its own files, git index, and artifacts. Managed by `worktree_manager.py`.
+
+**Worktree Manager**
+The Python module (`hooks/worktree_manager.py`) that handles git worktree lifecycle: creation, branch setup, file overlap detection, and cleanup after PR merge. Called by `/orchestrate --parallel` and `/pr`.

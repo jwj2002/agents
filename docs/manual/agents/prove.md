@@ -1,10 +1,202 @@
 # PROVE Agent
 
-!!! note "Coming Soon"
-    This section is under construction.
+**Version**: 1.3 | **Phase**: 4 | **Role**: Verifier + Outcome Recorder
 
-Verification levels (EXISTS, SUBSTANTIVE, WIRED, FUNCTIONAL) and outcome recording.
+PROVE is the final agent in the pipeline. It verifies that PATCH's implementation actually works, checks every acceptance criterion, records the outcome to structured data files, and classifies any failures by root cause. PROVE never fixes code -- it only reports.
 
----
+## Artifact Validation
 
-*Content will be consolidated from existing documentation in Phase 2/3.*
+PROVE requires the PATCH artifact to exist:
+
+```bash
+ls .agents/outputs/patch-${ISSUE}-*.md
+```
+
+If the PATCH artifact is missing, PROVE stops with `BLOCKED: PATCH artifact not found`.
+
+## Four Verification Levels
+
+PROVE applies verification in layers, from basic existence checks through functional testing.
+
+### Level 1: EXISTS
+
+Verify every file listed in the PATCH artifact exists on disk.
+
+```bash
+for f in <files_from_patch>; do
+  [ -f "$f" ] || echo "MISSING: $f"
+done
+```
+
+**Fail condition**: Any file from the PATCH artifact is missing.
+
+### Level 2: SUBSTANTIVE
+
+Verify that no stubs, placeholders, or incomplete implementations remain in modified files.
+
+```bash
+# Backend stubs
+grep -rn "pass$\|return False$\|return \[\]$\|raise NotImplementedError" <files>
+
+# Frontend stubs
+grep -rn "onClick={() => {}}\|return null$" <files>
+
+# Universal markers
+grep -rn "TODO\|FIXME\|HACK\|PLACEHOLDER" <files>
+```
+
+**Fail condition**: Any stub, placeholder, or marker found in new or modified files.
+
+### Level 3: WIRED
+
+Verify that new code is actually integrated into the application, not sitting in isolated files.
+
+Checks include:
+
+- New components are imported somewhere
+- New endpoints are called from the frontend
+- New repositories are injected into services
+- Enum values in frontend match backend VALUES (ENUM_VALUE check)
+- Component prop usage matches actual API (COMPONENT_API check)
+
+**Fail condition**: Isolated artifacts with no integration, or mismatched enum values or props.
+
+### Level 4: FUNCTIONAL
+
+Run the standard verification gates:
+
+| Check | Command | Pass Criteria |
+|-------|---------|---------------|
+| Backend lint | `ruff check .` | No errors |
+| Backend tests | `pytest -q` | All pass |
+| Frontend lint | `npm run lint` | No errors |
+| Frontend build | `npm run build` | Success |
+
+## Focused Test Strategy
+
+PROVE runs tests in two passes for fast feedback:
+
+**Pass 1 -- Focused** (affected modules only):
+
+```bash
+MODULES=$(git diff --name-only HEAD~1 -- backend/ \
+  | grep -oP 'backend/backend/\K[^/]+' | sort -u)
+for mod in $MODULES; do
+  pytest "backend/${mod}/tests/" -q
+done
+```
+
+**Pass 2 -- Full suite** (safety net):
+
+```bash
+cd backend && pytest -q
+cd frontend && npm run lint && npm run build
+```
+
+Both results are reported in the artifact:
+
+```
+Focused: backend/accounts/tests/ -- 12/12 passing (2.1s)
+Full suite: pytest -q -- 45/45 passing (8.3s)
+```
+
+!!! tip "When to Skip Focused Mode"
+    Skip the focused pass for fullstack changes, refactoring, cross-module changes, or codebases with fewer than 50 total tests where the full suite is fast enough.
+
+## Acceptance Criteria Checking
+
+PROVE references the acceptance criteria from the MAP-PLAN or PLAN artifact and checks each one:
+
+| Criterion | Status |
+|-----------|--------|
+| New endpoint returns 201 on success | PASS |
+| Validation rejects empty email | PASS |
+| Frontend form submits to correct URL | FAIL -- sends to /api/members instead of /api/accounts/{id}/members |
+
+## Status Determination
+
+| Condition | Status |
+|-----------|--------|
+| All gates pass, all criteria met | **PASS** |
+| Any verification command fails | **BLOCKED** |
+| Any acceptance criterion unmet | **BLOCKED** |
+| Any pattern check fails (enum, component API) | **BLOCKED** |
+
+## Outcome Recording
+
+### On PASS
+
+Append to `.claude/memory/metrics.jsonl`:
+
+```json
+{
+  "issue": 184,
+  "date": "2026-03-26",
+  "status": "PASS",
+  "complexity": "SIMPLE",
+  "stack": "backend",
+  "agents_run": ["MAP-PLAN", "PATCH", "PROVE"],
+  "agent_versions": {"map-plan": "1.0", "patch": "1.2", "prove": "1.3"}
+}
+```
+
+### On BLOCKED
+
+Append to both `.claude/memory/failures.jsonl` and `.claude/memory/metrics.jsonl`:
+
+**failures.jsonl** records the specific failure:
+
+```json
+{
+  "issue": 184,
+  "agent": "PATCH",
+  "root_cause": "ENUM_VALUE",
+  "details": "Frontend used CO_OWNER instead of CO-OWNER",
+  "fix": "Changed string literal to match backend enum VALUE",
+  "prevention": "MAP should document enum VALUES explicitly"
+}
+```
+
+**metrics.jsonl** records the outcome:
+
+```json
+{
+  "issue": 184,
+  "status": "BLOCKED",
+  "root_cause": "ENUM_VALUE",
+  "blocking_agent": "PROVE"
+}
+```
+
+These records feed the self-learning loop: `/learn` clusters failures by root cause, extracts prevention patterns, and updates agent definitions.
+
+## Root Cause Classification
+
+When recording a BLOCKED outcome, PROVE classifies the failure using the canonical root cause enum. The three most common codes are:
+
+| Code | Frequency | Description |
+|------|-----------|-------------|
+| `VERIFICATION_GAP` | 63% | Assumptions not verified by reading code |
+| `ENUM_VALUE` | 26% | Used enum NAME instead of VALUE |
+| `COMPONENT_API` | 17% | Wrong props or hook usage |
+
+See [Agent Overview](overview.md) for the full list of 11 root cause codes.
+
+## PROVE-lite
+
+For TRIVIAL issues, PROVE runs in a lightweight mode:
+
+- Runs Level 4 (FUNCTIONAL) gates only
+- Skips Level 2 (SUBSTANTIVE) and Level 3 (WIRED) checks
+- Still records the outcome to `metrics.jsonl`
+
+## When BLOCKED
+
+PROVE includes four pieces of information when reporting a failure:
+
+1. **Root cause classification** from the canonical enum
+2. **Exact error output** from the failing command or check
+3. **Unblock steps** describing what needs to change
+4. **Prevention recommendation** for future runs
+
+PROVE never attempts to fix the problem. It returns to the orchestrator with its findings.

@@ -1,10 +1,136 @@
-# Agent Overview
+# Agent System Overview
 
-!!! note "Coming Soon"
-    This section is under construction.
+The orchestrate pipeline uses specialized agents that execute in sequence, each producing a named artifact consumed by the next. Only one agent writes code. The rest investigate, plan, validate, and verify.
 
-Agent roles, separation of concerns, pipeline flow, artifact chains.
+## Agent Roles
 
----
+| Agent | Phase | Role | Read-Only? | Target / Max Lines |
+|-------|-------|------|------------|-------------------|
+| MAP | 1 | Investigator (COMPLEX only) | Yes | 150 / 200 |
+| MAP-PLAN | 1+2 | Investigator + Architect (TRIVIAL/SIMPLE) | Yes | 400 / 500 |
+| PLAN | 2 | Architect (COMPLEX only) | Yes | 400 / 500 |
+| TEST-PLANNER | 2 | Test matrix designer | Yes | 250 / 350 |
+| CONTRACT | 2.5 | Interface designer (fullstack) | Yes | 200 / 300 |
+| PLAN-CHECK | 2.8 | Plan validator | Yes | 80 / 120 |
+| PATCH | 3 | Implementer | **No** | 300 / 400 |
+| PROVE | 4 | Verifier + outcome recorder | Metrics only | 250 / 350 |
 
-*Content will be consolidated from existing documentation in Phase 2/3.*
+!!! warning "Separation of Concerns"
+    Only PATCH writes code. Only PROVE records metrics. Investigation agents must never start implementing. Verification agents must never start fixing.
+
+## Pipeline Flow
+
+The pipeline route depends on complexity classification:
+
+```
+TRIVIAL:   MAP-PLAN ─────────────────────────────── PATCH ── PROVE-lite
+SIMPLE:    MAP-PLAN ── [TEST-PLANNER] ── CONTRACT* ── PLAN-CHECK ── PATCH ── PROVE
+COMPLEX:   MAP ── PLAN ── [TEST-PLANNER] ── CONTRACT* ── PLAN-CHECK ── PATCH ── PROVE
+
+* = mandatory for fullstack only
+[ ] = optional, enabled with --with-tests
+```
+
+```
+                  +----------------+
+                  | GitHub Issue   |
+                  +-------+--------+
+                          |
+                +---------+---------+
+                | Classify Complexity|
+                +---------+---------+
+           +----------+----------+----------+
+           v          v                     v
+       TRIVIAL     SIMPLE               COMPLEX
+       1-2 files   3-5 files            6+ files
+           |          |                     |
+       MAP-PLAN   MAP-PLAN             MAP -> PLAN
+           |          |                     |
+           |     CONTRACT* / PLAN-CHECK  CONTRACT / PLAN-CHECK
+           |          |                     |
+        PATCH      PATCH                 PATCH
+           |          |                     |
+      PROVE-lite   PROVE                 PROVE
+```
+
+## Artifact Chains and Validation
+
+Each agent produces a named artifact following the pattern `{agent}-{issue}-{mmddyy}.md` stored in `.agents/outputs/`. Every agent validates that its required predecessor artifact exists before starting work.
+
+| Agent | Required Predecessor | Stops If Missing? |
+|-------|---------------------|-------------------|
+| MAP / MAP-PLAN | None (first agent) | N/A |
+| PLAN | MAP artifact | Yes |
+| TEST-PLANNER | MAP or MAP-PLAN | Yes |
+| CONTRACT | PLAN or MAP-PLAN | Yes |
+| PLAN-CHECK | PLAN or MAP-PLAN; CONTRACT if fullstack | Yes |
+| PATCH | PLAN or MAP-PLAN; CONTRACT if fullstack; PLAN-CHECK | Yes |
+| PROVE | PATCH artifact | Yes |
+
+```
+map-plan-184-030826.md
+    |
+    +-- contract-184-030826.md (if fullstack)
+    |
+    +-- plan-check-184-030826.md
+            |
+            +-- patch-184-030826.md
+                    |
+                    +-- prove-184-030826.md
+```
+
+!!! note "Blocking on Missing Artifacts"
+    If PATCH detects fullstack work but cannot find a CONTRACT artifact, it stops immediately with `BLOCKED: CONTRACT artifact required for fullstack`. No assumptions, no proceeding without explicit input.
+
+## Shared Behaviors from _base.md
+
+All agents inherit from `_base.md` (v3.0), which provides:
+
+**Pre-flight checks** -- Before any work begins, agents load learned failure patterns (via MCP `failure_patterns()` or file fallback), search for similar past artifacts, and verify project constraints.
+
+**Artifact naming** -- `{agent}-{issue}-{mmddyy}.md` in `.agents/outputs/`.
+
+**Size compliance** -- Each agent has target and max line counts. Artifacts over max must be compressed before submission using a priority checklist: replace code quotes with line references, remove restated acceptance criteria, consolidate duplicates, remove appendices.
+
+**Verification commands** -- Standardized gates for backend (`ruff check . && pytest -q`) and frontend (`npm run lint && npm run build`).
+
+**AGENT_RETURN directive** -- Every agent must end output with `AGENT_RETURN: {filename}` to signal completion to the orchestrator.
+
+**Failure context awareness** -- When spawned with a `## Prior Failure` block, the agent applies the prevention recommendation before starting and explicitly verifies the prior failure point is addressed.
+
+**Escalation protocol** -- Agents stop and report to the orchestrator if complexity seems wrong, information is missing, constraints would be violated, or scope is ambiguous.
+
+## Agent Versioning
+
+All agents include `version: X.Y` in their YAML frontmatter.
+
+| Change Type | Version Bump | Examples |
+|-------------|-------------|----------|
+| Minor (1.0 to 1.1) | Pattern additions, wording changes | Add new enum check reminder |
+| Major (1.0 to 2.0) | Restructure, new sections, workflow changes | Add Mandatory Verification Protocol |
+
+Versions are recorded in `metrics.jsonl` via the `agent_versions` field, enabling correlation between agent versions and success rates through the `/metrics` command.
+
+```json
+"agent_versions": {"map-plan": "1.0", "patch": "1.2", "prove": "1.3"}
+```
+
+## Root Cause Classification
+
+When failures occur, they are classified using a canonical enum of 11 codes:
+
+| Code | Description |
+|------|-------------|
+| `ENUM_VALUE` | Used enum NAME instead of VALUE |
+| `COMPONENT_API` | Wrong props or hook usage |
+| `MULTI_MODEL` | Forgot model relationship |
+| `API_MISMATCH` | Frontend/backend contract violation |
+| `ACCESS_CONTROL` | Missing or wrong permission check |
+| `MISSING_TEST` | Untested code path |
+| `SQLITE_COMPAT` | PostgreSQL-only feature used |
+| `STRUCTURE_VIOLATION` | Violated project constraints |
+| `SCOPE_CREEP` | Changes beyond issue scope |
+| `VERIFICATION_GAP` | Assumptions not verified by reading code |
+| `OTHER` | Document specifics in details field |
+
+These codes feed back into the learning loop: `/learn` clusters failures by root cause, extracts prevention patterns, and updates agent definitions.
