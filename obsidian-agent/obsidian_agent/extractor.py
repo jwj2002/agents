@@ -47,6 +47,11 @@ class SessionExtract:
     github_refs: list[str] = field(default_factory=list)  # Issue/PR numbers
     knowledge: list[str] = field(default_factory=list)  # [CAPTURE] tagged items
     notes: list[str] = field(default_factory=list)  # Freeform context worth capturing
+    # Metadata (preserved from existing STATUS.md frontmatter, not LLM-extracted)
+    meta_status: str = "active"  # active | maintenance | paused | archived
+    health: str = "on-track"  # on-track | at-risk | blocked
+    priority: str = "P2"  # P0 | P1 | P2
+    category: str = "work"  # work | personal
 
 
 def extract_captures(conversation_text: str) -> list[str]:

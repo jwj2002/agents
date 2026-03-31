@@ -62,8 +62,16 @@ def get_session_log_by_project(config: Config, project_path: str) -> Path:
     return _most_recent_jsonl(folder)
 
 
-def list_recent_projects(config: Config, limit: int = 10) -> list[tuple[str, Path]]:
+def list_recent_projects(
+    config: Config, limit: int = 10, since_timestamp: float = 0.0
+) -> list[tuple[str, Path]]:
     """List recently active projects by most-recent session mtime.
+
+    Args:
+        config: Agent configuration.
+        limit: Maximum number of projects to return.
+        since_timestamp: Only include projects with sessions modified after
+            this Unix timestamp. 0.0 means no filtering.
 
     Returns list of (project_name, most_recent_log_path) tuples.
     """
@@ -75,6 +83,12 @@ def list_recent_projects(config: Config, limit: int = 10) -> list[tuple[str, Pat
         if not jsonl_files:
             continue
         latest = max(jsonl_files, key=lambda p: p.stat().st_mtime)
+        mtime = latest.stat().st_mtime
+
+        # Skip if older than threshold
+        if since_timestamp and mtime < since_timestamp:
+            continue
+
         # Decode folder name back to project name
         # e.g., -home-jjob-projects-VE-RAG-System → VE-RAG-System
         name = folder.name.rsplit("-", 1)[-1] if "-" in folder.name else folder.name
@@ -82,7 +96,7 @@ def list_recent_projects(config: Config, limit: int = 10) -> list[tuple[str, Pat
         decoded = folder.name.replace("-", "/")
         if decoded.startswith("/"):
             name = Path(decoded).name
-        projects.append((name, latest, latest.stat().st_mtime))
+        projects.append((name, latest, mtime))
 
     projects.sort(key=lambda t: t[2], reverse=True)
     return [(name, path) for name, path, _ in projects[:limit]]

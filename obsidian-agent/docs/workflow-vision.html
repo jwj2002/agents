@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Obsidian Agent — Workflow Vision</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e2e4e9;
+    --muted: #8b8fa3;
+    --accent-blue: #5b9cf6;
+    --accent-green: #4ade80;
+    --accent-amber: #fbbf24;
+    --accent-purple: #a78bfa;
+    --accent-red: #f87171;
+    --claude-bg: #d4a574;
+    --python-bg: #5b9cf6;
+    --user-bg: #4ade80;
+    --obsidian-bg: #a78bfa;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+  }
+
+  .header {
+    text-align: center;
+    margin-bottom: 3rem;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .header h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .header p {
+    color: var(--muted);
+    font-size: 1.1rem;
+  }
+
+  .legend {
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+    margin-bottom: 3rem;
+    flex-wrap: wrap;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+  }
+
+  .legend-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+  }
+
+  .dot-claude { background: var(--claude-bg); }
+  .dot-python { background: var(--python-bg); }
+  .dot-user { background: var(--user-bg); }
+  .dot-obsidian { background: var(--obsidian-bg); }
+  .dot-cron { background: var(--accent-amber); }
+
+  .workflow-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2rem;
+    margin-bottom: 2.5rem;
+    overflow-x: auto;
+  }
+
+  .workflow-section h2 {
+    font-size: 1.5rem;
+    margin-bottom: 0.3rem;
+  }
+
+  .workflow-section .subtitle {
+    color: var(--muted);
+    font-size: 0.95rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+  }
+
+  .badge-auto { background: rgba(91,156,246,0.2); color: var(--accent-blue); }
+  .badge-manual { background: rgba(74,222,128,0.2); color: var(--accent-green); }
+  .badge-scheduled { background: rgba(251,191,36,0.2); color: var(--accent-amber); }
+
+  .mermaid {
+    display: flex;
+    justify-content: center;
+    margin: 1rem 0;
+  }
+
+  .mermaid svg {
+    max-width: 100%;
+  }
+
+  .timing-bar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.5rem;
+    background: rgba(91,156,246,0.06);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-top: 1.5rem;
+    font-size: 0.9rem;
+  }
+
+  .timing-bar .clock {
+    font-size: 1.3rem;
+    flex-shrink: 0;
+  }
+
+  .timing-bar strong {
+    color: var(--accent-amber);
+  }
+
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1.5rem;
+    margin-top: 2rem;
+  }
+
+  .summary-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    text-align: center;
+  }
+
+  .summary-card h3 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .summary-card .effort {
+    font-size: 2rem;
+    font-weight: 700;
+  }
+
+  .summary-card .effort-label {
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+
+  .effort-user { color: var(--accent-green); }
+  .effort-auto { color: var(--accent-blue); }
+
+  .outputs-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+
+  .output-tag {
+    padding: 4px 12px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 500;
+  }
+
+  .output-auto {
+    background: rgba(91,156,246,0.15);
+    color: var(--accent-blue);
+    border: 1px solid rgba(91,156,246,0.3);
+  }
+
+  .output-manual {
+    background: rgba(74,222,128,0.15);
+    color: var(--accent-green);
+    border: 1px solid rgba(74,222,128,0.3);
+  }
+
+  .section-divider {
+    text-align: center;
+    margin: 3rem 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+    position: relative;
+  }
+
+  .section-divider::before,
+  .section-divider::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    width: calc(50% - 80px);
+    height: 1px;
+    background: var(--border);
+  }
+
+  .section-divider::before { left: 0; }
+  .section-divider::after { right: 0; }
+
+  .data-flow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    margin: 2rem 0;
+    flex-wrap: wrap;
+  }
+
+  .flow-node {
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .flow-arrow {
+    color: var(--muted);
+    font-size: 1.2rem;
+  }
+
+  .fn-session { background: rgba(212,165,116,0.2); color: var(--claude-bg); border: 1px solid rgba(212,165,116,0.4); }
+  .fn-daily { background: rgba(91,156,246,0.15); color: var(--accent-blue); border: 1px solid rgba(91,156,246,0.3); }
+  .fn-weekly { background: rgba(167,139,250,0.15); color: var(--accent-purple); border: 1px solid rgba(167,139,250,0.3); }
+  .fn-monthly { background: rgba(251,191,36,0.15); color: var(--accent-amber); border: 1px solid rgba(251,191,36,0.3); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Obsidian Agent Workflow Vision</h1>
+  <p>Phases 1 & 2 — Automated multi-project tracking for work & personal vaults</p>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot dot-claude"></div> Claude Code (generates session data)</div>
+  <div class="legend-item"><div class="legend-dot dot-python"></div> Python / obsidian-agent (automated)</div>
+  <div class="legend-item"><div class="legend-dot" style="background: var(--accent-amber)"></div> Cron (scheduled trigger)</div>
+  <div class="legend-item"><div class="legend-dot dot-obsidian"></div> Obsidian Vault (output)</div>
+  <div class="legend-item"><div class="legend-dot dot-user"></div> You (manual review)</div>
+</div>
+
+<!-- DATA FLOW OVERVIEW -->
+<div class="data-flow">
+  <div class="flow-node fn-session">Session Logs</div>
+  <div class="flow-arrow">&rarr;</div>
+  <div class="flow-node fn-daily">Daily Entries</div>
+  <div class="flow-arrow">&rarr;</div>
+  <div class="flow-node fn-weekly">Weekly Rollups</div>
+  <div class="flow-arrow">&rarr;</div>
+  <div class="flow-node fn-monthly">Monthly Summaries</div>
+</div>
+
+<!-- SESSION WORKFLOW -->
+<div class="workflow-section">
+  <h2>Session Workflow <span class="badge badge-auto">Automatic</span></h2>
+  <p class="subtitle">Triggered every time you finish a Claude Code session — captures what happened</p>
+
+  <div class="mermaid">
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#2a2d3a', 'primaryTextColor': '#e2e4e9', 'primaryBorderColor': '#5b9cf6', 'lineColor': '#5b9cf6', 'secondaryColor': '#1a1d27', 'tertiaryColor': '#1a1d27', 'edgeLabelBackground': '#1a1d27', 'clusterBkg': '#1a1d27', 'clusterBorder': '#2a2d3a' }}}%%
+flowchart LR
+    A["<b>You</b><br/>Work in Claude Code<br/>on any project"]
+    B["<b>Claude Code</b><br/>Writes session log<br/>.jsonl to ~/.claude/"]
+    C["<b>obsidian-agent</b><br/>Parses session log<br/>+ extracts state via Claude Haiku"]
+    D["<b>Git Helper</b><br/>Extracts today's commits<br/>(deterministic, no LLM)"]
+    E["<b>Vault Writer</b><br/>Writes to Obsidian vault"]
+    F["STATUS.md<br/><i>overwritten</i>"]
+    G["Daily Log<br/><i>appended</i>"]
+    H["DASHBOARD.md<br/><i>rebuilt</i>"]
+
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+    E --> F
+    E --> G
+    E --> H
+
+    style A fill:#1a3a1a,stroke:#4ade80,color:#e2e4e9
+    style B fill:#3a2a1a,stroke:#d4a574,color:#e2e4e9
+    style C fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style D fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style E fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style F fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style G fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style H fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+  </div>
+
+  <div class="timing-bar">
+    <span class="clock">&#9201;</span>
+    <span><strong>Trigger:</strong> Nightly cron at 11:00 PM &mdash; runs <code>--all-projects</code> to catch every session from the day. Your effort: <strong>zero</strong>.</span>
+  </div>
+</div>
+
+<!-- DAILY WORKFLOW -->
+<div class="workflow-section">
+  <h2>Daily Workflow <span class="badge badge-scheduled">Scheduled + 2 min review</span></h2>
+  <p class="subtitle">Consolidates all sessions into one daily view per project + cross-project rollup</p>
+
+  <div class="mermaid">
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#2a2d3a', 'primaryTextColor': '#e2e4e9', 'primaryBorderColor': '#5b9cf6', 'lineColor': '#5b9cf6', 'secondaryColor': '#1a1d27', 'tertiaryColor': '#1a1d27', 'edgeLabelBackground': '#1a1d27', 'clusterBkg': '#1a1d27', 'clusterBorder': '#2a2d3a' }}}%%
+flowchart TD
+    subgraph CRON ["Cron — 11:00 PM nightly"]
+        direction TB
+        A1["<b>obsidian-agent --all-projects</b><br/>Process every active project"]
+        A2["For each project:<br/>Parse latest session<br/>Extract state via Haiku<br/>Inject git commits"]
+        A3["Write per-project files:<br/>STATUS.md + Daily Log entry"]
+        A4["<b>obsidian-agent --daily-rollup</b><br/>Aggregate all project dailies<br/>into cross-project daily"]
+        A5["Rebuild DASHBOARD.md<br/>from all STATUS.md files"]
+
+        A1 --> A2 --> A3 --> A4 --> A5
+    end
+
+    subgraph VAULT ["Obsidian Vault Output"]
+        direction TB
+        V1["Projects/DocketIQ/STATUS.md"]
+        V2["Projects/Temper/STATUS.md"]
+        V3["Projects/DocketIQ/Log/Daily/2026-03-30.md"]
+        V4["Projects/Temper/Log/Daily/2026-03-30.md"]
+        V5["<b>Rollups/Daily/2026-03-30.md</b><br/><i>NEW — cross-project daily</i>"]
+        V6["DASHBOARD.md"]
+    end
+
+    subgraph YOU ["You — Next Morning (2 min)"]
+        direction TB
+        U1["Open Obsidian"]
+        U2["Scan DASHBOARD.md<br/><i>All projects at a glance</i>"]
+        U3["Check today's daily rollup<br/><i>What happened yesterday</i>"]
+        U4["Drill into any project<br/>STATUS.md if needed"]
+    end
+
+    A3 --> V1
+    A3 --> V2
+    A3 --> V3
+    A3 --> V4
+    A4 --> V5
+    A5 --> V6
+    V6 --> U1
+    U1 --> U2 --> U3 --> U4
+
+    style A1 fill:#2a2a1a,stroke:#fbbf24,color:#e2e4e9
+    style A2 fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style A3 fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style A4 fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style A5 fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style V1 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style V2 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style V3 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style V4 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style V5 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style V6 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style U1 fill:#1a3a1a,stroke:#4ade80,color:#e2e4e9
+    style U2 fill:#1a3a1a,stroke:#4ade80,color:#e2e4e9
+    style U3 fill:#1a3a1a,stroke:#4ade80,color:#e2e4e9
+    style U4 fill:#1a3a1a,stroke:#4ade80,color:#e2e4e9
+  </div>
+
+  <div class="timing-bar">
+    <span class="clock">&#9201;</span>
+    <span><strong>Your effort:</strong> ~2 min morning scan. Everything else is automated.</span>
+  </div>
+</div>
+
+<!-- WEEKLY WORKFLOW -->
+<div class="workflow-section">
+  <h2>Weekly Workflow <span class="badge badge-scheduled">Scheduled + 5 min review</span></h2>
+  <p class="subtitle">Sunday night auto-generates rollups from daily logs — you review Monday morning</p>
+
+  <div class="mermaid">
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#2a2d3a', 'primaryTextColor': '#e2e4e9', 'primaryBorderColor': '#5b9cf6', 'lineColor': '#5b9cf6', 'secondaryColor': '#1a1d27', 'tertiaryColor': '#1a1d27', 'edgeLabelBackground': '#1a1d27', 'clusterBkg': '#1a1d27', 'clusterBorder': '#2a2d3a' }}}%%
+flowchart TD
+    subgraph CRON ["Cron — Sunday 11:30 PM"]
+        direction TB
+        W1["<b>obsidian-agent --weekly</b><br/>For each project with daily logs this week"]
+        W2["Aggregate daily logs<br/>Mon-Sun into per-project weekly"]
+        W3["Deduplicate completed items,<br/>decisions, blockers, refs"]
+        W4["<b>obsidian-agent --weekly-rollup</b><br/>Generate cross-project weekly"]
+
+        W1 --> W2 --> W3 --> W4
+    end
+
+    subgraph OUTPUT ["Vault Output"]
+        direction TB
+        O1["Projects/DocketIQ/Log/Weekly/2026-W13.md"]
+        O2["Projects/Temper/Log/Weekly/2026-W13.md"]
+        O3["<b>Rollups/Weekly/2026-W13.md</b><br/><i>Cross-project weekly</i>"]
+    end
+
+    subgraph REVIEW ["You — Monday Morning (5 min)"]
+        direction TB
+        R1["Open cross-project weekly<br/><i>Rollups/Weekly/2026-W13.md</i>"]
+        R2["Review: highlights,<br/>carried blockers, decisions"]
+        R3["Adjust priorities for<br/>the coming week"]
+        R4["Optional: share weekly<br/>with stakeholders"]
+    end
+
+    W3 --> O1
+    W3 --> O2
+    W4 --> O3
+    O3 --> R1
+    R1 --> R2 --> R3 --> R4
+
+    style W1 fill:#2a2a1a,stroke:#fbbf24,color:#e2e4e9
+    style W2 fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style W3 fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style W4 fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style O1 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style O2 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style O3 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style R1 fill:#1a3a1a,stroke:#4ade80,color:#e2e4e9
+    style R2 fill:#1a3a1a,stroke:#4ade80,color:#e2e4e9
+    style R3 fill:#1a3a1a,stroke:#4ade80,color:#e2e4e9
+    style R4 fill:#1a3a1a,stroke:#4ade80,color:#e2e4e9
+  </div>
+
+  <div class="timing-bar">
+    <span class="clock">&#9201;</span>
+    <span><strong>Your effort:</strong> ~5 min Monday review. Optionally forward to stakeholders. Generation is fully automated.</span>
+  </div>
+</div>
+
+<!-- MONTHLY WORKFLOW -->
+<div class="workflow-section">
+  <h2>Monthly Workflow <span class="badge badge-scheduled">Scheduled + 10 min review</span></h2>
+  <p class="subtitle">Last day of month — portfolio health check with milestones, risks, and metrics</p>
+
+  <div class="mermaid">
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#2a2d3a', 'primaryTextColor': '#e2e4e9', 'primaryBorderColor': '#5b9cf6', 'lineColor': '#5b9cf6', 'secondaryColor': '#1a1d27', 'tertiaryColor': '#1a1d27', 'edgeLabelBackground': '#1a1d27', 'clusterBkg': '#1a1d27', 'clusterBorder': '#2a2d3a' }}}%%
+flowchart TD
+    subgraph CRON ["Cron — Last day of month, 11:30 PM"]
+        direction TB
+        M1["<b>obsidian-agent --monthly</b><br/>Aggregate all weekly rollups for the month"]
+        M2["Per-project monthly:<br/>Milestones hit, decisions,<br/>blockers resolved/carried"]
+        M3["<b>Cross-project monthly</b><br/>Portfolio status table<br/>+ risk matrix + metrics"]
+    end
+
+    subgraph OUTPUT ["Vault Output"]
+        direction TB
+        P1["Projects/DocketIQ/Log/Monthly/2026-03.md"]
+        P2["Projects/Temper/Log/Monthly/2026-03.md"]
+        P3["<b>Rollups/Monthly/2026-03.md</b><br/><i>Portfolio summary</i>"]
+    end
+
+    subgraph REVIEW ["You — 1st of Month (10 min)"]
+        direction TB
+        Q1["Open monthly portfolio<br/><i>Rollups/Monthly/2026-03.md</i>"]
+        Q2["Review project health<br/>on-track / at-risk / blocked"]
+        Q3["Check milestones:<br/>hit vs missed vs upcoming"]
+        Q4["Identify risks &<br/>adjust roadmap"]
+        Q5["Optional: use for<br/>client/stakeholder reporting"]
+    end
+
+    M1 --> M2 --> M3
+    M2 --> P1
+    M2 --> P2
+    M3 --> P3
+    P3 --> Q1
+    Q1 --> Q2 --> Q3 --> Q4 --> Q5
+
+    style M1 fill:#2a2a1a,stroke:#fbbf24,color:#e2e4e9
+    style M2 fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style M3 fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style P1 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style P2 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style P3 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style Q1 fill:#1a3a1a,stroke:#4ade80,color:#e2e4e9
+    style Q2 fill:#1a3a1a,stroke:#4ade80,color:#e2e4e9
+    style Q3 fill:#1a3a1a,stroke:#4ade80,color:#e2e4e9
+    style Q4 fill:#1a3a1a,stroke:#4ade80,color:#e2e4e9
+    style Q5 fill:#1a3a1a,stroke:#4ade80,color:#e2e4e9
+  </div>
+
+  <div class="timing-bar">
+    <span class="clock">&#9201;</span>
+    <span><strong>Your effort:</strong> ~10 min on the 1st. This is your strategic review — are projects on track? Any course corrections?</span>
+  </div>
+</div>
+
+<div class="section-divider">YOUR TIME INVESTMENT</div>
+
+<!-- EFFORT SUMMARY -->
+<div class="summary-grid">
+  <div class="summary-card">
+    <h3>Session Capture</h3>
+    <div class="effort effort-auto">0 min</div>
+    <div class="effort-label">Fully automated via cron</div>
+  </div>
+  <div class="summary-card">
+    <h3>Daily Review</h3>
+    <div class="effort effort-user">2 min</div>
+    <div class="effort-label">Morning dashboard scan</div>
+  </div>
+  <div class="summary-card">
+    <h3>Weekly Review</h3>
+    <div class="effort effort-user">5 min</div>
+    <div class="effort-label">Monday rollup check</div>
+  </div>
+  <div class="summary-card">
+    <h3>Monthly Review</h3>
+    <div class="effort effort-user">10 min</div>
+    <div class="effort-label">Portfolio health check</div>
+  </div>
+  <div class="summary-card" style="border-color: var(--accent-green);">
+    <h3>Total Weekly</h3>
+    <div class="effort effort-user">~20 min</div>
+    <div class="effort-label">5 daily + weekly review</div>
+  </div>
+</div>
+
+<!-- FULL SYSTEM OVERVIEW -->
+<div class="workflow-section" style="margin-top: 3rem;">
+  <h2>Full System Overview</h2>
+  <p class="subtitle">How all the pieces connect — from coding session to monthly portfolio report</p>
+
+  <div class="mermaid">
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#2a2d3a', 'primaryTextColor': '#e2e4e9', 'primaryBorderColor': '#5b9cf6', 'lineColor': '#5b9cf6', 'secondaryColor': '#1a1d27', 'tertiaryColor': '#1a1d27', 'edgeLabelBackground': '#1a1d27', 'clusterBkg': 'transparent', 'clusterBorder': '#2a2d3a' }}}%%
+flowchart TB
+    subgraph INPUT ["Data Sources"]
+        direction TB
+        S1["Claude Code<br/>Session Logs (.jsonl)"]
+        S2["Git Commits<br/>(deterministic)"]
+        S3["GitHub Issues/PRs<br/><i>Phase 2: obsidian-github-tasks</i>"]
+    end
+
+    subgraph ENGINE ["obsidian-agent (Python)"]
+        direction TB
+        E1["Session Parser"]
+        E2["Claude Haiku Extractor<br/><i>status, phase, completed,<br/>decisions, blockers, next steps</i>"]
+        E3["Git Helper"]
+        E4["Daily Consolidator<br/><i>NEW: merge same-day sessions</i>"]
+        E5["Rollup Aggregator<br/><i>NEW: cross-project rollups</i>"]
+        E6["Vault Writer"]
+
+        E1 --> E2
+        E3 --> E4
+        E2 --> E4
+        E4 --> E5
+        E5 --> E6
+    end
+
+    subgraph VAULT ["Obsidian Vault"]
+        direction TB
+        V1["<b>DASHBOARD.md</b><br/>Portfolio overview"]
+        V2["Per-Project STATUS.md<br/><i>Current state</i>"]
+        V3["Per-Project Daily Logs<br/><i>Append-only history</i>"]
+        V4["Cross-Project Daily<br/><i>Rollups/Daily/</i>"]
+        V5["Cross-Project Weekly<br/><i>Rollups/Weekly/</i>"]
+        V6["Cross-Project Monthly<br/><i>Rollups/Monthly/</i>"]
+    end
+
+    subgraph OBSIDIAN ["Obsidian App (Phase 2)"]
+        direction TB
+        O1["Dataview Queries<br/><i>Live portfolio dashboard</i>"]
+        O2["Periodic Notes<br/><i>Auto-create daily/weekly</i>"]
+        O3["Templater<br/><i>Dynamic templates</i>"]
+        O4["GitHub Tasks Plugin<br/><i>Issue/PR sync</i>"]
+    end
+
+    subgraph SCHEDULE ["Cron Schedule"]
+        direction LR
+        C1["11:00 PM Daily<br/>--all-projects"]
+        C2["Sun 11:30 PM<br/>--weekly"]
+        C3["Last of Month<br/>--monthly"]
+    end
+
+    S1 --> E1
+    S2 --> E3
+    S3 -.-> O4
+
+    E6 --> V1
+    E6 --> V2
+    E6 --> V3
+    E6 --> V4
+    E6 --> V5
+    E6 --> V6
+
+    C1 -.-> ENGINE
+    C2 -.-> ENGINE
+    C3 -.-> ENGINE
+
+    V1 --> O1
+    V2 --> O1
+    V3 --> O2
+
+    style S1 fill:#3a2a1a,stroke:#d4a574,color:#e2e4e9
+    style S2 fill:#3a2a1a,stroke:#d4a574,color:#e2e4e9
+    style S3 fill:#3a2a1a,stroke:#d4a574,color:#e2e4e9
+    style E1 fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style E2 fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style E3 fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style E4 fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style E5 fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style E6 fill:#1a2a3a,stroke:#5b9cf6,color:#e2e4e9
+    style V1 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style V2 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style V3 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style V4 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style V5 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style V6 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style O1 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style O2 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style O3 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style O4 fill:#2a1a3a,stroke:#a78bfa,color:#e2e4e9
+    style C1 fill:#2a2a1a,stroke:#fbbf24,color:#e2e4e9
+    style C2 fill:#2a2a1a,stroke:#fbbf24,color:#e2e4e9
+    style C3 fill:#2a2a1a,stroke:#fbbf24,color:#e2e4e9
+  </div>
+</div>
+
+<!-- WHAT'S NEW SECTION -->
+<div class="workflow-section">
+  <h2>What Changes from Today</h2>
+  <p class="subtitle">Green = already working &nbsp;|&nbsp; Blue = new in Phase 1 &nbsp;|&nbsp; Purple = new in Phase 2</p>
+
+  <div class="outputs-list" style="margin-bottom: 1.5rem;">
+    <span class="output-tag" style="background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid rgba(74,222,128,0.3);">Existing</span>
+    <span class="output-tag output-auto">Phase 1 (Python)</span>
+    <span class="output-tag" style="background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.3);">Phase 2 (Obsidian)</span>
+  </div>
+
+  <table style="width:100%;border-collapse:collapse;font-size:0.9rem;">
+    <thead>
+      <tr style="border-bottom:2px solid var(--border);text-align:left;">
+        <th style="padding:8px 12px;">Capability</th>
+        <th style="padding:8px 12px;">Status</th>
+        <th style="padding:8px 12px;">Phase</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:8px 12px;">Session parsing + Claude extraction</td>
+        <td style="padding:8px 12px;color:#4ade80;">Working</td>
+        <td style="padding:8px 12px;">Existing</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:8px 12px;">Per-project STATUS.md + Daily logs</td>
+        <td style="padding:8px 12px;color:#4ade80;">Working</td>
+        <td style="padding:8px 12px;">Existing</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:8px 12px;">DASHBOARD.md (basic table)</td>
+        <td style="padding:8px 12px;color:#4ade80;">Working</td>
+        <td style="padding:8px 12px;">Existing</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:8px 12px;">Per-project weekly/monthly rollups</td>
+        <td style="padding:8px 12px;color:#4ade80;">Working</td>
+        <td style="padding:8px 12px;">Existing</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);background:rgba(91,156,246,0.05);">
+        <td style="padding:8px 12px;"><b>Cross-project daily rollup</b></td>
+        <td style="padding:8px 12px;color:var(--accent-blue);">New</td>
+        <td style="padding:8px 12px;color:var(--accent-blue);">Phase 1</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);background:rgba(91,156,246,0.05);">
+        <td style="padding:8px 12px;"><b>Cross-project weekly/monthly rollups</b></td>
+        <td style="padding:8px 12px;color:var(--accent-blue);">New (templates exist, unwired)</td>
+        <td style="padding:8px 12px;color:var(--accent-blue);">Phase 1</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);background:rgba(91,156,246,0.05);">
+        <td style="padding:8px 12px;"><b>Same-day session consolidation</b></td>
+        <td style="padding:8px 12px;color:var(--accent-blue);">New</td>
+        <td style="padding:8px 12px;color:var(--accent-blue);">Phase 1</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);background:rgba(91,156,246,0.05);">
+        <td style="padding:8px 12px;"><b>Dashboard: health, priority, type columns</b></td>
+        <td style="padding:8px 12px;color:var(--accent-blue);">New</td>
+        <td style="padding:8px 12px;color:var(--accent-blue);">Phase 1</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);background:rgba(91,156,246,0.05);">
+        <td style="padding:8px 12px;"><b>Cron automation (nightly/weekly/monthly)</b></td>
+        <td style="padding:8px 12px;color:var(--accent-blue);">New</td>
+        <td style="padding:8px 12px;color:var(--accent-blue);">Phase 1</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);background:rgba(167,139,250,0.05);">
+        <td style="padding:8px 12px;"><b>Dataview live queries in vault</b></td>
+        <td style="padding:8px 12px;color:var(--accent-purple);">New</td>
+        <td style="padding:8px 12px;color:var(--accent-purple);">Phase 2</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);background:rgba(167,139,250,0.05);">
+        <td style="padding:8px 12px;"><b>Frontmatter on STATUS.md (type, health, priority)</b></td>
+        <td style="padding:8px 12px;color:var(--accent-purple);">New</td>
+        <td style="padding:8px 12px;color:var(--accent-purple);">Phase 2</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);background:rgba(167,139,250,0.05);">
+        <td style="padding:8px 12px;"><b>Periodic Notes auto-creation</b></td>
+        <td style="padding:8px 12px;color:var(--accent-purple);">New</td>
+        <td style="padding:8px 12px;color:var(--accent-purple);">Phase 2</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);background:rgba(167,139,250,0.05);">
+        <td style="padding:8px 12px;"><b>GitHub Issues/PR sync to vault</b></td>
+        <td style="padding:8px 12px;color:var(--accent-purple);">New</td>
+        <td style="padding:8px 12px;color:var(--accent-purple);">Phase 2</td>
+      </tr>
+      <tr style="background:rgba(167,139,250,0.05);">
+        <td style="padding:8px 12px;"><b>Templater dynamic templates</b></td>
+        <td style="padding:8px 12px;color:var(--accent-purple);">New</td>
+        <td style="padding:8px 12px;color:var(--accent-purple);">Phase 2</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    flowchart: {
+      useMaxWidth: true,
+      htmlLabels: true,
+      curve: 'basis',
+      padding: 15,
+      nodeSpacing: 30,
+      rankSpacing: 40
+    },
+    themeVariables: {
+      darkMode: true,
+      background: '#0f1117',
+      fontFamily: 'Inter, -apple-system, sans-serif',
+      fontSize: '13px'
+    }
+  });
+</script>
+
+</body>
+</html>

@@ -1,0 +1,8 @@
+[Unit]
+Description=Obsidian Agent - process recent Claude sessions
+
+[Service]
+Type=oneshot
+ExecStart=%h/agents/obsidian-agent/.venv/bin/python -m obsidian_agent --all-projects --since-last-run
+WorkingDirectory=%h/agents/obsidian-agent
+Environment=HOME=%h

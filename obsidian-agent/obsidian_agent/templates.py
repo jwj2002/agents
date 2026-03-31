@@ -5,6 +5,14 @@ from datetime import datetime
 # STATUS.md — overwritten each session (current state at a glance)
 # ---------------------------------------------------------------------------
 STATUS_TEMPLATE = """\
+---
+type: project
+status: {meta_status}
+health: {meta_health}
+priority: {meta_priority}
+category: {meta_category}
+---
+
 # {project_name}
 
 > Last updated: {updated}
@@ -45,8 +53,8 @@ DASHBOARD_TEMPLATE = """\
 
 > Auto-generated: {updated}
 
-| Project | Status | Phase | Next Step | Last Updated |
-|---------|--------|-------|-----------|--------------|
+| Project | Status | Health | Priority | Category | Phase | Next Step | Last Updated |
+|---------|--------|--------|----------|----------|-------|-----------|--------------|
 {rows}
 """
 
@@ -91,6 +99,43 @@ DAILY_ENTRY_TEMPLATE = """\
 # Header for a new daily log file
 DAILY_HEADER_TEMPLATE = """\
 # Daily Log: {date}
+"""
+
+# ---------------------------------------------------------------------------
+# Cross-project daily rollup — Rollups/Daily/YYYY-MM-DD.md
+# ---------------------------------------------------------------------------
+DAILY_ROLLUP_TEMPLATE = """\
+# Daily Rollup: {date}
+
+> Auto-generated: {generated}
+
+## Summary
+
+| Project | Status | Key Activity |
+|---------|--------|-------------|
+{summary_rows}
+
+{project_sections}
+"""
+
+DAILY_ROLLUP_PROJECT_SECTION = """\
+## {project_name}
+
+**Status**: {status}
+
+### Completed
+{completed}
+
+### Decisions
+{decisions}
+
+### Blockers
+{blockers}
+
+### Follow-up
+{next_steps}
+
+**GitHub Refs**: {github_refs}
 """
 
 # ---------------------------------------------------------------------------
@@ -153,6 +198,25 @@ MONTHLY_MULTI_PROJECT_TEMPLATE = """\
 > Generated: {generated}
 
 {project_sections}
+"""
+
+# ---------------------------------------------------------------------------
+# Shared rollup project section (used by multi-project weekly/monthly)
+# ---------------------------------------------------------------------------
+ROLLUP_PROJECT_SECTION = """\
+## {project_name}
+
+### Completed
+{completed}
+
+### Decisions
+{decisions}
+
+### Blockers
+{blockers}
+
+### GitHub References
+{github_refs}
 """
 
 
@@ -233,6 +297,10 @@ def render_status(project_name: str, extract, updated: str | None = None) -> str
         blockers=_bullet_list(extract.blockers),
         github_refs=_bullet_list(extract.github_refs),
         notes=_bullet_list(extract.notes),
+        meta_status=extract.meta_status,
+        meta_health=extract.health,
+        meta_priority=extract.priority,
+        meta_category=extract.category,
     )
 
 
@@ -241,7 +309,10 @@ def render_dashboard_row(project_name: str, extract, updated: str) -> str:
     status = extract.status or "—"
     phase = extract.phase or "—"
     next_step = _first_or(extract.next_steps)
-    return f"| {project_name} | {status} | {phase} | {next_step} | {updated} |"
+    health = extract.health
+    priority = extract.priority
+    category = extract.category
+    return f"| {project_name} | {status} | {health} | {priority} | {category} | {phase} | {next_step} | {updated} |"
 
 
 def render_dashboard(rows: list[str], updated: str | None = None) -> str:
@@ -249,7 +320,7 @@ def render_dashboard(rows: list[str], updated: str | None = None) -> str:
     updated = updated or datetime.now().strftime("%Y-%m-%d %H:%M")
     return DASHBOARD_TEMPLATE.format(
         updated=updated,
-        rows="\n".join(rows) if rows else "| _No projects yet_ | | | | |",
+        rows="\n".join(rows) if rows else "| _No projects yet_ | | | | | | | |",
     )
 
 
@@ -277,6 +348,58 @@ def render_daily_header(date: str) -> str:
     return DAILY_HEADER_TEMPLATE.format(date=date)
 
 
+def render_daily_rollup(
+    date: str,
+    summary_rows: list[str],
+    project_sections: list[str],
+) -> str:
+    """Render cross-project daily rollup."""
+    return DAILY_ROLLUP_TEMPLATE.format(
+        date=date,
+        generated=datetime.now().strftime("%Y-%m-%d %H:%M"),
+        summary_rows="\n".join(summary_rows) if summary_rows else "| _No activity_ | | |",
+        project_sections="\n".join(project_sections),
+    )
+
+
+def render_daily_rollup_project(
+    project_name: str,
+    status: str,
+    completed: list[str],
+    decisions: list[str],
+    blockers: list[str],
+    next_steps: list[str],
+    github_refs: list[str],
+) -> str:
+    """Render a single project section in the daily rollup."""
+    return DAILY_ROLLUP_PROJECT_SECTION.format(
+        project_name=project_name,
+        status=status or "—",
+        completed=_bullet_list(completed),
+        decisions=_bullet_list(decisions),
+        blockers=_bullet_list(blockers),
+        next_steps=_checkbox_list(next_steps),
+        github_refs=", ".join(github_refs) if github_refs else "_None_",
+    )
+
+
+def render_rollup_project_section(
+    project_name: str,
+    completed: list[str],
+    decisions: list[str],
+    blockers: list[str],
+    github_refs: list[str],
+) -> str:
+    """Render a project section for multi-project weekly/monthly rollups."""
+    return ROLLUP_PROJECT_SECTION.format(
+        project_name=project_name,
+        completed=_bullet_list(completed),
+        decisions=_bullet_list(decisions),
+        blockers=_bullet_list(blockers),
+        github_refs=_bullet_list(github_refs),
+    )
+
+
 def render_weekly(
     week: str,
     project_name: str,
@@ -297,6 +420,18 @@ def render_weekly(
     )
 
 
+def render_weekly_multi(
+    week: str,
+    project_sections: list[str],
+) -> str:
+    """Render a cross-project weekly rollup."""
+    return WEEKLY_MULTI_PROJECT_TEMPLATE.format(
+        week=week,
+        generated=datetime.now().strftime("%Y-%m-%d %H:%M"),
+        project_sections="\n".join(project_sections),
+    )
+
+
 def render_monthly(
     month: str,
     project_name: str,
@@ -314,4 +449,16 @@ def render_monthly(
         decisions=_bullet_list(decisions),
         blockers=_bullet_list(blockers),
         github_refs=_bullet_list(github_refs),
+    )
+
+
+def render_monthly_multi(
+    month: str,
+    project_sections: list[str],
+) -> str:
+    """Render a cross-project monthly rollup."""
+    return MONTHLY_MULTI_PROJECT_TEMPLATE.format(
+        month=month,
+        generated=datetime.now().strftime("%Y-%m-%d %H:%M"),
+        project_sections="\n".join(project_sections),
     )
