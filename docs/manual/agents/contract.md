@@ -125,6 +125,29 @@ The body includes:
 
 The artifact ends with `AGENT_RETURN: contract-{issue}-{mmddyy}.md`.
 
+!!! example "CONTRACT artifact excerpt"
+    ```markdown
+    ---
+    issue: 184
+    agent: CONTRACT
+    date: 2026-03-26
+    scope: fullstack
+    endpoints_modified: 1
+    breaking_changes: NO
+    ---
+    ## Enum Definitions
+    | Python Name | Python VALUE | Valid API Values |
+    |-------------|-------------|-----------------|
+    | CO_OWNER    | "CO-OWNER"  | "CO-OWNER"      |
+
+    ## POST /accounts/{account_id}/members
+    **Auth**: Required | **Access**: require_account_owner
+    **Request**: { "email": "string", "role": "OWNER | CO-OWNER | DEPENDENT" }
+    **Response** (201): { "id": 1, "email": "user@example.com", "role": "CO-OWNER" }
+
+    AGENT_RETURN: contract-184-032626.md
+    ```
+
 ## Efficiency Rules
 
 - Use examples over prose -- a request/response pair communicates more than a paragraph

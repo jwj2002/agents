@@ -29,21 +29,22 @@ The argument is a plain-text description of the task.
 
 ## Decision Criteria
 
-Use `/quick` when ALL of these are true:
+!!! question "Should I use /quick or /orchestrate?"
+    **Use `/quick` when ALL of these are true:**
 
-- The change touches 3 files or fewer
-- The fix is obvious (no investigation needed)
-- No schema changes or migrations
-- No cross-cutting concerns (pure backend OR pure frontend)
-- You can verify the change with a single command
+    - The change touches 3 files or fewer
+    - The fix is obvious (no investigation needed)
+    - No schema changes or migrations
+    - No cross-cutting concerns (pure backend OR pure frontend)
+    - You can verify the change with a single command
 
-Use `/orchestrate` when ANY of these are true:
+    **Use `/orchestrate` when ANY of these are true:**
 
-- You need to investigate the codebase first
-- The change spans multiple subsystems
-- There are enum values, API contracts, or shared types involved
-- You want tracked artifacts for the implementation
-- The change requires a dedicated feature branch and PR
+    - You need to investigate the codebase first
+    - The change spans multiple subsystems
+    - There are enum values, API contracts, or shared types involved
+    - You want tracked artifacts for the implementation
+    - The change requires a dedicated feature branch and PR
 
 ## Process
 
@@ -89,12 +90,13 @@ cd frontend && npm run lint && npm run build
 
 ### 5. Report
 
-```
-Quick task complete:
-- Files changed: backend/accounts/services.py
-- Verification: PASS
-- Summary: Added missing import for AccountSchema
-```
+!!! example "Sample /quick session output"
+    ```
+    Quick task complete:
+    - Files changed: backend/accounts/services.py
+    - Verification: PASS
+    - Summary: Added missing import for AccountSchema
+    ```
 
 ## Optional Metrics Recording
 

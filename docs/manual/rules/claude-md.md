@@ -77,6 +77,10 @@ Environment variables, defaults, and test credentials.
 - JWT_SECRET must be set for auth endpoints
 ```
 
+### Putting It All Together
+
+Each of the seven sections above serves a distinct purpose. Omitting any one of them leaves a gap that agents will fill with guesses.
+
 ## The Template
 
 A starter template is provided at `claude-config/project-template/CLAUDE.md`:
@@ -180,11 +184,10 @@ The global rules in `~/.claude/rules/` apply to all projects. Per-project rules 
 
 ## Maintenance
 
-Review your CLAUDE.md when:
-
-- A new failure pattern emerges that is project-specific
-- The tech stack changes (new dependency versions, new tools)
-- The directory structure changes (new modules, renamed directories)
-- An agent makes a mistake that a CLAUDE.md entry would have prevented
+!!! tip "When to update your CLAUDE.md"
+    - A new failure pattern emerges that is project-specific
+    - The tech stack changes (new dependency versions, new tools)
+    - The directory structure changes (new modules, renamed directories)
+    - An agent makes a mistake that a CLAUDE.md entry would have prevented
 
 Keep the file under 200 lines. If it grows beyond that, extract domain-specific sections into `.claude/rules/` as conditional rule files.

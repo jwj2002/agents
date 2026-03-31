@@ -34,16 +34,19 @@ done
 
 Verify that no stubs, placeholders, or incomplete implementations remain in modified files.
 
-```bash
-# Backend stubs
-grep -rn "pass$\|return False$\|return \[\]$\|raise NotImplementedError" <files>
+=== "Backend checks"
 
-# Frontend stubs
-grep -rn "onClick={() => {}}\|return null$" <files>
+    ```bash
+    grep -rn "pass$\|return False$\|return \[\]$\|raise NotImplementedError" <files>
+    grep -rn "TODO\|FIXME\|HACK\|PLACEHOLDER" <files>
+    ```
 
-# Universal markers
-grep -rn "TODO\|FIXME\|HACK\|PLACEHOLDER" <files>
-```
+=== "Frontend checks"
+
+    ```bash
+    grep -rn "onClick={() => {}}\|return null$" <files>
+    grep -rn "TODO\|FIXME\|HACK\|PLACEHOLDER" <files>
+    ```
 
 **Fail condition**: Any stub, placeholder, or marker found in new or modified files.
 
@@ -95,10 +98,15 @@ cd frontend && npm run lint && npm run build
 
 Both results are reported in the artifact:
 
-```
-Focused: backend/accounts/tests/ -- 12/12 passing (2.1s)
-Full suite: pytest -q -- 45/45 passing (8.3s)
-```
+!!! example "Verification level output"
+    ```
+    Level 1 EXISTS:       6/6 files found
+    Level 2 SUBSTANTIVE:  0 stubs, 0 placeholders
+    Level 3 WIRED:        All imports resolved, enum values aligned
+    Level 4 FUNCTIONAL:
+      Focused: backend/accounts/tests/ -- 12/12 passing (2.1s)
+      Full suite: pytest -q -- 45/45 passing (8.3s)
+    ```
 
 !!! tip "When to Skip Focused Mode"
     Skip the focused pass for fullstack changes, refactoring, cross-module changes, or codebases with fewer than 50 total tests where the full suite is fast enough.

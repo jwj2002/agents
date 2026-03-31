@@ -58,6 +58,28 @@ The agent sends the conversation to Claude Haiku, which extracts structured stat
 | `next_steps` | Planned next actions |
 | `knowledge` | Items tagged with `[CAPTURE]` during the session |
 
+!!! example "STATUS.md excerpt"
+    ```markdown
+    # mymoney-dev
+
+    **Status**: Active
+    **Phase**: Implementation - Phase 2
+
+    ## Completed
+    - [x] Database schema migration (#601)
+    - [x] Account service layer (#602)
+
+    ## In Progress
+    - [ ] Member invitation flow (#605) -- PATCH in progress
+
+    ## Blockers
+    - None
+
+    ## Next Steps
+    - Complete member invitation frontend
+    - Add role-based access tests
+    ```
+
 !!! tip "Tagging Knowledge"
     Tag items with `[CAPTURE]` during a Claude Code session to have them extracted into the daily log under a Knowledge section:
     ```
@@ -185,6 +207,9 @@ max_conversation_chars = 50000
 | Monthly summary review | 10 min | Monthly |
 
 The agent runs automatically via launchd/systemd/cron. Session capture requires zero manual effort. The only time investment is reviewing the generated summaries.
+
+!!! tip "Automation setup"
+    Start with `--install-launchd` on macOS (or `--install-systemd` on Linux). The watcher runs every 60 seconds and the rollup runs nightly -- you will never need to run the agent manually after initial setup. Check `~/Library/Logs/obsidian-agent/` if sessions are not appearing in your vault.
 
 ## Dependencies
 

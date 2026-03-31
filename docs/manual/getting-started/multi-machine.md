@@ -130,6 +130,11 @@ Maintain a mapping file (`claude-config/rules/github-accounts.md`) that maps eac
 - Always verify with `gh auth status` before `git push` or `gh pr create`
 - The `/pr` command checks the active account automatically
 
+!!! warning "Multi-account gotchas"
+    - Pushing to the wrong account silently succeeds but creates commits under the wrong identity
+    - `git config --global user.email` applies to ALL repos -- always use per-repo config for work projects
+    - `gh auth status` shows the active account but does NOT check the git email config -- verify both
+
 ## Adding a New Machine
 
 1. Clone the repo: `git clone <repo-url> ~/agents`
@@ -137,3 +142,8 @@ Maintain a mapping file (`claude-config/rules/github-accounts.md`) that maps eac
 3. Create `~/.claude/settings.local.json` with machine-specific MCP paths
 4. Set up `gh auth` for your GitHub account(s)
 5. Verify: run `claude` and confirm all commands are available
+
+!!! tip "Platform-specific notes"
+    - **macOS**: The installer auto-detects iCloud for the Obsidian vault path. Ensure iCloud Drive is enabled in System Settings.
+    - **WSL**: The vault is created on the Windows side so Obsidian for Windows can read it. The Windows username is auto-detected via `cmd.exe`.
+    - **Linux**: The vault defaults to `~/obsidian/MyVault`. Install Obsidian separately if you want vault browsing.

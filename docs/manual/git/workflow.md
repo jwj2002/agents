@@ -15,12 +15,13 @@ Every branch follows the pattern `{type}/issue-{N}-{slug}`:
 | `test/` | Adding or updating tests |
 | `perf/` | Performance improvement |
 
-```
-feature/issue-123-add-oauth-login
-fix/issue-456-null-pointer-crash
-chore/update-dependencies
-docs/update-api-reference
-```
+!!! example "Branch naming examples"
+    ```
+    feature/issue-123-add-oauth-login
+    fix/issue-456-null-pointer-crash
+    chore/update-dependencies
+    docs/update-api-reference
+    ```
 
 !!! warning "Never"
     Never reuse a branch for multiple PRs. Never name a branch after a person or date. Never use `feat/` --- use `feature/` consistently.
@@ -172,11 +173,12 @@ Each phase branches from the **updated main** (after the previous phase merges).
 
 ## Never-Do List
 
-- Reuse one branch for multiple PRs
-- Bundle multiple issues in one commit
-- Ship `debug:` commits to main
-- Implement then immediately revert (validate first)
-- Force push to shared branches
-- Skip CI with `--no-verify`
-- Merge without rebasing on latest main
-- Commit directly to main
+!!! warning "Violations of any of these will break the multi-agent workflow"
+    - Reuse one branch for multiple PRs
+    - Bundle multiple issues in one commit
+    - Ship `debug:` commits to main
+    - Implement then immediately revert (validate first)
+    - Force push to shared branches
+    - Skip CI with `--no-verify`
+    - Merge without rebasing on latest main
+    - Commit directly to main

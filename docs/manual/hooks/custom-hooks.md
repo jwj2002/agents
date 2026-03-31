@@ -71,6 +71,12 @@ Multiple hooks on the same event run sequentially in the order they appear.
 
 ## Design Principles
 
+!!! tip "Four principles for reliable hooks"
+    1. **Fail gracefully** -- wrap external imports and degrade, never crash
+    2. **Log to file** -- hooks run silently; without file logging, failures are invisible
+    3. **Keep output compact** -- stdout goes into context; every line costs tokens
+    4. **Auto-clean old data** -- checkpoint files accumulate; include a retention cleanup
+
 ### Fail Gracefully
 
 If your hook depends on an external package (like PyYAML), wrap the import and degrade rather than crash:
@@ -173,6 +179,12 @@ if __name__ == "__main__":
 ```
 
 Register it in `settings.json` under the `SessionStart` event with an empty `matcher` to run on every session start.
+
+!!! warning "Common mistakes"
+    - **Forgetting to read stdin** -- hooks receive JSON on stdin even if unused; not reading it can cause the hook to hang
+    - **Printing too much** -- SessionStart output goes directly into context; dumping 200 lines of state wastes tokens
+    - **Using exit code 2 on Stop** -- this sends feedback and resumes the agent, which can cause infinite loops
+    - **Missing error handling on subprocess calls** -- a failed `git` or `osascript` call should not crash the hook
 
 ## Testing Hooks
 

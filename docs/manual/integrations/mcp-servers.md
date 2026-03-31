@@ -83,6 +83,28 @@ Agents use MCP tools as the preferred source for failure patterns during pre-fli
 
 **Why MCP-first**: The `failure_patterns()` tool returns structured JSON with root cause codes, frequencies, and prevention steps. This is more reliable than parsing a markdown file, and the MCP server can aggregate data from multiple sources (vault + memory files) in a single call.
 
+!!! example "Sample `failure_patterns()` response"
+    ```json
+    {
+      "patterns": [
+        {
+          "root_cause": "ENUM_VALUE",
+          "frequency": 26,
+          "description": "Frontend uses Python enum NAME instead of VALUE",
+          "prevention": "CONTRACT must document enum VALUES explicitly"
+        },
+        {
+          "root_cause": "VERIFICATION_GAP",
+          "frequency": 63,
+          "description": "Agent assumed API shape without reading source",
+          "prevention": "Read actual source file before using any component"
+        }
+      ],
+      "period": "last_30_days",
+      "total_failures": 12
+    }
+    ```
+
 ## settings.json Configuration
 
 All MCP servers are configured under the `mcpServers` key in `settings.json`:

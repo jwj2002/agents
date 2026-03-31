@@ -206,27 +206,29 @@ When a session completes (via the Stop hook), `notify_completion.py` sends a mac
 
 ## When NOT to Parallelize
 
-| Situation | Reason |
-|-----------|--------|
-| Issues share files | Merge conflicts are likely |
-| Issue B depends on Issue A | B needs A's changes in main first |
-| Single-file changes | Worktree overhead exceeds benefit |
-| Limited machine resources | Each worktree is a full repo copy |
+!!! warning "Do not parallelize in these situations"
+    | Situation | Reason |
+    |-----------|--------|
+    | Issues share files | Merge conflicts are likely |
+    | Issue B depends on Issue A | B needs A's changes in main first |
+    | Single-file changes | Worktree overhead exceeds benefit |
+    | Limited machine resources | Each worktree is a full repo copy |
 
 ## Recommended Pattern: Wave Scheduling
 
 Group independent issues into parallel waves. Dependent issues run in later waves after predecessors merge.
 
-```
-Wave 1 (parallel -- no file overlap):
-  /orchestrate 42 --parallel   # accounts module
-  /orchestrate 57 --parallel   # reports module
+!!! example "A two-wave parallel session"
+    ```
+    Wave 1 (parallel -- no file overlap):
+      /orchestrate 42 --parallel   # accounts module
+      /orchestrate 57 --parallel   # reports module
 
-      |  both merge to main  |
+          |  both merge to main  |
 
-Wave 2 (after Wave 1 merges):
-  /orchestrate 63 --parallel   # depends on #42 changes
-  /orchestrate 71 --parallel   # independent of #63
-```
+    Wave 2 (after Wave 1 merges):
+      /orchestrate 63 --parallel   # depends on #42 changes
+      /orchestrate 71 --parallel   # independent of #63
+    ```
 
 This pattern maximizes throughput while preventing merge conflicts. Always rebase on the latest main before creating a PR from a worktree.
