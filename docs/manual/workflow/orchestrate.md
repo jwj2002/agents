@@ -2,6 +2,9 @@
 
 The `/orchestrate` command runs a multi-agent pipeline to implement GitHub issues. It classifies complexity, spawns specialized agents in sequence, tracks state across context compactions, and records outcomes for the learning system.
 
+!!! info "Automatic Routing"
+    You don't need to decide when to use `/orchestrate` vs Plan Mode vs `/quick`. Claude automatically assesses every task and routes to the right workflow based on complexity, then announces the decision. See [Implementation Routing](#implementation-routing) at the bottom of this page.
+
 ## Usage
 
 ```bash
@@ -259,3 +262,60 @@ All outputs go to `.agents/outputs/` with the naming pattern `{agent}-{issue}-{m
 | `prove-184-032626.md` | PROVE |
 
 Each agent validates the chain: PROVE checks for PATCH, PATCH checks for MAP-PLAN (and CONTRACT if fullstack), and so on.
+
+## Implementation Routing
+
+Claude automatically assesses every task and routes to the right workflow. You describe what you want; the routing rule decides how to do it.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    IMPLEMENTATION ROUTING                      │
+│                                                               │
+│  Assess Task                                                  │
+│       │                                                       │
+│       ├─ TRIVIAL ──→ /quick ──────────────→ done              │
+│       │                                                       │
+│       ├─ SIMPLE ───→ Plan Mode ───────────→ done              │
+│       │                  └─ offer codex review                │
+│       │                                                       │
+│       ├─ MODERATE ─→ /orchestrate ────────→ codex review      │
+│       │              (SIMPLE tier)          (recommended)      │
+│       │                                                       │
+│       ├─ COMPLEX ──→ /orchestrate ────────→ codex review      │
+│       │              (COMPLEX tier)         (automatic)        │
+│       │                                                       │
+│       ├─ FULLSTACK ─→ /orchestrate ───────→ codex review      │
+│       │               + CONTRACT            (enum/API focus)  │
+│       │                                                       │
+│       └─ PRIOR FAIL → /orchestrate ───────→ codex review      │
+│                       + failure context     (automatic)        │
+│                       or /codex:rescue                        │
+│                                                               │
+│  + --parallel for 2+ independent issues                       │
+│  + --resume for interrupted workflows                         │
+└──────────────────────────────────────────────────────────────┘
+```
+
+| Complexity | Files | Route | Codex Review |
+|------------|-------|-------|-------------|
+| **TRIVIAL** | 1 | `/quick` | Skip |
+| **SIMPLE** | 1-3 | Plan Mode | Offer |
+| **MODERATE** | 4-5 | `/orchestrate` SIMPLE | Recommended |
+| **COMPLEX** | 6+ | `/orchestrate` COMPLEX | Automatic |
+| **FULLSTACK** | Any | `/orchestrate` + CONTRACT | Automatic (enum/API focus) |
+| **PRIOR FAIL** | Any | `/orchestrate` + context or `/codex:rescue` | Automatic |
+
+## Codex Review Integration
+
+After PROVE passes on MODERATE+ tasks, a cross-model review runs automatically:
+
+```
+PATCH → PROVE passes → /codex:adversarial-review --background
+                               │
+                          findings?
+                          ├── No  → /pr
+                          └── Yes → fix → re-run PROVE → /pr
+```
+
+!!! tip "Why cross-model review matters"
+    Claude and GPT have different blind spots. ENUM_VALUE errors (26% of fullstack failures) are caught more reliably when a different model reviews the code. Claude writes it, Codex reviews it — genuinely adversarial, not the same model checking its own work.

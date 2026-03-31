@@ -1,32 +1,60 @@
-# Implementation Routing: Plan Mode vs Orchestrate
+# Implementation Routing: Task Assessment → Workflow → Review
 
-When implementing GitHub issues, choose the right workflow based on complexity and confidence.
+When given any task, assess complexity and route to the right workflow with the right review level. **Make the call yourself — do not ask the user which mode to use.**
 
-## Decision Matrix
+## Step 1: Assess and Route
 
-**Assess BEFORE entering any mode.** Read the issue, check files involved, then decide.
+**Assess BEFORE entering any mode.** Read the issue/task, check files involved, then decide.
 
-| Signal | Plan Mode | Orchestrate |
-|--------|-----------|-------------|
-| Files to modify | 1-3 | 4+ |
-| Subsystems touched | 1 (backend OR frontend) | 2+ (cross-cutting) |
-| Requirements clarity | Clear, specific | Ambiguous, needs investigation |
-| Schema changes | None or simple ALTER | New tables + migrations + seed data |
-| Test complexity | Add to existing test file | New test infrastructure needed |
-| Dependencies | None or 1 prior issue | Multiple blocking issues |
-| Estimated complexity | TRIVIAL / SIMPLE | MODERATE / COMPLEX |
-| Confidence to complete | High (>80%) | Lower (<80%) |
+| Complexity | Files | Criteria | Route To | Codex Review |
+|------------|-------|----------|----------|-------------|
+| **TRIVIAL** | 1 | Typo, config, rename, obvious fix | `/quick` | Skip |
+| **SIMPLE** | 1-3 | Clear requirements, single subsystem | Plan Mode | Offer after implementation |
+| **MODERATE** | 4-5 | Clear pattern, single subsystem | `/orchestrate` (SIMPLE tier) | Recommended |
+| **COMPLEX** | 6+ | Cross-cutting, architectural decisions | `/orchestrate` (COMPLEX tier) | Automatic |
+| **FULLSTACK** | Any | Backend + frontend changes | `/orchestrate` + CONTRACT | Automatic (focus: enums/API) |
+| **PRIOR FAIL** | Any | Re-attempt of a BLOCKED issue | `/orchestrate` + failure context, or `/codex:rescue` | Automatic |
 
-**Rule of thumb:** If you can hold the entire change in your head and write it without extensive exploration, use plan mode. If you need to investigate, coordinate across files, or might get blocked — use orchestrate.
+**Modifiers:**
+- **Multiple independent issues** → add `--parallel` (worktree isolation, separate tabs)
+- **Interrupted workflow** → add `--resume` (skip completed phases)
+- **Stuck after re-attempt** → try `/codex:rescue` before escalating to human
 
-## Plan Mode Flow
+## Step 2: Announce Your Decision
+
+State the routing decision briefly before starting:
+
+> **Quick** — typo in README, 1 file, obvious fix.
+
+> **Plan mode** — 2 files (entity_grid.py, config.py), clear requirements, high confidence.
+
+> **Orchestrate (SIMPLE)** — 4 files, backend-only, clear pattern to follow. Codex review recommended.
+
+> **Orchestrate (COMPLEX, fullstack)** — new module + schema + frontend integration. CONTRACT required. Codex adversarial review automatic.
+
+> **Parallel** — Issues 42 and 57 are independent. Recommending `--parallel` in separate tabs.
+
+The user can override: "just do it" (downgrade to quick/plan) or "orchestrate this" (upgrade).
+
+## Workflow Flows
+
+### Quick (`/quick`)
+
+For TRIVIAL tasks. No pipeline, no agents, no GitHub issue required.
+
+1. Load critical patterns
+2. Make the change directly
+3. Verify (lint/test if applicable)
+4. Report what was done
+
+### Plan Mode
+
+For SIMPLE tasks. Plan before implementing.
 
 1. Enter plan mode (`EnterPlanMode`)
 2. Explore codebase, read relevant files
 3. Write implementation plan to plan file
 4. Exit plan mode — present plan with options:
-
-**CRITICAL — Always present these options after showing the plan:**
 
 ```
 Options:
@@ -35,34 +63,72 @@ Options:
 3. "Revise plan" — Adjust the approach before implementing
 ```
 
-The top option should always be "Compact and implement" with "(Recommended)" — this clears context overhead from planning exploration before the implementation pass, giving maximum context for coding.
+5. After implementation, **offer** Codex review: "Want a cross-model review? I can run `/codex:adversarial-review`."
 
-## Orchestrate Flow
+### Orchestrate
 
-Use `/orchestrate <issue-number>` which runs the full MAP → PLAN → PATCH → PROVE pipeline with agent spawning and artifact tracking.
+For MODERATE, COMPLEX, and FULLSTACK tasks. Full agent pipeline.
 
-## Announce Your Decision
+```
+TRIVIAL tier:  MAP-PLAN → PATCH → PROVE-lite
+SIMPLE tier:   MAP-PLAN → [CONTRACT*] → PLAN-CHECK → PATCH → PROVE
+COMPLEX tier:  MAP → PLAN → [CONTRACT*] → PLAN-CHECK → PATCH → PROVE
+```
 
-When starting an issue, state your routing decision briefly:
+Use `/orchestrate <issue-number>` with optional flags: `--with-tests`, `--resume`, `--parallel`.
 
-> **Plan mode** — 2 files (entity_grid.py, config.py), clear requirements, high confidence.
+## Step 3: Apply Codex Review
 
-or
+After the task is implemented (regardless of workflow), apply review based on risk:
 
-> **Orchestrate** — new service module + schema + integration into 3 existing files + tests. Need structured investigation.
+| Risk Level | Codex Action | Command |
+|------------|-------------|---------|
+| **TRIVIAL** | Skip entirely | — |
+| **SIMPLE** | Offer (don't force) | "Want a cross-model review?" |
+| **MODERATE** | Run after implementation | `/codex:review --background` |
+| **COMPLEX** | Run adversarial after PROVE | `/codex:adversarial-review --background` |
+| **FULLSTACK** | Run with enum/API focus | `/codex:adversarial-review --background "Focus on: enum value mismatches, API contract compliance, access control"` |
+| **PRIOR FAIL** | Run before commit | `/codex:adversarial-review --wait "Focus on: {prior root cause}"` |
 
-Do NOT ask the user which mode to use — make the call and state it. The user will see the decision in the plan or orchestrate output and can override if they disagree.
+### Codex Review Integration with Orchestrate
+
+For MODERATE+ tasks routed through `/orchestrate`, Codex review runs **after PROVE passes**:
+
+```
+PATCH completes → PROVE passes → /codex:adversarial-review --background
+                                         │
+                                    findings?
+                                    ├── No  → /pr
+                                    └── Yes → fix issues → re-run PROVE → /pr
+```
+
+### Codex Rescue (Fallback)
+
+When a task has been attempted and BLOCKED:
+
+1. First re-attempt: `/orchestrate` with failure context injection (standard)
+2. Still BLOCKED: `/codex:rescue "investigate and fix {description}"` (different model, different approach)
+3. Still BLOCKED: escalate to human
 
 ## Examples
 
+### Quick
+- "Fix the typo in the README" → **Quick**, skip review
+- "Update the env example with new variable" → **Quick**, skip review
+
 ### Plan Mode
-- "Add feature flag to config.py" (1 file, obvious)
-- "Wire resolve_fact_key() into upsert_fact()" (2 files, clear integration point)
-- "Fix bug in direct_fact_lookup regex" (1 file, targeted fix)
-- "Add 3 new seed vocabulary entries" (1 file, data addition)
+- "Add feature flag to config.py" → **Plan mode**, offer review
+- "Wire resolve_fact_key() into upsert_fact()" → **Plan mode**, offer review
 
 ### Orchestrate
-- "Create fact_vocabulary table + service + seed data + tests" (new module, 5+ files)
-- "Implement migrate_fact_keys() with conflict resolution" (touches schema, service, audit, tests)
-- "Full Phase 1 vocabulary foundation" (entire phase, 8+ files)
-- "Redesign extraction pipeline with vocabulary constraints" (cross-cutting, multiple services)
+- "Add validation endpoint with tests" → **Orchestrate SIMPLE**, recommended review
+- "Create fact_vocabulary table + service + seed data + tests" → **Orchestrate COMPLEX**, automatic adversarial review
+- "Implement payment form with backend API" → **Orchestrate FULLSTACK**, automatic review with enum/API focus
+
+### Parallel
+- "Implement issues 42, 57, and 63" → Assess independence:
+  - 42 and 57 independent → `--parallel` in separate tabs
+  - 63 depends on 42 → sequential after 42 merges
+
+### Rescue
+- "Issue 184 has failed twice" → `/codex:rescue` before re-attempting with Claude

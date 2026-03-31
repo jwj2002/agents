@@ -148,29 +148,55 @@ Claude addresses findings
 
 **Why this works**: Different models have different blind spots. Claude might produce correct logic but miss an edge case in error handling. Codex might catch that edge case because its training distribution weights error handling differently. The reverse is also true -- Claude catches things Codex misses.
 
-## Integration with Orchestrate Workflow
+## Automatic Review via Implementation Routing
 
-### Add to PROVE phase
+Codex review is **automatically applied based on task complexity** — you don't need to remember to run it. The [implementation routing rule](../workflow/orchestrate.md#implementation-routing) handles this:
 
-After PATCH completes, run a Codex review as part of verification:
+| Task Complexity | Codex Review | What Happens |
+|-----------------|-------------|-------------|
+| **TRIVIAL** | Skip | Not worth the overhead |
+| **SIMPLE** | Offer | "Want a cross-model review?" after implementation |
+| **MODERATE** | Recommended | `/codex:review --background` runs after implementation |
+| **COMPLEX** | Automatic | `/codex:adversarial-review --background` runs after PROVE |
+| **FULLSTACK** | Automatic + focused | Review focuses on enum value mismatches and API contract compliance |
+| **PRIOR FAILURE** | Automatic + targeted | Review focuses on the prior root cause |
 
-```bash
-# In PROVE phase, after running tests
-/codex:review --base origin/main --wait
+### How It Works With Orchestrate
+
+For MODERATE+ tasks, the review runs after PROVE passes:
+
+```
+PATCH completes
+     │
+     ▼
+PROVE passes (all 4 levels)
+     │
+     ▼
+/codex:adversarial-review --background
+  "Focus on: enum value mismatches, API contract
+   compliance, access control, transaction integrity"
+     │
+     ├── No findings → /pr
+     └── Findings → fix issues → re-run PROVE → /pr
 ```
 
-This adds a cross-model verification layer to the standard PROVE checks (EXISTS, SUBSTANTIVE, WIRED, FUNCTIONAL).
+!!! tip "You don't trigger this manually"
+    Claude reads the routing rule, assesses your task, and decides whether to run Codex review. You just describe what you want done.
 
-### Use rescue as PATCH fallback
+### Rescue as PATCH Fallback
 
-When PATCH is blocked and recovery attempts fail, delegate to Codex:
+When PATCH is BLOCKED and re-attempting with failure context doesn't fix it:
 
 ```bash
-# After PATCH failure
-/codex:rescue --model o4-mini --effort high
+# Different model, different approach to the same problem
+/codex:rescue "investigate and fix: {description of the stuck issue}"
 ```
 
-This gives a fresh model perspective on the implementation problem without burning more Claude context on a failing approach.
+The escalation path:
+
+1. Re-run PATCH with failure context (standard)
+2. `/codex:rescue` (different model perspective)
+3. Escalate to human
 
 ## Review Gate
 
