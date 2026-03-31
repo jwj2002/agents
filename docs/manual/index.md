@@ -51,11 +51,11 @@ It is **not** prompt engineering. It is the discipline of designing agent pipeli
 
     [:octicons-arrow-right-24: Learning Loop](learning/self-learning-loop.md)
 
--   :material-shield-check:{ .lg .middle } **Cross-Model Review**
+-   :material-shield-check:{ .lg .middle } **Cross-Model AI + 7 Plugins**
 
     ---
 
-    Claude writes code, OpenAI Codex reviews it. Different models catch different blind spots.
+    Claude writes code, Codex reviews and co-implements. Plus: security guidance, TypeScript/Python LSP, Playwright e2e testing, enhanced PR review.
 
     [:octicons-arrow-right-24: Codex Plugin](integrations/codex-plugin.md)
 

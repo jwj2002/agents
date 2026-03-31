@@ -88,6 +88,20 @@ Not symlinked --- referenced by orchestrate and other commands directly.
 | `agent-prompt.md` | 2.5 KB | Shared prompt template with variable substitution for all agents |
 | `github-actions/` | --- | GitHub Actions workflow templates (Copilot review setup) |
 
+## Plugins (7 installed)
+
+Installed via `install.sh` Phase 2.5. Stored in `~/.claude/plugins/cache/` (not symlinked — installed per machine).
+
+| Plugin | Source | Category | Purpose |
+|--------|--------|----------|---------|
+| `codex` | `openai-codex` | Cross-model AI | GPT-powered review, adversarial challenge, task delegation, rescue |
+| `security-guidance` | `claude-plugins-official` | Security | Vulnerability detection, compliance checks, secure coding guidance |
+| `typescript-lsp` | `claude-plugins-official` | Language | TypeScript/React type errors, auto-imports, go-to-definition |
+| `pyright-lsp` | `claude-plugins-official` | Language | Python type checking for FastAPI backend code |
+| `pr-review-toolkit` | `claude-plugins-official` | Git | Enhanced PR review with deeper analysis capabilities |
+| `playwright` | `claude-plugins-official` | Testing | End-to-end browser testing for frontend verification |
+| `frontend-design` | `claude-plugins-official` | Frontend | Production-grade UI generation with distinctive design |
+
 ## Config Files
 
 | File | Size | Purpose |

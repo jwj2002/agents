@@ -72,15 +72,36 @@ python3 -c "import yaml" || pip install PyYAML
 
 ### Phase 2.5: Plugins
 
-If the `claude` CLI is available, the installer configures the Codex plugin:
+If the `claude` CLI is available, the installer adds the OpenAI Codex marketplace and installs all 7 required plugins:
+
+| Plugin | Source | Purpose |
+|--------|--------|---------|
+| `codex` | `openai-codex` | Cross-model review and task delegation via GPT |
+| `security-guidance` | `claude-plugins-official` | Security review, vulnerability detection, compliance checks |
+| `typescript-lsp` | `claude-plugins-official` | Real-time TypeScript/React type errors, auto-imports |
+| `pyright-lsp` | `claude-plugins-official` | Python type checking for FastAPI backend |
+| `pr-review-toolkit` | `claude-plugins-official` | Enhanced PR review capabilities |
+| `playwright` | `claude-plugins-official` | End-to-end browser testing |
+| `frontend-design` | `claude-plugins-official` | Production-grade UI generation |
 
 ```bash
+# Marketplace setup
 claude plugin marketplace add openai/codex-plugin-cc
+
+# All plugins installed in a loop
 claude plugin install codex@openai-codex
+claude plugin install security-guidance@claude-plugins-official
+claude plugin install typescript-lsp@claude-plugins-official
+claude plugin install pyright-lsp@claude-plugins-official
+claude plugin install pr-review-toolkit@claude-plugins-official
+claude plugin install playwright@claude-plugins-official
+claude plugin install frontend-design@claude-plugins-official
 ```
 
-!!! tip "Codex plugin is optional"
-    The plugin enables `/codex-review` for second-opinion code reviews. Skip this if you do not have an OpenAI API key.
+!!! note "Prerequisites"
+    - **Codex plugin** requires `npm install -g @openai/codex` and a ChatGPT subscription or OpenAI API key
+    - **LSP plugins** (typescript-lsp, pyright-lsp) require their respective language servers installed locally
+    - All other plugins work out of the box
 
 ### Phase 3: First-time Setup
 
