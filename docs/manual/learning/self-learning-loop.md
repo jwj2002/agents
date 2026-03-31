@@ -147,20 +147,10 @@ Scans each project for `.claude/memory/failures.jsonl`, merges same root causes 
 
 ## Pattern Loading (MCP-First)
 
-Agents prefer MCP tools over file reads for pattern data during pre-flight:
+Agents prefer MCP tools over file reads for pattern data during pre-flight. MCP provides structured JSON responses via `failure_patterns()` and `agent_metrics()`. File-based loading (`patterns-critical.md`, `patterns-full.md`) serves as a fallback when MCP is unavailable.
 
-```
-+---------------------+     +--------------------------+
-|  Agent Pre-Flight   |---->|  MCP: failure_patterns() |
-|                     |     |  MCP: agent_metrics(30d) |
-|  (all agents via    |     +----------+---------------+
-|   _base.md)         |                | fails?
-|                     |                v
-|                     |     +--------------------------+
-|                     |---->|  File: patterns-critical |
-|                     |     |  File: patterns-full.md  |
-+---------------------+     +--------------------------+
-```
+!!! tip "See also"
+    For the full MCP pattern loading diagram and configuration details, see [MCP Servers -- MCP-First Pattern Loading](../integrations/mcp-servers.md#mcp-first-pattern-loading).
 
 ## Real-World Results
 

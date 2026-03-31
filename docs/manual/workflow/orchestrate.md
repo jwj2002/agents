@@ -1,6 +1,6 @@
 # Orchestrate Workflow
 
-The `/orchestrate` command runs a multi-agent pipeline to implement GitHub issues. It classifies complexity, spawns specialized agents in sequence, tracks state across context compactions, and records outcomes for the learning system.
+The orchestrate command is your primary tool for implementing GitHub issues. You give it an issue number — it investigates the codebase, plans the changes, implements them, verifies they work, and reports the result. You don't need to choose which agents run or in what order; the system handles that based on task complexity.
 
 !!! info "Automatic Routing"
     You don't need to decide when to use `/orchestrate` vs Plan Mode vs `/quick`. Claude automatically assesses every task and routes to the right workflow based on complexity, then announces the decision. See [Implementation Routing](#implementation-routing) at the bottom of this page.
@@ -44,48 +44,48 @@ GitHub Issue
 
 ## Complexity Classification
 
-### Decision Flow
+???+ example "How complexity routing works"
 
-```
-                    +---------------+
-                    | GitHub Issue  |
-                    +-------+-------+
-                            |
-                 +----------+----------+
-                 | Classify Complexity |
-                 +----------+----------+
-                            |
-           +----------------+----------------+
-           |                |                |
-      +---------+     +----------+     +----------+
-      | TRIVIAL |     |  SIMPLE  |     | COMPLEX  |
-      | 1-2 file|     | 3-5 file |     | 6+ files |
-      +----+----+     +----+-----+     +----+-----+
-           |               |                |
-           v               v                v
-      MAP-PLAN         MAP-PLAN        MAP --> PLAN
-           |               |                |
-           |          +----+----+      +----+----+
-           |          |fullstack|      |fullstack|
-           |          +----+----+      +----+----+
-           |          yes  | no        yes  | no
-           |               v                v
-           |          CONTRACT(*)       CONTRACT
-           |               |                |
-           |          PLAN-CHECK       PLAN-CHECK
-           |               |                |
-           v               v                v
-        PATCH            PATCH            PATCH
-           |               |                |
-           v               v                v
-      PROVE-lite         PROVE            PROVE
-      (gates only)         |                |
-           |               v                v
-           +------------- /pr --------------+
+    ```
+                        +---------------+
+                        | GitHub Issue  |
+                        +-------+-------+
+                                |
+                     +----------+----------+
+                     | Classify Complexity |
+                     +----------+----------+
+                                |
+               +----------------+----------------+
+               |                |                |
+          +---------+     +----------+     +----------+
+          | TRIVIAL |     |  SIMPLE  |     | COMPLEX  |
+          | 1-2 file|     | 3-5 file |     | 6+ files |
+          +----+----+     +----+-----+     +----+-----+
+               |               |                |
+               v               v                v
+          MAP-PLAN         MAP-PLAN        MAP --> PLAN
+               |               |                |
+               |          +----+----+      +----+----+
+               |          |fullstack|      |fullstack|
+               |          +----+----+      +----+----+
+               |          yes  | no        yes  | no
+               |               v                v
+               |          CONTRACT(*)       CONTRACT
+               |               |                |
+               |          PLAN-CHECK       PLAN-CHECK
+               |               |                |
+               v               v                v
+            PATCH            PATCH            PATCH
+               |               |                |
+               v               v                v
+          PROVE-lite         PROVE            PROVE
+          (gates only)         |                |
+               |               v                v
+               +------------- /pr --------------+
 
-     (*) CONTRACT-lite if 0 new endpoints + <=2 frontend files
-         CONTRACT-full otherwise
-```
+         (*) CONTRACT-lite if 0 new endpoints + <=2 frontend files
+             CONTRACT-full otherwise
+    ```
 
 ### Classification Criteria
 
@@ -95,88 +95,88 @@ GitHub Issue
 | **SIMPLE** | 3-5 | Clear pattern, single subsystem | MAP-PLAN with full verification |
 | **COMPLEX** | 6+ | Endpoints, migrations, architectural | Separate MAP and PLAN phases |
 
-## Step-by-Step Process
+??? info "Detailed step-by-step process"
 
-### Step 0: Verify Issue
+    ### Step 0: Verify Issue
 
-```bash
-gh issue view $ISSUE --json number,title,body
-```
+    ```bash
+    gh issue view $ISSUE --json number,title,body
+    ```
 
-If the issue does not exist, the workflow stops.
+    If the issue does not exist, the workflow stops.
 
-### Step 1: Classify and Detect Stack
+    ### Step 1: Classify and Detect Stack
 
-The orchestrator reads the issue body and classifies complexity. After MAP-PLAN (or MAP) completes, it auto-detects the stack by scanning the plan artifact for `backend/` and `frontend/` references:
+    The orchestrator reads the issue body and classifies complexity. After MAP-PLAN (or MAP) completes, it auto-detects the stack by scanning the plan artifact for `backend/` and `frontend/` references:
 
-- Both present: `fullstack` (CONTRACT becomes mandatory)
-- Only one: `backend` or `frontend`
+    - Both present: `fullstack` (CONTRACT becomes mandatory)
+    - Only one: `backend` or `frontend`
 
-### Step 1.6: CONTRACT Weight Assessment
+    ### Step 1.6: CONTRACT Weight Assessment
 
-For fullstack issues, decide between inline and full contract:
+    For fullstack issues, decide between inline and full contract:
 
-| Signal | CONTRACT-lite (inline) | CONTRACT-full (agent) |
-|--------|------------------------|-----------------------|
-| New endpoints | 0 | 1+ |
-| Enum changes | 0-1 | 2+ |
-| Breaking API changes | No | Yes |
-| Frontend files touched | 1-2 | 3+ |
+    | Signal | CONTRACT-lite (inline) | CONTRACT-full (agent) |
+    |--------|------------------------|-----------------------|
+    | New endpoints | 0 | 1+ |
+    | Enum changes | 0-1 | 2+ |
+    | Breaking API changes | No | Yes |
+    | Frontend files touched | 1-2 | 3+ |
 
-CONTRACT-lite embeds the contract directly in the PATCH prompt. CONTRACT-full spawns a dedicated agent that produces its own artifact.
+    CONTRACT-lite embeds the contract directly in the PATCH prompt. CONTRACT-full spawns a dedicated agent that produces its own artifact.
 
-### Step 1.7: Conflict Check
+    ### Step 1.7: Conflict Check
 
-Before branching, checks for file conflicts with open PRs and active worktrees:
+    Before branching, checks for file conflicts with open PRs and active worktrees:
 
-```bash
-# Files from open PRs
-gh pr list --state open --json files --jq '.[].files[].path'
+    ```bash
+    # Files from open PRs
+    gh pr list --state open --json files --jq '.[].files[].path'
 
-# Compare against planned files from MAP-PLAN artifact
-```
+    # Compare against planned files from MAP-PLAN artifact
+    ```
 
-If conflicts are found, the orchestrator warns but does not block. You decide whether to proceed or wait.
+    If conflicts are found, the orchestrator warns but does not block. You decide whether to proceed or wait.
 
-### Step 2: Create Feature Branch
+    ### Step 2: Create Feature Branch
 
-```bash
-git fetch origin && git checkout -b feature/issue-$ISSUE-description origin/main
-```
+    ```bash
+    git fetch origin && git checkout -b feature/issue-$ISSUE-description origin/main
+    ```
 
-Skipped when `--parallel` is used (the worktree setup handles branch creation).
+    Skipped when `--parallel` is used (the worktree setup handles branch creation).
 
-### Step 3: Spawn Agents
+    ### Step 3: Spawn Agents
 
-Each agent is spawned via the Task tool with inherited context:
+    Each agent is spawned via the Task tool with inherited context:
 
-```markdown
-## Inherited Context (DO NOT re-read these files)
-- Issue: #184 - Add payment module
-- Branch: feature/issue-184-payment-module
-- Stack: backend
-- Complexity: SIMPLE
+    ```markdown
+    ## Inherited Context (DO NOT re-read these files)
+    - Issue: #184 - Add payment module
+    - Branch: feature/issue-184-payment-module
+    - Stack: backend
+    - Complexity: SIMPLE
 
-## Prior Artifacts
-- map-plan-184-032626.md
-```
+    ## Prior Artifacts
+    - map-plan-184-032626.md
+    ```
 
-Every agent validates that predecessor artifacts exist before starting. If an artifact is missing, the agent stops immediately.
+    Every agent validates that predecessor artifacts exist before starting. If an artifact is missing, the agent stops immediately.
 
-### Step 4: Report Status
+    ### Step 4: Report Status
 
-```
-Workflow complete for issue #184
+    ```
+    Workflow complete for issue #184
 
-Artifacts:
-- map-plan-184-032626.md
-- patch-184-032626.md
-- prove-184-032626.md
+    Artifacts:
+    - map-plan-184-032626.md
+    - patch-184-032626.md
+    - prove-184-032626.md
 
-PROVE status: PASS
+    PROVE status: PASS
 
-Next: /pr 184 to create pull request
-```
+    Next: /pr 184 to create pull request
+    ```
 
 ## Agent Roles
 
@@ -196,29 +196,10 @@ Next: /pr 184 to create pull request
 
 ## State Tracking
 
-State persists in `.agents/outputs/claude_checkpoints/PERSISTENT_STATE.yaml`:
+State is managed by `state_manager.py` and persists in `.agents/outputs/claude_checkpoints/PERSISTENT_STATE.yaml`. The module provides functions for updating phases, clearing active work, querying completed phases, and locating worktrees.
 
-```yaml
-active_work:
-  issue: 184
-  branch: feature/issue-184-payment-module
-  phase: PATCH
-  last_action: Starting PATCH phase
-  completed_phases: [MAP-PLAN, PLAN-CHECK]
-  worktree_path: null
-meta:
-  updated: '2026-03-26'
-```
-
-The `state_manager.py` module provides:
-
-| Function | Used By |
-|----------|---------|
-| `update_phase()` | Orchestrate (before each agent) |
-| `clear_active()` | Orchestrate (after completion) |
-| `get_completed_phases()` | `--resume` flag |
-| `get_active_work()` | SessionStart hook |
-| `get_worktree_for_issue()` | `--parallel` flag |
+!!! tip "See also"
+    For the full YAML schema, function reference, and fallback behavior, see [State Manager](../hooks/state-manager.md).
 
 ## Resume Mode
 
@@ -263,82 +244,84 @@ All outputs go to `.agents/outputs/` with the naming pattern `{agent}-{issue}-{m
 
 Each agent validates the chain: PROVE checks for PATCH, PATCH checks for MAP-PLAN (and CONTRACT if fullstack), and so on.
 
-## Implementation Routing
+??? info "Advanced: Implementation routing and Codex delegation"
 
-Claude automatically assesses every task and routes to the right workflow. You describe what you want; the routing rule decides how to do it.
+    ## Implementation Routing
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                    IMPLEMENTATION ROUTING                      │
-│                                                               │
-│  Assess Task                                                  │
-│       │                                                       │
-│       ├─ TRIVIAL ──→ /quick ──────────────→ done              │
-│       │                                                       │
-│       ├─ SIMPLE ───→ Plan Mode ───────────→ done              │
-│       │                  └─ offer codex review                │
-│       │                                                       │
-│       ├─ MODERATE ─→ /orchestrate ────────→ codex review      │
-│       │              (SIMPLE tier)          (recommended)      │
-│       │                                                       │
-│       ├─ COMPLEX ──→ /orchestrate ────────→ codex review      │
-│       │              (COMPLEX tier)         (automatic)        │
-│       │                                                       │
-│       ├─ FULLSTACK ─→ /orchestrate ───────→ codex review      │
-│       │               + CONTRACT            (enum/API focus)  │
-│       │                                                       │
-│       └─ PRIOR FAIL → /orchestrate ───────→ codex review      │
-│                       + failure context     (automatic)        │
-│                       or /codex:rescue                        │
-│                                                               │
-│  + --parallel for 2+ independent issues                       │
-│  + --resume for interrupted workflows                         │
-└──────────────────────────────────────────────────────────────┘
-```
+    Claude automatically assesses every task and routes to the right workflow. You describe what you want; the routing rule decides how to do it.
 
-| Complexity | Files | Route | Codex Role |
-|------------|-------|-------|-----------|
-| **TRIVIAL** | 1 | `/quick` | None |
-| **SIMPLE** | 1-3 | Plan Mode | Offer review |
-| **MODERATE** | 4-5 | `/orchestrate` SIMPLE | Review (recommended) |
-| **COMPLEX** | 6+ | `/orchestrate` COMPLEX | Review (automatic) + delegate subtasks |
-| **FULLSTACK** | Any | `/orchestrate` + CONTRACT | Review (enum/API) + parallel frontend |
-| **PRIOR FAIL** | Any | `/codex:rescue` first | Primary implementer |
+    ```
+    ┌──────────────────────────────────────────────────────────────┐
+    │                    IMPLEMENTATION ROUTING                      │
+    │                                                               │
+    │  Assess Task                                                  │
+    │       │                                                       │
+    │       ├─ TRIVIAL ──→ /quick ──────────────→ done              │
+    │       │                                                       │
+    │       ├─ SIMPLE ───→ Plan Mode ───────────→ done              │
+    │       │                  └─ offer codex review                │
+    │       │                                                       │
+    │       ├─ MODERATE ─→ /orchestrate ────────→ codex review      │
+    │       │              (SIMPLE tier)          (recommended)      │
+    │       │                                                       │
+    │       ├─ COMPLEX ──→ /orchestrate ────────→ codex review      │
+    │       │              (COMPLEX tier)         (automatic)        │
+    │       │                                                       │
+    │       ├─ FULLSTACK ─→ /orchestrate ───────→ codex review      │
+    │       │               + CONTRACT            (enum/API focus)  │
+    │       │                                                       │
+    │       └─ PRIOR FAIL → /orchestrate ───────→ codex review      │
+    │                       + failure context     (automatic)        │
+    │                       or /codex:rescue                        │
+    │                                                               │
+    │  + --parallel for 2+ independent issues                       │
+    │  + --resume for interrupted workflows                         │
+    └──────────────────────────────────────────────────────────────┘
+    ```
 
-## Codex Integration (Review + Delegation)
+    | Complexity | Files | Route | Codex Role |
+    |------------|-------|-------|-----------|
+    | **TRIVIAL** | 1 | `/quick` | None |
+    | **SIMPLE** | 1-3 | Plan Mode | Offer review |
+    | **MODERATE** | 4-5 | `/orchestrate` SIMPLE | Review (recommended) |
+    | **COMPLEX** | 6+ | `/orchestrate` COMPLEX | Review (automatic) + delegate subtasks |
+    | **FULLSTACK** | Any | `/orchestrate` + CONTRACT | Review (enum/API) + parallel frontend |
+    | **PRIOR FAIL** | Any | `/codex:rescue` first | Primary implementer |
 
-Codex serves two roles: **reviewer** (after implementation) and **implementer** (parallel to Claude during PATCH).
+    ## Codex Integration (Review + Delegation)
 
-### Automatic Review
+    Codex serves two roles: **reviewer** (after implementation) and **implementer** (parallel to Claude during PATCH).
 
-After PROVE passes on MODERATE+ tasks:
+    ### Automatic Review
 
-```
-PATCH → PROVE passes → /codex:adversarial-review --background
-                               │
-                          findings?
-                          ├── No  → /pr
-                          └── Yes → fix → re-run PROVE → /pr
-```
+    After PROVE passes on MODERATE+ tasks:
 
-### Parallel Delegation During PATCH
+    ```
+    PATCH → PROVE passes → /codex:adversarial-review --background
+                                   │
+                              findings?
+                              ├── No  → /pr
+                              └── Yes → fix → re-run PROVE → /pr
+    ```
 
-For COMPLEX and FULLSTACK tasks, Claude delegates independent subtasks to Codex in background:
+    ### Parallel Delegation During PATCH
 
-```
-MAP-PLAN identifies subtasks
-     │
-     ├── Backend → Claude PATCH (primary thread)
-     │       │
-     │       ├── /codex:rescue --background --write (frontend)
-     │       ├── /codex:rescue --background --write (tests)
-     │       └── Claude continues implementing...
-     │
-     ▼
-/codex:status → collect results → PROVE → review → /pr
-```
+    For COMPLEX and FULLSTACK tasks, Claude delegates independent subtasks to Codex in background:
 
-!!! tip "Why cross-model delegation matters"
-    Claude and GPT have different strengths. Claude excels at architectural reasoning and orchestration. GPT handles mechanical implementation, test writing, and debugging well. Using both in parallel maximizes throughput without sacrificing quality.
+    ```
+    MAP-PLAN identifies subtasks
+         │
+         ├── Backend → Claude PATCH (primary thread)
+         │       │
+         │       ├── /codex:rescue --background --write (frontend)
+         │       ├── /codex:rescue --background --write (tests)
+         │       └── Claude continues implementing...
+         │
+         ▼
+    /codex:status → collect results → PROVE → review → /pr
+    ```
 
-See [Codex Plugin](../integrations/codex-plugin.md) for all delegation patterns and model selection guide.
+    !!! tip "Why cross-model delegation matters"
+        Claude and GPT have different strengths. Claude excels at architectural reasoning and orchestration. GPT handles mechanical implementation, test writing, and debugging well. Using both in parallel maximizes throughput without sacrificing quality.
+
+    See [Codex Plugin](../integrations/codex-plugin.md) for all delegation patterns and model selection guide.

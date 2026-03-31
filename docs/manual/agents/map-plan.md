@@ -2,7 +2,7 @@
 
 **Version**: 1.0 | **Phase**: 1+2 | **Role**: Investigator + Architect
 
-MAP-PLAN combines investigation and planning into a single agent for the TRIVIAL and SIMPLE pipeline tiers within `/orchestrate`. It reads code, documents what it finds, and produces a file-by-file implementation plan -- but never modifies any code.
+MAP-PLAN is the first agent to run on most issues. It reads the issue, investigates your codebase, and produces a detailed implementation plan. The plan includes which files to modify, what patterns to follow, and acceptance criteria for verification. It does not write any code -- that's PATCH's job.
 
 !!! info "Routing context"
     MAP-PLAN runs when the routing model selects `/orchestrate` for MODERATE or higher tasks, and the orchestrate pipeline classifies the work as TRIVIAL or SIMPLE pipeline tier. Tasks routed to `/quick` or Plan Mode never reach MAP-PLAN.
@@ -63,97 +63,99 @@ For changes to calculations or formulas:
 
 Every MAP-PLAN output must include a **Verification Steps** section documenting: what spec was read, what code was verified, which approach was chosen and why, what dependencies were checked, and all models/components identified.
 
-## Process Steps
+???+ info "Detailed process steps"
 
-### 1. Classify Pipeline Tier
+    ## Process Steps
 
-| Pipeline Tier | Criteria |
-|---------------|----------|
-| TRIVIAL | Docs, config, renames, deletions |
-| SIMPLE | 1-3 files, localized change |
-| COMPLEX | New endpoints, migrations, cross-module |
+    ### 1. Classify Pipeline Tier
 
-### 2. Identify Stack
+    | Pipeline Tier | Criteria |
+    |---------------|----------|
+    | TRIVIAL | Docs, config, renames, deletions |
+    | SIMPLE | 1-3 files, localized change |
+    | COMPLEX | New endpoints, migrations, cross-module |
 
-Determine `backend`, `frontend`, or `fullstack`. If fullstack, a CONTRACT agent is required before PATCH.
+    ### 2. Identify Stack
 
-### 3. Find Affected Files
+    Determine `backend`, `frontend`, or `fullstack`. If fullstack, a CONTRACT agent is required before PATCH.
 
-Locate all files relevant to the change using search tools. Document each file and its role in the change.
+    ### 3. Find Affected Files
 
-### 4. Document Component APIs
+    Locate all files relevant to the change using search tools. Document each file and its role in the change.
 
-!!! tip "COMPONENT_API accounts for 17% of failures"
-    When reusing frontend components, always extract and document the actual PropTypes or TypeScript interface from the source file.
+    ### 4. Document Component APIs
 
-```markdown
-#### ComponentName
-**Props**: propA (string, required), propB (func, optional)
-**Example**: `<Component propA="x" />`
-```
+    !!! tip "COMPONENT_API accounts for 17% of failures"
+        When reusing frontend components, always extract and document the actual PropTypes or TypeScript interface from the source file.
 
-### 5. Document Enum Values
+    ```markdown
+    #### ComponentName
+    **Props**: propA (string, required), propB (func, optional)
+    **Example**: `<Component propA="x" />`
+    ```
 
-!!! tip "ENUM_VALUE accounts for 26% of failures"
-    Always document the VALUE (right side of `=`), not the Python name.
+    ### 5. Document Enum Values
 
-| Python Name | Python VALUE | Notes |
-|-------------|--------------|-------|
-| `CO_OWNER` | `"CO-OWNER"` | Hyphen in value, underscore in name |
+    For fullstack issues, always document the enum VALUE (right side of `=`), not the Python name.
 
-### 6. Data Model Analysis
+    !!! tip "See also"
+        For the full ENUM_VALUE pattern explanation with code examples, see [Core Patterns -- ENUM_VALUE](../rules/core-patterns.md#enum_value-in-detail).
 
-For CRUD operations, map every field to its owning model. List all models involved and note whether multi-model orchestration is needed.
+    ### 6. Data Model Analysis
 
-### 7. Find Pattern to Mirror
+    For CRUD operations, map every field to its owning model. List all models involved and note whether multi-model orchestration is needed.
 
-Search for similar existing implementations in the codebase. Reference them by file path and line range rather than quoting code.
+    ### 7. Find Pattern to Mirror
 
-### 8. Create File-by-File Plan
+    Search for similar existing implementations in the codebase. Reference them by file path and line range rather than quoting code.
 
-For each file that needs changes:
+    ### 8. Create File-by-File Plan
 
-```markdown
-#### File: `path/to/file.py`
-**Changes**: Add new validation method
-**Pattern**: See `similar/file.py:45-67`
-```
+    For each file that needs changes:
 
-### 9. Define Acceptance Criteria
+    ```markdown
+    #### File: `path/to/file.py`
+    **Changes**: Add new validation method
+    **Pattern**: See `similar/file.py:45-67`
+    ```
 
-Write a single checklist of criteria. PATCH and PROVE reference this list -- it is never duplicated across artifacts.
+    ### 9. Define Acceptance Criteria
 
-```markdown
-- [ ] Criterion 1
-- [ ] Criterion 2
-- [ ] Criterion 3
-```
+    Write a single checklist of criteria. PATCH and PROVE reference this list -- it is never duplicated across artifacts.
 
-## Output Template
+    ```markdown
+    - [ ] Criterion 1
+    - [ ] Criterion 2
+    - [ ] Criterion 3
+    ```
 
-The artifact starts with YAML frontmatter:
+??? example "MAP-PLAN artifact template"
 
-```yaml
----
-issue: 184
-agent: MAP-PLAN
-date: 2026-03-26
-complexity: SIMPLE
-stack: backend
-files_identified: 3
----
-```
+    ## Output Template
 
-The body includes these sections:
+    The artifact starts with YAML frontmatter:
 
-| Section | Content |
-|---------|---------|
-| Summary | 3-5 sentences: what, why, risks |
-| Verification Steps | Spec read, code verified, approach decided, impact analyzed, completeness confirmed |
-| Investigation | Affected files, component APIs, enum values, data model analysis, risks |
-| Plan | File-by-file steps, acceptance criteria, verification gates |
+    ```yaml
+    ---
+    issue: 184
+    agent: MAP-PLAN
+    date: 2026-03-26
+    complexity: SIMPLE
+    stack: backend
+    files_identified: 3
+    ---
+    ```
 
-The artifact ends with `AGENT_RETURN: map-plan-{issue}-{mmddyy}.md`.
+    The body includes these sections:
+
+    | Section | Content |
+    |---------|---------|
+    | Summary | 3-5 sentences: what, why, risks |
+    | Verification Steps | Spec read, code verified, approach decided, impact analyzed, completeness confirmed |
+    | Investigation | Affected files, component APIs, enum values, data model analysis, risks |
+    | Plan | File-by-file steps, acceptance criteria, verification gates |
+
+    The artifact ends with `AGENT_RETURN: map-plan-{issue}-{mmddyy}.md`.
 
 ## Pre-Submission Checklist
 

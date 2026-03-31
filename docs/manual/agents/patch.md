@@ -2,7 +2,7 @@
 
 **Version**: 1.2 | **Phase**: 3 | **Role**: Implementer
 
-PATCH is the only agent in the pipeline that writes code. It reads the plan, extracts requirements, implements changes, runs verification gates, and documents what changed. If any gate fails, PATCH fixes the issue in-place before submitting its artifact.
+PATCH is the only agent that modifies code. It reads the plan from MAP-PLAN, follows the project's architecture patterns, and implements the changes. Before writing any code, it runs a pre-flight checklist. After implementation, it runs verification gates (linting, tests). If anything fails, it fixes in-place before submitting.
 
 ## Pre-Flight Checklist
 
@@ -56,18 +56,18 @@ This checklist ensures nothing is missed during implementation and provides a ve
 
 ## Implementation Conventions
 
-### Backend
+=== "Backend"
 
-- Access control logic belongs in dependency injection, never inline in route handlers
-- Routers stay thin -- business logic lives in services
-- Tests must be SQLite-compatible
-- Format only modified files: `ruff format path/to/modified.py`
+    - Access control logic belongs in dependency injection, never inline in route handlers
+    - Routers stay thin -- business logic lives in services
+    - Tests must be SQLite-compatible
+    - Format only modified files: `ruff format path/to/modified.py`
 
-### Frontend
+=== "Frontend"
 
-- All API calls go through `frontend/src/api.js`
-- Reuse established component patterns from the codebase
-- Verify component APIs by reading source before using them
+    - All API calls go through `frontend/src/api.js`
+    - Reuse established component patterns from the codebase
+    - Verify component APIs by reading source before using them
 
 ## Pre-Submission Gates
 
@@ -90,19 +90,21 @@ cd frontend && npm run build
 
 If a gate is unfixable within the current session, PATCH sets its artifact status to `Blocked`, documents the failure, and returns to the orchestrator.
 
-## Deviation Policy
+??? info "Deviation policy (when implementation diverges from plan)"
 
-When implementation diverges from the plan, PATCH categorizes the deviation and takes the appropriate action:
+    ## Deviation Policy
 
-| Level | Examples | Action |
-|-------|----------|--------|
-| **TRIVIAL** | Naming, formatting, import order | Proceed silently |
-| **MINOR** | Different utility function, extra helper, slightly different signature | Note in Deviations section |
-| **SIGNIFICANT** | Different approach, extra endpoint, schema change | **STOP**. Document and return to orchestrator |
-| **SCOPE** | New feature, unplanned migration, unplanned module | **ABORT**. Return immediately |
+    When implementation diverges from the plan, PATCH categorizes the deviation and takes the appropriate action:
 
-!!! tip "When in Doubt, Escalate"
-    If unsure whether a deviation is MINOR or SIGNIFICANT, always choose the higher level. It is better to pause and confirm than to proceed with an unauthorized change.
+    | Level | Examples | Action |
+    |-------|----------|--------|
+    | **TRIVIAL** | Naming, formatting, import order | Proceed silently |
+    | **MINOR** | Different utility function, extra helper, slightly different signature | Note in Deviations section |
+    | **SIGNIFICANT** | Different approach, extra endpoint, schema change | **STOP**. Document and return to orchestrator |
+    | **SCOPE** | New feature, unplanned migration, unplanned module | **ABORT**. Return immediately |
+
+    !!! tip "When in Doubt, Escalate"
+        If unsure whether a deviation is MINOR or SIGNIFICANT, always choose the higher level. It is better to pause and confirm than to proceed with an unauthorized change.
 
 ## Completion Checklist
 
@@ -130,36 +132,38 @@ Before marking the artifact as DONE:
 - New code has tests
 - Success and error cases covered
 
-## Output Template
+??? example "PATCH artifact template"
 
-The PATCH artifact includes a YAML frontmatter block:
+    ## Output Template
 
-```yaml
----
-issue: 184
-agent: PATCH
-date: 2026-03-26
-status: Complete | Blocked | Gates-Failed
-files_modified: 3
-files_created: 1
-tests_added: 4
----
-```
+    The PATCH artifact includes a YAML frontmatter block:
 
-The body documents:
+    ```yaml
+    ---
+    issue: 184
+    agent: PATCH
+    date: 2026-03-26
+    status: Complete | Blocked | Gates-Failed
+    files_modified: 3
+    files_created: 1
+    tests_added: 4
+    ---
+    ```
 
-| Section | Content |
-|---------|---------|
-| Summary | What was implemented (3-5 sentences) |
-| Pre-Flight | Checklist of what was read and verified |
-| Requirements Checklist | Extracted from the plan |
-| Files Changed | Per-file list of additions and modifications |
-| Component API Verification | Table matching PLAN spec to actual props (if frontend) |
-| Enum Alignment | Table matching frontend strings to backend VALUES (if fullstack) |
-| Verification | Gate results with pass/fail and output |
-| Deviations | Any divergence from PLAN with level and justification |
+    The body documents:
 
-The artifact ends with `AGENT_RETURN: patch-{issue}-{mmddyy}.md`.
+    | Section | Content |
+    |---------|---------|
+    | Summary | What was implemented (3-5 sentences) |
+    | Pre-Flight | Checklist of what was read and verified |
+    | Requirements Checklist | Extracted from the plan |
+    | Files Changed | Per-file list of additions and modifications |
+    | Component API Verification | Table matching PLAN spec to actual props (if frontend) |
+    | Enum Alignment | Table matching frontend strings to backend VALUES (if fullstack) |
+    | Verification | Gate results with pass/fail and output |
+    | Deviations | Any divergence from PLAN with level and justification |
+
+    The artifact ends with `AGENT_RETURN: patch-{issue}-{mmddyy}.md`.
 
 ## Efficiency Rules
 
