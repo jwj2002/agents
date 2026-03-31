@@ -1,0 +1,13 @@
+# Obsidian Agent config — Work machine (macOS)
+# Applied by install-all.sh when profile=work
+
+[vault]
+path = "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/WorkVault"
+projects_folder = "Projects"
+
+[claude]
+projects_path = "~/.claude/projects"
+
+[extraction]
+model = "haiku"
+max_conversation_chars = 50000
