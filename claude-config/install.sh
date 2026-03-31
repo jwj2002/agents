@@ -217,19 +217,33 @@ if command -v claude &>/dev/null; then
         fi
     fi
 
-    # Install codex plugin (if not already installed)
-    if claude plugin list 2>/dev/null | grep -q "codex@openai-codex"; then
-        CODEX_PLUGIN_STATUS="installed"
-        echo "  ✓ Codex plugin (already installed)"
-    else
-        if claude plugin install codex@openai-codex 2>/dev/null; then
-            CODEX_PLUGIN_STATUS="installed"
-            echo "  ✓ Codex plugin installed"
+    # Install all required plugins
+    INSTALLED_LIST=$(claude plugin list 2>/dev/null)
+    PLUGINS_INSTALLED=0
+    PLUGINS_TOTAL=0
+
+    for PLUGIN in \
+        "codex@openai-codex" \
+        "security-guidance@claude-plugins-official" \
+        "typescript-lsp@claude-plugins-official" \
+        "pyright-lsp@claude-plugins-official" \
+        "pr-review-toolkit@claude-plugins-official" \
+        "playwright@claude-plugins-official" \
+        "frontend-design@claude-plugins-official"; do
+        PLUGINS_TOTAL=$((PLUGINS_TOTAL + 1))
+        if echo "$INSTALLED_LIST" | grep -q "$PLUGIN"; then
+            echo "  ✓ $PLUGIN (already installed)"
+            PLUGINS_INSTALLED=$((PLUGINS_INSTALLED + 1))
         else
-            CODEX_PLUGIN_STATUS="install failed"
-            echo "  ✗ Failed to install Codex plugin (need: npm install -g @openai/codex)"
+            if claude plugin install "$PLUGIN" 2>/dev/null; then
+                echo "  ✓ $PLUGIN installed"
+                PLUGINS_INSTALLED=$((PLUGINS_INSTALLED + 1))
+            else
+                echo "  ✗ Failed to install $PLUGIN"
+            fi
         fi
-    fi
+    done
+    CODEX_PLUGIN_STATUS="$PLUGINS_INSTALLED/$PLUGINS_TOTAL installed"
 else
     echo "  ⚠ claude CLI not found — skipping plugin install"
 fi
