@@ -296,18 +296,22 @@ Claude automatically assesses every task and routes to the right workflow. You d
 └──────────────────────────────────────────────────────────────┘
 ```
 
-| Complexity | Files | Route | Codex Review |
-|------------|-------|-------|-------------|
-| **TRIVIAL** | 1 | `/quick` | Skip |
-| **SIMPLE** | 1-3 | Plan Mode | Offer |
-| **MODERATE** | 4-5 | `/orchestrate` SIMPLE | Recommended |
-| **COMPLEX** | 6+ | `/orchestrate` COMPLEX | Automatic |
-| **FULLSTACK** | Any | `/orchestrate` + CONTRACT | Automatic (enum/API focus) |
-| **PRIOR FAIL** | Any | `/orchestrate` + context or `/codex:rescue` | Automatic |
+| Complexity | Files | Route | Codex Role |
+|------------|-------|-------|-----------|
+| **TRIVIAL** | 1 | `/quick` | None |
+| **SIMPLE** | 1-3 | Plan Mode | Offer review |
+| **MODERATE** | 4-5 | `/orchestrate` SIMPLE | Review (recommended) |
+| **COMPLEX** | 6+ | `/orchestrate` COMPLEX | Review (automatic) + delegate subtasks |
+| **FULLSTACK** | Any | `/orchestrate` + CONTRACT | Review (enum/API) + parallel frontend |
+| **PRIOR FAIL** | Any | `/codex:rescue` first | Primary implementer |
 
-## Codex Review Integration
+## Codex Integration (Review + Delegation)
 
-After PROVE passes on MODERATE+ tasks, a cross-model review runs automatically:
+Codex serves two roles: **reviewer** (after implementation) and **implementer** (parallel to Claude during PATCH).
+
+### Automatic Review
+
+After PROVE passes on MODERATE+ tasks:
 
 ```
 PATCH → PROVE passes → /codex:adversarial-review --background
@@ -317,5 +321,24 @@ PATCH → PROVE passes → /codex:adversarial-review --background
                           └── Yes → fix → re-run PROVE → /pr
 ```
 
-!!! tip "Why cross-model review matters"
-    Claude and GPT have different blind spots. ENUM_VALUE errors (26% of fullstack failures) are caught more reliably when a different model reviews the code. Claude writes it, Codex reviews it — genuinely adversarial, not the same model checking its own work.
+### Parallel Delegation During PATCH
+
+For COMPLEX and FULLSTACK tasks, Claude delegates independent subtasks to Codex in background:
+
+```
+MAP-PLAN identifies subtasks
+     │
+     ├── Backend → Claude PATCH (primary thread)
+     │       │
+     │       ├── /codex:rescue --background --write (frontend)
+     │       ├── /codex:rescue --background --write (tests)
+     │       └── Claude continues implementing...
+     │
+     ▼
+/codex:status → collect results → PROVE → review → /pr
+```
+
+!!! tip "Why cross-model delegation matters"
+    Claude and GPT have different strengths. Claude excels at architectural reasoning and orchestration. GPT handles mechanical implementation, test writing, and debugging well. Using both in parallel maximizes throughput without sacrificing quality.
+
+See [Codex Plugin](../integrations/codex-plugin.md) for all delegation patterns and model selection guide.
