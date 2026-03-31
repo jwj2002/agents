@@ -22,16 +22,10 @@ Three failure patterns account for over 50% of all agent failures. Each was disc
 
 **What happens**: Frontend sends the Python enum NAME (`CO_OWNER`, with underscore) when the backend expects the enum VALUE (`CO-OWNER`, with hyphen).
 
-**Why agents make this mistake**: In Python, `Role.CO_OWNER` is how you reference the enum member. The VALUE is `"CO-OWNER"`, assigned with `CO_OWNER = "CO-OWNER"`. Agents see the Python name in code and use it as the string value, not realizing the stored/transmitted value is different.
+**Systematic prevention**: CONTRACT documents enum VALUES explicitly, PATCH pre-flight reads backend enum definitions, and PROVE verifies frontend strings match backend VALUES.
 
-**Real example**: Backend defines `CO_OWNER = "CO-OWNER"`. Agent writes `role: "CO_OWNER"` in frontend. API returns 422 or silently stores the wrong value.
-
-**Systematic prevention**:
-
-1. **CONTRACT agent** explicitly documents enum VALUES (not names) in a dedicated section
-2. **PATCH pre-flight** includes "Read backend enum definitions, use VALUE (right side of `=`)"
-3. **PROVE verification** checks that frontend strings match backend VALUES
-4. **`core-patterns.md`** with `grep` command: `grep -A 5 "class.*Enum" backend/*/enums.py`
+!!! tip "See also"
+    For the full ENUM_VALUE pattern explanation with code examples, see [Core Patterns -- ENUM_VALUE](../rules/core-patterns.md#enum_value-in-detail).
 
 ### COMPONENT_API (17% of frontend failures)
 

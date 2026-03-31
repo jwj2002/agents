@@ -172,15 +172,10 @@ These records feed the self-learning loop: `/learn` clusters failures by root ca
 
 ## Root Cause Classification
 
-When recording a BLOCKED outcome, PROVE classifies the failure using the canonical root cause enum. The three most common codes are:
+When recording a BLOCKED outcome, PROVE classifies the failure using one of 12 canonical root cause codes. The three most common are VERIFICATION_GAP (63%), ENUM_VALUE (26%), and COMPONENT_API (17%).
 
-| Code | Frequency | Description |
-|------|-----------|-------------|
-| `VERIFICATION_GAP` | 63% | Assumptions not verified by reading code |
-| `ENUM_VALUE` | 26% | Used enum NAME instead of VALUE |
-| `COMPONENT_API` | 17% | Wrong props or hook usage |
-
-See [Agent Overview](overview.md) for the full list of 11 root cause codes.
+!!! tip "See also"
+    For the full ENUM_VALUE pattern with code examples, see [Core Patterns -- ENUM_VALUE](../rules/core-patterns.md#enum_value-in-detail). For the complete 12-code taxonomy, see [Failure Patterns](../learning/failure-patterns.md#full-root-cause-taxonomy).
 
 ## PROVE-lite
 

@@ -23,23 +23,10 @@ PLAN or MAP-PLAN  -->  CONTRACT  -->  PLAN-CHECK  -->  PATCH
 
 ## The ENUM_VALUE Problem
 
-Before CONTRACT was mandatory, `ENUM_VALUE` accounted for 26% of all fullstack failures. The failure pattern:
+Before CONTRACT was mandatory, `ENUM_VALUE` accounted for 26% of all fullstack failures. The core issue: frontend code uses the Python enum NAME (with underscores) when it should use the enum VALUE (with hyphens). CONTRACT forces explicit documentation of enum VALUES in a dedicated section, eliminating ambiguity about which string the frontend should send.
 
-```python
-# Backend defines:
-class AccountMemberRole(str, Enum):
-    CO_OWNER = "CO-OWNER"    # Python NAME: CO_OWNER, VALUE: "CO-OWNER"
-```
-
-```javascript
-// Frontend incorrectly uses the Python NAME:
-role: "CO_OWNER"    // WRONG -- underscore
-
-// Frontend should use the VALUE:
-role: "CO-OWNER"    // CORRECT -- hyphen
-```
-
-CONTRACT forces explicit documentation of enum VALUES in a dedicated section, eliminating ambiguity about which string the frontend should send.
+!!! tip "See also"
+    For the full ENUM_VALUE pattern explanation with code examples, see [Core Patterns -- ENUM_VALUE](../rules/core-patterns.md#enum_value-in-detail).
 
 ## What CONTRACT Defines
 

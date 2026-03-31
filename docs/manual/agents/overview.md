@@ -1,6 +1,6 @@
 # Agent System Overview
 
-The orchestrate pipeline uses specialized agents that execute in sequence, each producing a named artifact consumed by the next. Only one agent writes code. The rest investigate, plan, validate, and verify.
+When you run `/orchestrate`, a team of specialized agents handles your issue. Each agent has one job — investigate, plan, implement, or verify. Only one agent (PATCH) writes code. The rest are read-only, which means they can't break anything while they work.
 
 ## Agent Roles
 
@@ -85,23 +85,25 @@ map-plan-184-030826.md
 !!! note "Blocking on Missing Artifacts"
     If PATCH detects fullstack work but cannot find a CONTRACT artifact, it stops immediately with `BLOCKED: CONTRACT artifact required for fullstack`. No assumptions, no proceeding without explicit input.
 
-## Shared Behaviors from _base.md
+??? info "Shared agent behaviors (_base.md)"
 
-All agents inherit from `_base.md` (v3.0), which provides:
+    ## Shared Behaviors from _base.md
 
-**Pre-flight checks** -- Before any work begins, agents load learned failure patterns (via MCP `failure_patterns()` or file fallback), search for similar past artifacts, and verify project constraints.
+    All agents inherit from `_base.md` (v3.0), which provides:
 
-**Artifact naming** -- `{agent}-{issue}-{mmddyy}.md` in `.agents/outputs/`.
+    **Pre-flight checks** -- Before any work begins, agents load learned failure patterns (via MCP `failure_patterns()` or file fallback), search for similar past artifacts, and verify project constraints.
 
-**Size compliance** -- Each agent has target and max line counts. Artifacts over max must be compressed before submission using a priority checklist: replace code quotes with line references, remove restated acceptance criteria, consolidate duplicates, remove appendices.
+    **Artifact naming** -- `{agent}-{issue}-{mmddyy}.md` in `.agents/outputs/`.
 
-**Verification commands** -- Standardized gates for backend (`ruff check . && pytest -q`) and frontend (`npm run lint && npm run build`).
+    **Size compliance** -- Each agent has target and max line counts. Artifacts over max must be compressed before submission using a priority checklist: replace code quotes with line references, remove restated acceptance criteria, consolidate duplicates, remove appendices.
 
-**AGENT_RETURN directive** -- Every agent must end output with `AGENT_RETURN: {filename}` to signal completion to the orchestrator.
+    **Verification commands** -- Standardized gates for backend (`ruff check . && pytest -q`) and frontend (`npm run lint && npm run build`).
 
-**Failure context awareness** -- When spawned with a `## Prior Failure` block, the agent applies the prevention recommendation before starting and explicitly verifies the prior failure point is addressed.
+    **AGENT_RETURN directive** -- Every agent must end output with `AGENT_RETURN: {filename}` to signal completion to the orchestrator.
 
-**Escalation protocol** -- Agents stop and report to the orchestrator if complexity seems wrong, information is missing, constraints would be violated, or scope is ambiguous.
+    **Failure context awareness** -- When spawned with a `## Prior Failure` block, the agent applies the prevention recommendation before starting and explicitly verifies the prior failure point is addressed.
+
+    **Escalation protocol** -- Agents stop and report to the orchestrator if complexity seems wrong, information is missing, constraints would be violated, or scope is ambiguous.
 
 ## Agent Versioning
 
@@ -118,22 +120,11 @@ Versions are recorded in `metrics.jsonl` via the `agent_versions` field, enablin
 "agent_versions": {"map-plan": "1.0", "patch": "1.2", "prove": "1.3"}
 ```
 
-## Root Cause Classification
+??? info "Root cause classification codes"
 
-When failures occur, they are classified using a canonical enum of 11 codes:
+    ## Root Cause Classification
 
-| Code | Description |
-|------|-------------|
-| `ENUM_VALUE` | Used enum NAME instead of VALUE |
-| `COMPONENT_API` | Wrong props or hook usage |
-| `MULTI_MODEL` | Forgot model relationship |
-| `API_MISMATCH` | Frontend/backend contract violation |
-| `ACCESS_CONTROL` | Missing or wrong permission check |
-| `MISSING_TEST` | Untested code path |
-| `SQLITE_COMPAT` | PostgreSQL-only feature used |
-| `STRUCTURE_VIOLATION` | Violated project constraints |
-| `SCOPE_CREEP` | Changes beyond issue scope |
-| `VERIFICATION_GAP` | Assumptions not verified by reading code |
-| `OTHER` | Document specifics in details field |
+    Failures are classified using 12 canonical root cause codes. These codes feed back into the learning loop: `/learn` clusters failures by root cause, extracts prevention patterns, and updates agent definitions.
 
-These codes feed back into the learning loop: `/learn` clusters failures by root cause, extracts prevention patterns, and updates agent definitions.
+    !!! tip "See also"
+        For the complete taxonomy with descriptions, typical causes, and detection agents, see [Failure Patterns -- Full Root Cause Taxonomy](../learning/failure-patterns.md#full-root-cause-taxonomy).
