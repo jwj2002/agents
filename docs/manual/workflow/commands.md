@@ -22,6 +22,16 @@ Runs the multi-agent pipeline for a GitHub issue. Used for MODERATE, COMPLEX, FU
 /orchestrate 184 --parallel           # Isolated worktree execution
 ```
 
+!!! example "Example: running orchestrate"
+
+    ```
+    You: /orchestrate 42
+    Claude: Issue #42 classified as: SIMPLE (backend)
+            Using workflow: MAP-PLAN → PLAN-CHECK → PATCH → PROVE
+            ... [agents run] ...
+            Workflow complete. Next: /pr 42
+    ```
+
 See [Orchestrate Workflow](orchestrate.md) for full documentation.
 
 ### /quick

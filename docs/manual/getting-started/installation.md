@@ -33,6 +33,9 @@ This creates the central configuration repository at `~/agents/`.
 cd ~/agents/claude-config && ./install.sh
 ```
 
+!!! success "Expected output"
+    The installer prints progress for each phase: `[1/4] Symlinks... [2/4] Dependencies... [2.5/4] Plugins... [3/4] First-time setup... [4/4] Verification...` with a final summary of all checks passed.
+
 The installer runs four phases automatically.
 
 ### Phase 1: Symlinks
@@ -158,6 +161,11 @@ python3 -c "import yaml; print('OK')"
 claude
 ```
 
+!!! success "Expected output"
+    - All three `ls -la` commands show symlinks pointing to `~/agents/claude-config/...`
+    - PyYAML prints `OK`
+    - `claude` launches and typing `/` lists all slash commands (orchestrate, quick, pr, learn, metrics, etc.)
+
 You should see all slash commands available (type `/` to list them).
 
 ## Updating
@@ -175,6 +183,9 @@ The installer is idempotent -- it skips existing correct symlinks and only updat
     New commands, agents, or hooks may have been added. The symlinks themselves persist, but dependency versions or new plugin requirements might need updating.
 
 ## Troubleshooting
+
+!!! tip "Quick diagnostic"
+    Run `./install.sh` again -- it is idempotent and will report exactly which components are healthy and which need attention.
 
 | Problem | Solution |
 |---------|----------|

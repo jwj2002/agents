@@ -32,11 +32,24 @@ The notification plays the `Glass` sound via the AppleScript `sound name "Glass"
 display notification "PATCH finished for issue #184" with title "Claude Code" sound name "Glass"
 ```
 
+!!! success "What the macOS notification looks like"
+    A standard Notification Center banner appears in the top-right corner with:
+
+    - **Title**: Claude Code
+    - **Body**: PATCH finished for issue #184
+    - **Sound**: Glass chime
+
 ## iPhone Relay via Handoff
 
 macOS Notification Center notifications automatically forward to paired iPhones through Apple's Handoff / Continuity features. No additional configuration is needed beyond having Handoff enabled on both devices and being signed into the same Apple ID.
 
 This means you can start a long-running orchestrate pipeline, leave your desk, and receive a notification on your phone when the session finishes.
+
+!!! tip "iPhone Handoff setup"
+    1. On your Mac: System Settings > General > AirDrop & Handoff > enable Handoff
+    2. On your iPhone: Settings > General > AirPlay & Continuity > enable Handoff
+    3. Both devices must be signed into the same Apple ID and on the same Wi-Fi network
+    4. Ensure Notification Center is allowed for Terminal (or your terminal app) in System Settings > Notifications
 
 ## AppleScript Injection Sanitization
 

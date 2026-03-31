@@ -19,19 +19,20 @@ After:   orchestrate  --+
 
 ## PERSISTENT_STATE.yaml Schema
 
-```yaml
-active_work:
-  issue: 775
-  branch: feature/issue-775-asset-form-fields
-  phase: PATCH
-  last_action: Implemented backend models
-  completed_phases:
-    - MAP-PLAN
-    - PLAN-CHECK
-  worktree_path: null    # Set when --parallel is used
-meta:
-  updated: '2026-03-26'
-```
+!!! example "Populated YAML during an active orchestrate session"
+    ```yaml
+    active_work:
+      issue: 775
+      branch: feature/issue-775-asset-form-fields
+      phase: PATCH
+      last_action: Implemented backend models
+      completed_phases:
+        - MAP-PLAN
+        - PLAN-CHECK
+      worktree_path: null    # Set when --parallel is used
+    meta:
+      updated: '2026-03-26'
+    ```
 
 | Field | Type | Purpose |
 |-------|------|---------|

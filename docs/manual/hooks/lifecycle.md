@@ -49,6 +49,29 @@ When a new session begins, this hook restores context from the previous session:
 3. Detects if an orchestrate workflow was in progress
 4. Outputs continuation instructions with issue number, phase, and branch
 
+!!! example "What SessionStart outputs (~500 tokens)"
+
+    ```
+    ## Restored Context
+
+    ### Project State
+    active_work:
+      issue: 42
+      branch: feature/issue-42-health-check
+      phase: PATCH
+      last_action: Starting PATCH phase
+      completed_phases: [MAP-PLAN, PLAN-CHECK]
+
+    ### Critical Patterns (Always Apply)
+    1. VERIFICATION_GAP: Read spec/code before assuming
+    2. ENUM_VALUE: Use VALUES not Python names
+    3. COMPONENT_API: Read PropTypes before using
+
+    ### ACTIVE ORCHESTRATE WORKFLOW
+    Issue: #42 | Phase: PATCH | Branch: feature/issue-42-health-check
+    Continue with the current phase using the Task tool.
+    ```
+
 !!! note "Token Budget"
     SessionStart outputs approximately 500 tokens of restored context. This is an 85% reduction from the naive approach of dumping raw transcript summaries (~3,250 tokens). Every token of hook output competes with code context in the agent's working memory.
 

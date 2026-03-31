@@ -4,6 +4,8 @@ All system diagrams collected in one reference. These diagrams show how the comp
 
 ## 1. Repository Structure
 
+The `~/agents/` monorepo contains all Claude Code configuration alongside standalone agent projects.
+
 ```
 ~/agents/                              # Single git repo
   claude-config/                       # Claude Code configuration
@@ -27,6 +29,8 @@ All system diagrams collected in one reference. These diagrams show how the comp
 
 ## 2. Symlink Deployment
 
+How version-controlled config in the repo maps to the paths Claude Code reads at runtime.
+
 ```
 ~/agents/claude-config/                ~/.claude/
   agents/          ---symlink--->        agents/
@@ -46,6 +50,8 @@ All system diagrams collected in one reference. These diagrams show how the comp
 Changes to the repo are live immediately --- symlinks mean no re-install is needed. Run `git pull` on another machine and updates propagate.
 
 ## 3. Hook Lifecycle Flow
+
+The sequence of hook events from session start through completion, showing how state is persisted and restored.
 
 ```
 SESSION START
@@ -73,6 +79,8 @@ SESSION START
 ```
 
 ## 4. Task Routing Decision Tree
+
+How incoming tasks are classified by complexity tier and routed to the appropriate workflow.
 
 ```
 Task / GitHub Issue
@@ -105,6 +113,8 @@ TRIVIAL SIMPLE MODERATE  COMPLEX   FULLSTACK  PRIOR FAIL
 
 ## 5. Parallel Worktree Sessions
 
+How two concurrent `/orchestrate --parallel` sessions each get isolated worktrees with independent file systems.
+
 ```
 Tab 1: /orchestrate 42 --parallel    Tab 2: /orchestrate 57 --parallel
   .worktrees/issue-42/ (isolated)      .worktrees/issue-57/ (isolated)
@@ -120,6 +130,8 @@ Each worktree has its own files, git index, and `.agents/outputs/`. `PERSISTENT_
 
 ## 6. State Manager Functions
 
+The `state_manager.py` API surface and which components call each function.
+
 ```
 state_manager.py
   load_state()            <- read PERSISTENT_STATE.yaml
@@ -134,6 +146,8 @@ Callers: orchestrate (commands/), precompact, sessionstart, notify (hooks/)
 ```
 
 ## 7. Self-Learning Loop
+
+How PROVE outcomes feed back into agent behavior through the `/learn` command and pattern files.
 
 ```
 /orchestrate --> PROVE --> metrics.jsonl + failures.jsonl
@@ -155,6 +169,8 @@ Callers: orchestrate (commands/), precompact, sessionstart, notify (hooks/)
 
 ## 8. MCP Pattern Loading
 
+The fallback chain agents use to load failure patterns: MCP first, file-based second.
+
 ```
 +---------------------+     +---------------------------+
 |  Agent Pre-Flight   |---->|  MCP: failure_patterns()  |
@@ -173,6 +189,8 @@ Agents prefer MCP tools over file reads for pattern data. MCP provides structure
 
 ## 9. Obsidian Data Flow
 
+How Claude Code session data flows through the Obsidian agent into the vault, and which downstream tools consume it.
+
 ```
 Claude Code Sessions (.claude/projects/*/session.jsonl)
         |
@@ -188,6 +206,8 @@ obsidian-agent (Haiku) --+--> Obsidian Vault (STATUS.md, Daily, DASHBOARD)
 ```
 
 ## 10. Cross-Model Review
+
+How three AI models (Opus, Haiku, Codex) divide responsibilities across implementation, review, and validation.
 
 ```
 Claude Opus (Primary)          Claude Haiku (Review)

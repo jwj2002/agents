@@ -18,6 +18,18 @@ Or from within the project directory:
 
 The script copies template files without overwriting anything that already exists.
 
+!!! example "What the bootstrap creates"
+    ```
+    Created: CLAUDE.md
+    Created: .claude/settings.json
+    Created: .claude/commands/.gitkeep
+    Created: .claude/context/project-stack.md
+    Created: .claude/memory/.gitkeep
+    Created: .claude/rules/project-rules.md
+    Skipped: CLAUDE.md (already exists)
+    ```
+    Files that already exist are skipped, so the script is safe to re-run.
+
 ## What Gets Created
 
 ```
@@ -197,3 +209,8 @@ This applies to agents, commands, and rules. To customize an agent for a specifi
 
 !!! note "Project overrides are rare"
     Most projects use the global agents unchanged. Only override when a project has unique architectural patterns that require different agent behavior.
+
+!!! tip "CLAUDE.md best practices"
+    - **Be specific, not aspirational** -- write "Never run DROP TABLE" instead of "Be careful with the database"
+    - **Include exact commands** -- agents copy-paste your commands, so test them first
+    - **Update after failures** -- every agent mistake that a CLAUDE.md entry would have prevented is a missed guardrail

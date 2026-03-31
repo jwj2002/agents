@@ -4,6 +4,9 @@ Rules in this system follow a tiered loading strategy: load the minimum context 
 
 ## How Conditional Loading Works
 
+!!! info "Auto-loading behavior"
+    Rules load automatically based on which files the agent is reading or editing. You do not need to manually activate rules -- Claude Code matches the file path against the glob patterns in each rule's frontmatter and loads matching rules transparently.
+
 Claude Code evaluates rule files based on **path-based triggers** defined in each file's YAML frontmatter. When the agent is working in a directory that matches a trigger glob, the corresponding rule is loaded. When no match occurs, the rule stays unloaded and costs zero tokens.
 
 ```yaml

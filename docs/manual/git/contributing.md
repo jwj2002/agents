@@ -62,13 +62,14 @@ Claude Code agents use the `--parallel` flag on `/orchestrate`, which automatica
 
 Group independent issues into parallel waves; dependent issues run sequentially:
 
-```
-Wave 1 (parallel): #630 (injection scanner), #631 (PII scanner), #633 (audit log)
-    -> No file overlap, all three run simultaneously
+!!! example "Wave scheduling in practice"
+    ```
+    Wave 1 (parallel): #630 (injection scanner), #631 (PII scanner), #633 (audit log)
+        -> No file overlap, all three run simultaneously
 
-Wave 2 (serial): #632 (taint tracking)
-    -> Depends on #630 and #631, starts after Wave 1 merges
-```
+    Wave 2 (serial): #632 (taint tracking)
+        -> Depends on #630 and #631, starts after Wave 1 merges
+    ```
 
 ### Rebase Before PR
 
@@ -130,15 +131,16 @@ One branch (`feature/personal-probes`) was reused for 7 consecutive PRs over 2 h
 
 ## Anti-Patterns
 
-| Anti-Pattern | Why It Fails | Correct Approach |
-|-------------|-------------|-----------------|
-| Reuse one branch for multiple PRs | Cannot revert individual changes | One branch per PR |
-| Bundle multiple issues in one commit | Cannot bisect or blame individual issues | One issue per commit |
-| `debug:` commits on main | Noise in history, debug code in production | Remove before PR |
-| Implement then immediately revert | Wasted effort, cluttered history | Validate approach before coding |
-| Force push to shared branches | Destroys other agents' work | Rebase and push normally |
-| Long-lived feature branches | Diverge from main, painful merges | Keep branches under 24 hours |
-| Config flip-flops | Shows undecided architecture | Decide with data before implementing |
+!!! danger "These patterns cause cascading failures in multi-agent workflows"
+    | Anti-Pattern | Why It Fails | Correct Approach |
+    |-------------|-------------|-----------------|
+    | Reuse one branch for multiple PRs | Cannot revert individual changes | One branch per PR |
+    | Bundle multiple issues in one commit | Cannot bisect or blame individual issues | One issue per commit |
+    | `debug:` commits on main | Noise in history, debug code in production | Remove before PR |
+    | Implement then immediately revert | Wasted effort, cluttered history | Validate approach before coding |
+    | Force push to shared branches | Destroys other agents' work | Rebase and push normally |
+    | Long-lived feature branches | Diverge from main, painful merges | Keep branches under 24 hours |
+    | Config flip-flops | Shows undecided architecture | Decide with data before implementing |
 
 ## Repository Setup Checklist
 

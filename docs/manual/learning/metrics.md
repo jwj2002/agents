@@ -147,6 +147,30 @@ With `--json`, the dashboard outputs structured data for automation or external 
 }
 ```
 
+!!! example "Sample /metrics output"
+
+    ```
+    ═══════════════════════════════════════
+              AGENT METRICS (30 days)
+    ═══════════════════════════════════════
+    Issues:     47
+    Pass:       43 (91.5%)
+    Blocked:     4 (8.5%)
+
+    By Complexity:
+      TRIVIAL:  12/12 (100%)
+      SIMPLE:   24/26 (92.3%)
+      COMPLEX:   7/9  (77.8%)
+
+    Top Failures:
+      VERIFICATION_GAP: 2
+      ENUM_VALUE: 1
+      MULTI_MODEL: 1
+
+    Trend: ↑ Improving (85% → 91.5%)
+    ═══════════════════════════════════════
+    ```
+
 !!! note "Data Requirements"
     `/metrics` requires `.claude/memory/metrics.jsonl` to exist. Run issues through `/orchestrate` to generate outcome data. The PROVE agent writes records automatically at the end of every workflow.
 
