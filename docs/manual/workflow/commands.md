@@ -13,7 +13,7 @@ All slash commands are defined in `claude-config/commands/` and available global
 
 ### /orchestrate
 
-Runs the MAP - PLAN - PATCH - PROVE pipeline for a GitHub issue.
+Runs the multi-agent pipeline for a GitHub issue. Used for MODERATE, COMPLEX, FULLSTACK, and PRIOR FAIL routing tiers. Internally selects a pipeline tier (TRIVIAL, SIMPLE, or COMPLEX) to determine which agents run.
 
 ```bash
 /orchestrate 184                      # Standard
@@ -26,7 +26,7 @@ See [Orchestrate Workflow](orchestrate.md) for full documentation.
 
 ### /quick
 
-Executes small tasks directly without sub-agents, artifacts, or GitHub issues.
+Handles TRIVIAL routing tier tasks --- executes small tasks directly without sub-agents, artifacts, or GitHub issues.
 
 ```bash
 /quick Fix typo in README

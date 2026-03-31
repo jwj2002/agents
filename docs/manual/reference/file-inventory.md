@@ -10,7 +10,7 @@ Symlinked to `~/.claude/agents/`. Agent definitions are markdown files that defi
 |------|------|---------|
 | `_base.md` | 10.3 KB | Base agent inherited by all others: pre-flight, artifact naming, validation, AGENT_RETURN directive |
 | `map.md` | 3.6 KB | Investigator for COMPLEX issues (read-only, phase 1) |
-| `map-plan.md` | 6.5 KB | Combined investigator + architect for TRIVIAL/SIMPLE issues (read-only, phase 1+2) |
+| `map-plan.md` | 6.5 KB | Combined investigator + architect for TRIVIAL/SIMPLE pipeline tiers (read-only, phase 1+2) |
 | `plan.md` | 4.1 KB | Architect for COMPLEX issues (read-only, phase 2) |
 | `contract.md` | 3.3 KB | Interface designer for fullstack issues (read-only, phase 2.5) |
 | `plan-checker.md` | 3.1 KB | Plan validator (read-only, phase 2.8) |

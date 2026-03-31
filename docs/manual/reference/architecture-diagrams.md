@@ -72,27 +72,33 @@ SESSION START
   [continue working]
 ```
 
-## 4. Orchestrate Pipeline Decision Tree
+## 4. Task Routing Decision Tree
 
 ```
-GitHub Issue --> Classify Complexity
-                    |
-    +---------------+---------------+
-    |               |               |
-  TRIVIAL         SIMPLE          COMPLEX
-  (1-2 files)     (3-5 files)     (6+ files)
-    |               |               |
-  MAP-PLAN        MAP-PLAN      MAP -> PLAN
-    |               |               |
-    |          fullstack? -----> CONTRACT(*)
-    |               |               |
-    |          PLAN-CHECK       PLAN-CHECK
-    |               |               |
-  PATCH           PATCH           PATCH
-    |               |               |
-  PROVE-lite      PROVE           PROVE
-    |               |               |
-    +------------- /pr -------------+
+Task / GitHub Issue
+        |
+  Classify Routing Tier
+        |
+  +-----+-------+----------+-----------+-----------+
+  |     |       |          |           |           |
+TRIVIAL SIMPLE MODERATE  COMPLEX   FULLSTACK  PRIOR FAIL
+(1 file)(1-3)  (4-5)     (6+)      (any)      (any)
+  |     |       |          |           |           |
+/quick  Plan    +--------- /orchestrate -----------+
+        Mode    |          |           |           |
+              SIMPLE     COMPLEX    SIMPLE or   SIMPLE or
+              pipeline   pipeline   COMPLEX +   COMPLEX +
+                |          |        CONTRACT    failure ctx
+                |          |           |           |
+              MAP-PLAN  MAP->PLAN  MAP-PLAN or MAP->PLAN
+                |          |           |           |
+           PLAN-CHECK  PLAN-CHECK  CONTRACT(*)    |
+                |          |           |           |
+              PATCH      PATCH      PATCH       PATCH
+                |          |           |           |
+              PROVE      PROVE      PROVE       PROVE
+                |          |           |           |
+                +--------- /pr --------+----------+
 
 (*) CONTRACT-lite if 0 new endpoints + <=2 frontend files
 ```

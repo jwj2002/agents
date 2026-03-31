@@ -2,12 +2,15 @@
 
 **Version**: 1.0 | **Phase**: 1+2 | **Role**: Investigator + Architect
 
-MAP-PLAN combines investigation and planning into a single agent for TRIVIAL and SIMPLE issues. It reads code, documents what it finds, and produces a file-by-file implementation plan -- but never modifies any code.
+MAP-PLAN combines investigation and planning into a single agent for the TRIVIAL and SIMPLE pipeline tiers within `/orchestrate`. It reads code, documents what it finds, and produces a file-by-file implementation plan -- but never modifies any code.
+
+!!! info "Routing context"
+    MAP-PLAN runs when the routing model selects `/orchestrate` for MODERATE or higher tasks, and the orchestrate pipeline classifies the work as TRIVIAL or SIMPLE pipeline tier. Tasks routed to `/quick` or Plan Mode never reach MAP-PLAN.
 
 ## When to Use
 
-| Complexity | Use MAP-PLAN? | Alternative |
-|------------|---------------|-------------|
+| Pipeline Tier | Use MAP-PLAN? | Alternative |
+|---------------|---------------|-------------|
 | TRIVIAL | Yes | -- |
 | SIMPLE | Yes | -- |
 | COMPLEX | No | Use separate MAP + PLAN agents |
@@ -62,10 +65,10 @@ Every MAP-PLAN output must include a **Verification Steps** section documenting:
 
 ## Process Steps
 
-### 1. Classify Complexity
+### 1. Classify Pipeline Tier
 
-| Level | Criteria |
-|-------|----------|
+| Pipeline Tier | Criteria |
+|---------------|----------|
 | TRIVIAL | Docs, config, renames, deletions |
 | SIMPLE | 1-3 files, localized change |
 | COMPLEX | New endpoints, migrations, cross-module |

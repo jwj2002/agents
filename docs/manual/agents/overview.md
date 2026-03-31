@@ -6,9 +6,9 @@ The orchestrate pipeline uses specialized agents that execute in sequence, each 
 
 | Agent | Phase | Role | Read-Only? | Target / Max Lines |
 |-------|-------|------|------------|-------------------|
-| MAP | 1 | Investigator (COMPLEX only) | Yes | 150 / 200 |
-| MAP-PLAN | 1+2 | Investigator + Architect (TRIVIAL/SIMPLE) | Yes | 400 / 500 |
-| PLAN | 2 | Architect (COMPLEX only) | Yes | 400 / 500 |
+| MAP | 1 | Investigator (COMPLEX pipeline only) | Yes | 150 / 200 |
+| MAP-PLAN | 1+2 | Investigator + Architect (TRIVIAL/SIMPLE pipeline) | Yes | 400 / 500 |
+| PLAN | 2 | Architect (COMPLEX pipeline only) | Yes | 400 / 500 |
 | TEST-PLANNER | 2 | Test matrix designer | Yes | 250 / 350 |
 | CONTRACT | 2.5 | Interface designer (fullstack) | Yes | 200 / 300 |
 | PLAN-CHECK | 2.8 | Plan validator | Yes | 80 / 120 |
@@ -20,12 +20,15 @@ The orchestrate pipeline uses specialized agents that execute in sequence, each 
 
 ## Pipeline Flow
 
-The pipeline route depends on complexity classification:
+!!! info "Pipeline tiers vs routing tiers"
+    This page describes the **pipeline tiers** — which agents run inside `/orchestrate`. For the full **routing model** (how tasks are classified and directed to `/quick`, Plan Mode, or `/orchestrate`), see the [Orchestrate Pipeline](../workflow/orchestrate.md) page.
+
+When `/orchestrate` runs, it selects one of three pipeline tiers:
 
 ```
-TRIVIAL:   MAP-PLAN ─────────────────────────────── PATCH ── PROVE-lite
-SIMPLE:    MAP-PLAN ── [TEST-PLANNER] ── CONTRACT* ── PLAN-CHECK ── PATCH ── PROVE
-COMPLEX:   MAP ── PLAN ── [TEST-PLANNER] ── CONTRACT* ── PLAN-CHECK ── PATCH ── PROVE
+TRIVIAL pipeline:  MAP-PLAN ─────────────────────────────── PATCH ── PROVE-lite
+SIMPLE pipeline:   MAP-PLAN ── [TEST-PLANNER] ── CONTRACT* ── PLAN-CHECK ── PATCH ── PROVE
+COMPLEX pipeline:  MAP ── PLAN ── [TEST-PLANNER] ── CONTRACT* ── PLAN-CHECK ── PATCH ── PROVE
 
 * = mandatory for fullstack only
 [ ] = optional, enabled with --with-tests
@@ -33,16 +36,16 @@ COMPLEX:   MAP ── PLAN ── [TEST-PLANNER] ── CONTRACT* ── PLAN-CH
 
 ```
                   +----------------+
-                  | GitHub Issue   |
+                  | /orchestrate   |
                   +-------+--------+
                           |
                 +---------+---------+
-                | Classify Complexity|
+                | Select Pipeline   |
                 +---------+---------+
            +----------+----------+----------+
            v          v                     v
-       TRIVIAL     SIMPLE               COMPLEX
-       1-2 files   3-5 files            6+ files
+     TRIVIAL       SIMPLE              COMPLEX
+     pipeline      pipeline            pipeline
            |          |                     |
        MAP-PLAN   MAP-PLAN             MAP -> PLAN
            |          |                     |

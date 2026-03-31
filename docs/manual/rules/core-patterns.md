@@ -89,7 +89,7 @@ The rule file uses `alwaysApply: true` in its frontmatter, which means Claude Co
 ```
 
 !!! tip "Full Patterns for Complex Issues"
-    For COMPLEX issues (6+ files, architectural decisions), agents load the extended pattern file at `.claude/memory/patterns-full.md` (~660 lines). This contains detailed prevention checklists with examples for all 12 root cause codes. The core patterns file handles the common cases; the full file handles edge cases.
+    For COMPLEX pipeline tier issues (6+ files, architectural decisions), agents load the extended pattern file at `.claude/memory/patterns-full.md` (~660 lines). This contains detailed prevention checklists with examples for all 12 root cause codes. The core patterns file handles the common cases; the full file handles edge cases.
 
 ## Relationship to the Learning Loop
 

@@ -1,6 +1,6 @@
 # Quick Mode
 
-The `/quick` command handles small, well-scoped tasks without the overhead of the full orchestrate pipeline. No sub-agents, no artifacts, no GitHub issue required.
+The `/quick` command handles small, well-scoped tasks without the overhead of the full orchestrate pipeline. No sub-agents, no artifacts, no GitHub issue required. In the routing model, `/quick` is the destination for **TRIVIAL** routing tier tasks (1 file, obvious fix).
 
 ## Usage
 
@@ -14,15 +14,15 @@ The argument is a plain-text description of the task.
 
 ## When to Use /quick vs /orchestrate
 
-| Criteria | `/quick` | `/orchestrate` |
-|----------|----------|----------------|
-| Scope | 1-2 files, obvious fix | Multi-file, needs planning |
-| Tracking | No GitHub issue needed | Requires GitHub issue |
-| Branching | Stays on current branch | Creates feature branch |
-| Artifacts | None generated | Full MAP - PATCH - PROVE chain |
-| Sub-agents | None spawned | Specialized agents per phase |
-| Patterns | Critical patterns only | Full patterns for COMPLEX |
-| Time | Seconds to minutes | Minutes to longer |
+| Criteria | `/quick` (routing: TRIVIAL) | Plan Mode (routing: SIMPLE) | `/orchestrate` (routing: MODERATE+) |
+|----------|----------------------------|----------------------------|--------------------------------------|
+| Scope | 1 file, obvious fix | 1-3 files, clear requirements | 4+ files, needs investigation |
+| Tracking | No GitHub issue needed | No GitHub issue needed | Requires GitHub issue |
+| Branching | Stays on current branch | Stays on current branch | Creates feature branch |
+| Artifacts | None generated | None generated | Full MAP - PATCH - PROVE chain |
+| Sub-agents | None spawned | None spawned | Specialized agents per phase |
+| Patterns | Critical patterns only | Critical patterns only | Full patterns for COMPLEX pipeline |
+| Time | Seconds | Minutes | Minutes to longer |
 
 !!! tip "Rule of thumb"
     If you hesitate about whether it fits `/quick`, use `/orchestrate` instead. Quick mode is for changes you could describe in one sentence and verify in one command.

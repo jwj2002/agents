@@ -96,21 +96,28 @@ It is **not** prompt engineering. It is the discipline of designing agent pipeli
 
 All configuration is **symlinked** from `~/.claude/` to the repo. Changes propagate instantly. `install.sh` handles setup on any platform (macOS, WSL, Linux).
 
-## The Orchestrate Workflow
+## Task Routing
 
-Three complexity tiers, each with a different agent path:
+Six routing tiers determine how each task is handled:
+
+| Routing Tier | Files | Route To | Example |
+|-------------|-------|----------|---------|
+| **TRIVIAL** | 1 | `/quick` (no pipeline) | Fix typo, update config |
+| **SIMPLE** | 1-3 | Plan Mode (no pipeline) | Add endpoint, wire component |
+| **MODERATE** | 4-5 | `/orchestrate` (SIMPLE pipeline) | New service + tests |
+| **COMPLEX** | 6+ | `/orchestrate` (COMPLEX pipeline) | New module with schema + service + tests |
+| **FULLSTACK** | Any | `/orchestrate` + CONTRACT | Cross-stack feature with enum/API contracts |
+| **PRIOR FAIL** | Any | `/orchestrate` + failure context | Retry with root cause injection |
 
 ```
-TRIVIAL:  MAP-PLAN ──────────────────────────── PATCH → PROVE-lite
-SIMPLE:   MAP-PLAN → [CONTRACT*] → PLAN-CHECK → PATCH → PROVE
-COMPLEX:  MAP → PLAN → [CONTRACT*] → PLAN-CHECK → PATCH → PROVE
+TRIVIAL ──────────────── /quick (direct fix, no agents)
+SIMPLE ─────────────────  Plan Mode (no agents, no pipeline)
+MODERATE ───┐
+FULLSTACK ──┤            /orchestrate pipelines:
+PRIOR FAIL ─┤
+COMPLEX ────┘              SIMPLE:   MAP-PLAN → [CONTRACT*] → PLAN-CHECK → PATCH → PROVE
+                           COMPLEX:  MAP → PLAN → [CONTRACT*] → PLAN-CHECK → PATCH → PROVE
 ```
-
-| Tier | Files | Agents | Example |
-|------|-------|--------|---------|
-| **TRIVIAL** | 1-2 | 3 (skip PLAN-CHECK, PROVE-lite) | Fix typo, update config |
-| **SIMPLE** | 3-5 | 4-6 | Add endpoint, wire component |
-| **COMPLEX** | 6+ | 6-8 | New module with schema + service + tests |
 
 Every issue gets outcome tracking in `metrics.jsonl`. Failures get root cause classification in `failures.jsonl`. The `/learn` command turns this data into prevention patterns.
 

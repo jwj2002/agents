@@ -40,10 +40,10 @@ Within a single orchestrate session, certain agents can run concurrently when th
 
 | Pattern | Agents | Condition |
 |---------|--------|-----------|
-| MAP fan-out | Explore backend + frontend + tests | COMPLEX issues |
-| MAP + TEST-PLANNER | MAP + TEST-PLANNER | COMPLEX with `--with-tests` |
+| MAP fan-out | Explore backend + frontend + tests | COMPLEX pipeline tier |
+| MAP + TEST-PLANNER | MAP + TEST-PLANNER | COMPLEX pipeline with `--with-tests` |
 | PLAN-CHECK + TEST-PLANNER | PLAN-CHECK + TEST-PLANNER | `--with-tests` flag |
-| Speculative PATCH | PLAN-CHECK + PATCH | SIMPLE backend-only |
+| Speculative PATCH | PLAN-CHECK + PATCH | SIMPLE pipeline, backend-only |
 | Fullstack PATCH | Backend PATCH + Frontend PATCH | Fullstack with CONTRACT |
 
 ### MAP Fan-Out
@@ -61,7 +61,7 @@ v
 MAP agent synthesizes all findings into single artifact
 ```
 
-Skip fan-out for TRIVIAL/SIMPLE issues (MAP-PLAN handles exploration inline) or when only one subsystem is involved.
+Skip fan-out for TRIVIAL/SIMPLE pipeline tiers (MAP-PLAN handles exploration inline) or when only one subsystem is involved.
 
 ### Speculative PATCH
 

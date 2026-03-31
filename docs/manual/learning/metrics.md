@@ -21,15 +21,18 @@ The dashboard displays six panels, each calculated from the JSONL data files.
 
 Issues completed, first-attempt success rate, average recovery attempts, and average time to completion. Success rate is the primary KPI: `PASS / (PASS + BLOCKED)`.
 
-### Success by Complexity
+### Success by Pipeline Tier
 
-Breakdown across the three complexity tiers:
+Breakdown across the three pipeline tiers used by `/orchestrate`:
 
-| Complexity | Typical Rate | Implication |
-|------------|-------------|-------------|
+| Pipeline Tier | Typical Rate | Implication |
+|---------------|-------------|-------------|
 | TRIVIAL | 95% | Single-file, obvious changes |
 | SIMPLE | 85% | 1-3 files, clear requirements |
 | COMPLEX | 43% | 4+ files, cross-cutting, ambiguous |
+
+!!! info "Pipeline tiers vs routing tiers"
+    Metrics track **pipeline tiers** (TRIVIAL, SIMPLE, COMPLEX) — the agent sequence used within `/orchestrate`. The routing tiers (MODERATE, FULLSTACK, PRIOR FAIL) determine which tasks reach `/orchestrate` in the first place. MODERATE routes map to the SIMPLE pipeline; COMPLEX and FULLSTACK route to the COMPLEX pipeline.
 
 !!! tip "COMPLEX below 50%"
     If COMPLEX success rate drops below 50%, the recommendations engine suggests breaking COMPLEX issues into SIMPLE sub-issues before execution.
@@ -156,7 +159,7 @@ Metrics records follow the canonical schema from `_base.md`:
 | `issue` | integer | Yes | GitHub issue number |
 | `date` | string | Yes | ISO date (YYYY-MM-DD) |
 | `status` | string | Yes | `PASS` or `BLOCKED` |
-| `complexity` | string | Yes | `TRIVIAL`, `SIMPLE`, or `COMPLEX` |
+| `complexity` | string | Yes | Pipeline tier: `TRIVIAL`, `SIMPLE`, or `COMPLEX` |
 | `stack` | string | Yes | `backend`, `frontend`, or `fullstack` |
 | `agents_run` | array | Yes | List of agent names that executed |
 | `agent_versions` | object | Yes | Map of agent name to version string |

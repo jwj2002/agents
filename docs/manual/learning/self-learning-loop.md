@@ -52,7 +52,7 @@ One JSON line per completed issue, written automatically by the PROVE agent:
 }
 ```
 
-**Required fields**: `issue`, `date`, `status`, `complexity`, `stack`, `agents_run`, `agent_versions`
+**Required fields**: `issue`, `date`, `status`, `complexity` (pipeline tier: TRIVIAL/SIMPLE/COMPLEX), `stack`, `agents_run`, `agent_versions`
 
 ### failures.jsonl
 
