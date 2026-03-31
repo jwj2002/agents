@@ -1,0 +1,124 @@
+site_name: Agentic Engineering Manual
+site_description: A comprehensive guide to building systematic, repeatable AI-assisted development workflows
+site_author: Jason Job
+site_url: https://agents-manual.pages.dev
+
+repo_url: https://github.com/jwj2002/agents
+repo_name: jwj2002/agents
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.mark
+  - pymdownx.keys
+  - tables
+  - attr_list
+  - md_in_html
+  - def_list
+  - footnotes
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/jwj2002
+
+docs_dir: docs/manual
+
+nav:
+  - Home: index.md
+
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Multi-Machine Sync: getting-started/multi-machine.md
+    - Project Setup: getting-started/project-setup.md
+
+  - Workflow:
+    - Orchestrate Pipeline: workflow/orchestrate.md
+    - Command Reference: workflow/commands.md
+    - Quick Mode: workflow/quick-mode.md
+    - Parallel Execution: workflow/parallel.md
+
+  - Agents:
+    - Agent Overview: agents/overview.md
+    - MAP-PLAN: agents/map-plan.md
+    - PATCH: agents/patch.md
+    - PROVE: agents/prove.md
+    - CONTRACT: agents/contract.md
+
+  - Hooks:
+    - Lifecycle Hooks: hooks/lifecycle.md
+    - State Manager: hooks/state-manager.md
+    - Notifications: hooks/notifications.md
+    - Custom Hooks: hooks/custom-hooks.md
+
+  - Self-Learning:
+    - Learning Loop: learning/self-learning-loop.md
+    - Failure Patterns: learning/failure-patterns.md
+    - Metrics Dashboard: learning/metrics.md
+
+  - Integrations:
+    - Codex Plugin: integrations/codex-plugin.md
+    - MCP Servers: integrations/mcp-servers.md
+    - Obsidian Agent: integrations/obsidian-agent.md
+
+  - Rules:
+    - Core Patterns: rules/core-patterns.md
+    - Conditional Rules: rules/conditional-rules.md
+    - Writing CLAUDE.md: rules/claude-md.md
+
+  - Git:
+    - Git Workflow: git/workflow.md
+    - Contributing Policy: git/contributing.md
+
+  - Reference:
+    - Glossary: reference/glossary.md
+    - File Inventory: reference/file-inventory.md
+    - Architecture Diagrams: reference/architecture-diagrams.md
