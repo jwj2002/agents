@@ -24,5 +24,8 @@ venv/
 .agents/
 .claude/
 
+# MkDocs build output
+site/
+
 # Local-only settings (not symlinked)
 claude-config/settings.local.json
