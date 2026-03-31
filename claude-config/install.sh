@@ -197,6 +197,45 @@ fi
 
 echo ""
 
+# ─── Phase 2.5: Plugins ─────────────────────────────────────────────────────
+
+echo "Phase 2.5: Plugins"
+
+CODEX_PLUGIN_STATUS="skipped"
+
+if command -v claude &>/dev/null; then
+    # Add OpenAI Codex marketplace (if not already added)
+    if claude plugin marketplace list 2>/dev/null | grep -q "openai-codex"; then
+        CODEX_PLUGIN_STATUS="marketplace exists"
+        echo "  ✓ Codex marketplace (already configured)"
+    else
+        if claude plugin marketplace add openai/codex-plugin-cc 2>/dev/null; then
+            echo "  ✓ Codex marketplace added"
+        else
+            CODEX_PLUGIN_STATUS="marketplace failed"
+            echo "  ✗ Failed to add Codex marketplace"
+        fi
+    fi
+
+    # Install codex plugin (if not already installed)
+    if claude plugin list 2>/dev/null | grep -q "codex@openai-codex"; then
+        CODEX_PLUGIN_STATUS="installed"
+        echo "  ✓ Codex plugin (already installed)"
+    else
+        if claude plugin install codex@openai-codex 2>/dev/null; then
+            CODEX_PLUGIN_STATUS="installed"
+            echo "  ✓ Codex plugin installed"
+        else
+            CODEX_PLUGIN_STATUS="install failed"
+            echo "  ✗ Failed to install Codex plugin (need: npm install -g @openai/codex)"
+        fi
+    fi
+else
+    echo "  ⚠ claude CLI not found — skipping plugin install"
+fi
+
+echo ""
+
 # ─── Phase 3: First-time Setup ──────────────────────────────────────────────
 
 echo "Phase 3: First-time setup"
@@ -333,6 +372,7 @@ echo "  Platform:    $PLATFORM_LABEL"
 echo "  Symlinks:    ✓ $LINKS_TOTAL/$LINKS_TOTAL linked"
 echo "  MCP Server:  $MCP_STATUS"
 echo "  PyYAML:      $PYYAML_STATUS"
+echo "  Codex Plugin: $CODEX_PLUGIN_STATUS"
 
 # Vault summary
 if [ "$PLATFORM" = "wsl" ] && [ -n "$WIN_VAULT" ]; then
