@@ -1,8 +1,8 @@
-# Obsidian Agent config — Personal machine (WSL/Linux)
+# Obsidian Agent config — Personal machine (macOS)
 # Applied by install-all.sh when profile=personal
 
 [vault]
-path = "~/obsidian/MyVault"
+path = "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/MyVault"
 projects_folder = "Projects"
 
 [claude]

@@ -60,12 +60,12 @@ detect_profile() {
 
     # Add your hostname patterns here
     case "$hostname" in
-        *JJ-DELLPRO14*|*dell*|*personal*)
-            echo "personal"
+        *JJ-DELLPRO14*|*dell*)
+            echo "work"
             return
             ;;
-        *work*|*mac*|*MBP*|*MacBook*)
-            echo "work"
+        *mac*|*MBP*|*MacBook*|*personal*)
+            echo "personal"
             return
             ;;
     esac
