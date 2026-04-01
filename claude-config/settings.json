@@ -43,6 +43,17 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/context_monitor.py"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {

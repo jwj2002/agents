@@ -365,6 +365,9 @@ Apply VERIFICATION_GAP, ENUM_VALUE, and COMPONENT_API checks as relevant.
 - {list any prior artifacts for this issue}
 ```
 
+!!! warning "Fresh Context Rule"
+    Each agent gets a clean context window. Pass file PATHS in the artifact list, not file CONTENTS. Let agents use the Read tool to load what they need. This ensures consistent quality regardless of how long the orchestrate session has been running.
+
 #### MAP Fan-Out (COMPLEX issues only)
 
 For COMPLEX issues, the MAP phase can fan out parallel exploration agents to investigate different subsystems concurrently. The MAP agent then synthesizes findings into a single artifact.
@@ -397,6 +400,9 @@ Task(
   Report: test file paths, what is/isn't covered, test patterns used.'''
 )
 ```
+
+!!! info "Fan-out agents get fresh context"
+    Each Explore agent spawns with only the issue title and investigation focus. Do NOT paste codebase findings into the prompt — let each agent discover independently.
 
 **After all complete**: Feed combined findings into MAP agent prompt as `## Exploration Results`.
 This replaces MAP doing its own sequential exploration, saving investigation time.
