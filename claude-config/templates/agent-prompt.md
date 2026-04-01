@@ -2,6 +2,26 @@
 
 Used by orchestrate.md to construct Task() prompts. The orchestrator reads this template and substitutes variables before passing to the Task tool.
 
+## Context Isolation (MANDATORY)
+
+Every agent spawned via this template runs with a **fresh context window**. To maintain consistent quality from task 1 to task 50:
+
+1. **DO NOT** pass conversation history, prior tool results, or orchestrator reasoning to agents
+2. **DO** pass only: this template (filled), the referenced artifact files, and rules/patterns
+3. **DO** let the agent read its own files via Read tool rather than pasting file contents into the prompt
+4. The agent's prompt should consume <30% of context, leaving >70% for the agent's own work
+
+### What Goes Into an Agent Prompt
+- Filled template variables (issue, branch, stack, complexity, artifact list)
+- Prior failure block (if re-attempt)
+- Agent-specific instructions (1-2 sentences)
+
+### What NEVER Goes Into an Agent Prompt
+- Orchestrator's exploration results or reasoning
+- Contents of files (let the agent Read them)
+- Conversation history between user and orchestrator
+- Other agents' full artifact contents (pass file paths, not contents)
+
 ## Variables
 
 | Variable | Description | Example |
