@@ -1,6 +1,6 @@
 # Hook Lifecycle
 
-Claude Code hooks fire at specific moments during a session. Four hooks turn stateless chat sessions into stateful development workflows by persisting context across compactions, verifying completion quality, and sending notifications.
+Claude Code hooks fire at specific moments during a session. Five hooks turn stateless chat sessions into stateful development workflows by persisting context across compactions, monitoring context usage, verifying completion quality, and sending notifications.
 
 ## Hook Execution Order
 
@@ -13,6 +13,14 @@ Claude Code hooks fire at specific moments during a session. Four hooks turn sta
 +-----------------------------------------------------------------+
                           |
                     [Session Work]
+                          |
++-- PostToolUse (after each tool call) ------------------------+
+|  context_monitor.py                                          |
+|  +-- Check remaining context window %                        |
+|  +-- Debounce: skip unless 10 calls elapsed or escalation    |
+|  +-- Output WARNING (<=35%) or CRITICAL (<=25%)              |
+|  +-- Always exits 0 (advisory only)                          |
++-----------------------------------------------------------------+
                           |
 +-- PreCompact ----------------------------------------------+
 |  precompact_checkpoint.py                                   |
@@ -112,6 +120,23 @@ The output is advisory -- it prints warnings visible to the user as context for 
 
 Sends a macOS Notification Center alert when the session finishes. See [Notifications](notifications.md) for details.
 
+## PostToolUse: Context Monitor
+
+**File**: `context_monitor.py`
+
+`context_monitor.py` runs after every tool call and monitors context window usage:
+
+| Remaining Context | Severity | Action |
+|-------------------|----------|--------|
+| > 35% | Silent | No output |
+| <= 35% | WARNING | "Avoid starting new complex work" |
+| <= 25% | CRITICAL | "Context nearly exhausted -- wrap up or compact" |
+
+- Debounced every 10 tool calls to avoid spam
+- Severity escalation bypasses debounce (WARNING to CRITICAL warns immediately)
+- Session-isolated state in `/tmp/claude-ctx-monitor-{session_id}.json`
+- Always exits 0 (advisory only, never blocks)
+
 ## Configuration
 
 Hooks are configured in `settings.json`:
@@ -137,6 +162,17 @@ Hooks are configured in `settings.json`:
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/sessionstart_restore_state.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/context_monitor.py"
           }
         ]
       }

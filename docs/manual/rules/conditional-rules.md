@@ -29,6 +29,9 @@ Rules with `alwaysApply: true` bypass the path matching and load into every sess
 | `fastapi-layered-pattern.md` | 23.6 KB (767 lines) | `**/backend/**`, `**/api/**`, `**/services/**` | Full layered architecture reference: router, service, repository, models, schemas, deps |
 | `orchestrate-workflow.md` | 16.7 KB (588 lines) | `.agents/**/*.md` | Agent efficiency rules, artifact naming, size compliance, CONTRACT requirements |
 | `spec-review-workflow.md` | 12.0 KB (361 lines) | `**/specs/**`, `**/.agents/**` | Spec finalization gate, review process, issue creation rules |
+| `behavioral-evals.md` | 4.2 KB (~140 lines) | PROVE phase | Behavioral verification test suite |
+| `eval-file-mapping.md` | 1.2 KB (~38 lines) | PROVE phase | Maps file patterns to relevant evals |
+| `post-merge-verification.md` | 1.2 KB (~38 lines) | `/pr --merge` | Post-merge ops verification checklist |
 
 ## Token Budget Analysis
 

@@ -14,6 +14,7 @@ The orchestrate command is your primary tool for implementing GitHub issues. You
 /orchestrate 184 --resume               # Resume from last completed phase
 /orchestrate 184 --parallel             # Run in isolated worktree
 /orchestrate 184 --parallel --resume    # Resume in existing worktree
+/orchestrate 184 --discuss              # Add DISCUSS phase before investigation
 ```
 
 If no issue number is provided, you will be prompted to create one with `/feature` or `/bug`.
@@ -25,6 +26,7 @@ If no issue number is provided, you will be prompted to create one with `/featur
 | `--with-tests` | Adds TEST-PLANNER agent after MAP-PLAN. Recommended for calculations, formulas, or complex business logic. |
 | `--resume` | Skips already-completed phases. Reads state from `PERSISTENT_STATE.yaml`. |
 | `--parallel` | Creates an isolated git worktree (`.worktrees/issue-{N}/`). Enables concurrent orchestrate sessions on independent issues. |
+| `--discuss` | Adds DISCUSS agent before MAP-PLAN/MAP to capture design decisions and trade-offs before investigation begins. |
 
 ## Pipeline Overview
 
@@ -33,13 +35,13 @@ GitHub Issue
      |
      +-- TRIVIAL --> MAP-PLAN --> PATCH --> PROVE-lite
      |
-     +-- SIMPLE ---> MAP-PLAN --> [TEST-PLANNER] --> CONTRACT* --> PLAN-CHECK --> PATCH --> PROVE
+     +-- SIMPLE ---> [DISCUSS] --> MAP-PLAN --> [TEST-PLANNER] --> CONTRACT* --> PLAN-CHECK --> PATCH --> PROVE
      |
-     +-- COMPLEX --> MAP --> PLAN --> [TEST-PLANNER] --> CONTRACT* --> PLAN-CHECK --> PATCH --> PROVE
+     +-- COMPLEX --> [DISCUSS] --> MAP --> PLAN --> [TEST-PLANNER] --> CONTRACT* --> PLAN-CHECK --> PATCH --> PROVE
 
      * CONTRACT is MANDATORY for fullstack (PATCH will STOP without it)
        CONTRACT-lite (inline) for simple fullstack (0 new endpoints, <=2 frontend files)
-     [ ] = Optional (requires --with-tests flag)
+     [ ] = Optional (requires --with-tests or --discuss flag)
 ```
 
 ## Complexity Classification
@@ -63,7 +65,9 @@ GitHub Issue
           +----+----+     +----+-----+     +----+-----+
                |               |                |
                v               v                v
-          MAP-PLAN         MAP-PLAN        MAP --> PLAN
+          MAP-PLAN       [DISCUSS]          [DISCUSS]
+               |               |                |
+               |          MAP-PLAN        MAP --> PLAN
                |               |                |
                |          +----+----+      +----+----+
                |          |fullstack|      |fullstack|
@@ -182,6 +186,7 @@ GitHub Issue
 
 | Agent | Phase | Read-Only | Purpose |
 |-------|-------|-----------|---------|
+| **DISCUSS** | 0.5 | Yes | Capture design decisions (optional, `--discuss`) |
 | **MAP** | 1 | Yes | Investigate codebase (COMPLEX only) |
 | **MAP-PLAN** | 1+2 | Yes | Investigate + plan (TRIVIAL/SIMPLE) |
 | **PLAN** | 2 | Yes | File-by-file implementation plan (COMPLEX) |
