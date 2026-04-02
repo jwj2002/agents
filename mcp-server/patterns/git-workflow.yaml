@@ -1,0 +1,94 @@
+name: git-workflow
+category: workflow
+description: "Git branch naming, commit conventions, PR checklist, and pre-PR verification commands"
+tags: ["git", "branching", "commits", "pr", "ci"]
+created: "2026-04-01"
+content: |
+  ## Git Workflow Rules
+
+  Main stays green at all times. All agents follow these rules for every git operation.
+
+  ### Branch Rules
+
+  - Always branch from latest origin/main: `git fetch origin && git checkout -b {branch} origin/main`
+  - Naming: `{type}/issue-{N}-{slug}` where type is `feature/`, `fix/`, `chore/`, `docs/`, `test/`, `perf/`
+  - One branch = one PR = one logical change
+  - Branch lifetime: <24h preferred, 48h max
+  - Never commit directly to main
+
+  ### Commit Conventions
+
+  - Format: `type(scope): description` (imperative, lowercase, no period, max 72 chars)
+  - One issue per commit — never bundle `(#123, #124, #125)`
+  - No `debug:` commits — remove all debug logging before PR
+  - No flip-flops — validate architecture decisions BEFORE implementing
+
+  ### Pre-PR Checklist (MANDATORY)
+
+  Run these steps in order before creating any PR:
+
+  ```bash
+  # 1. Rebase on latest main
+  git fetch origin && git rebase origin/main
+
+  # 2. Run checks (Python projects)
+  ruff check . && ruff format --check .
+  pytest tests/ -x --timeout=60
+
+  # 3. Verify only relevant files changed
+  git diff --name-only origin/main
+  ```
+
+  If any check fails, fix before creating PR. Never skip checks.
+
+  ### PR Creation
+
+  - Title: Conventional Commits format
+  - Body: Summary + Test Plan + issue reference (`Closes #N`)
+  - Merge strategy: Squash merge only
+  - After merge: Delete remote branch (enable auto-delete in repo settings)
+
+  ### Branch Cleanup (After Every PR Merge)
+
+  ```bash
+  git fetch --prune origin
+  git branch -d feature/issue-N-slug
+  ```
+
+  Before starting new work:
+  ```bash
+  git branch -r --merged origin/main | grep -v 'main\|HEAD'
+  git branch -vv | grep ': gone]' | awk '{print $1}' | xargs -r git branch -D
+  ```
+
+  ### Large Features (500+ lines)
+
+  Split into phased PRs, each leaving main working:
+  1. Schema/model -> merge
+  2. Service/logic -> merge (branch from updated main)
+  3. API/integration -> merge
+  4. Tests -> merge
+
+  ### Parallel Agent Work
+
+  1. Check for file conflicts: `gh pr list --state open --json headRefName,files`
+  2. No two agents edit the same file — serialize if overlap
+  3. Use worktree isolation per agent
+  4. Rebase before PR after other agents merge
+  5. Wave scheduling: independent issues parallel, dependent issues sequential
+
+  ### Never Do These
+
+  - Reuse one branch for multiple PRs
+  - Bundle multiple issues in one commit
+  - Ship debug commits to main
+  - Implement then immediately revert
+  - Force push to shared branches
+  - Skip CI with --no-verify
+  - Merge without rebasing on latest main
+
+usage_notes: |
+  - Pre-PR checklist is mandatory — no exceptions
+  - Branch naming must include issue number for traceability
+  - Squash merge only — keeps main history clean
+  - For emergency hotfixes: branch from last green commit as fix/hotfix-{description}

@@ -1,0 +1,124 @@
+name: websocket-singleton
+category: frontend
+description: "Plain TS singleton for WebSocket connections — never use React hooks for WS lifecycle"
+tags: ["websocket", "react", "singleton", "useSyncExternalStore"]
+created: "2026-04-01"
+content: |
+  ## WebSocket Singleton Pattern
+
+  WebSocket connections MUST be managed as a plain TypeScript singleton class, NOT inside
+  React useEffect hooks. React hooks are tied to component lifecycle — re-renders, StrictMode
+  double-mounting, and dependency changes tear down and recreate the connection.
+
+  ### Architecture
+
+  ```
+  WebSocketManager (plain TS singleton — lives outside React)
+    ├── connect(token) / disconnect()
+    ├── send(type, payload, requestId?)
+    ├── onMessage callbacks
+    ├── reconnect with exponential backoff
+    ├── ping/pong keepalive (30s interval)
+    ├── offline queue (replayed on reconnect)
+    └── state replay (presence view, subscriptions)
+
+  useWebSocket (thin React hook)
+    └── useSyncExternalStore(manager.subscribe, manager.getSnapshot)
+  ```
+
+  ### Singleton Class (lib/websocket.ts)
+
+  ```typescript
+  interface WsSnapshot {
+    isConnected: boolean;
+    lastMessage: WsMessage | null;
+  }
+
+  class WebSocketManager {
+    private ws: WebSocket | null = null;
+    private token: string | null = null;
+    private intentionalClose = false;
+    private listeners = new Set<() => void>();
+    private _snapshot: WsSnapshot = { isConnected: false, lastMessage: null };
+    private offlineQueue: QueuedMessage[] = [];
+
+    connect(token: string): void {
+      if (this.ws && this.token === token) return;
+      this.token = token;
+      this.intentionalClose = false;
+      this.doConnect();
+    }
+
+    disconnect(): void {
+      this.intentionalClose = true;
+      this.token = null;
+      if (this.ws) { this.ws.onclose = null; this.ws.close(); this.ws = null; }
+      this._snapshot = { isConnected: false, lastMessage: null };
+      this.notify();
+    }
+
+    send(type: string, payload: Record<string, unknown>, requestId?: string): void {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        this.offlineQueue.push({ type, payload, requestId });
+        return;
+      }
+      this.ws.send(JSON.stringify({ type, payload, ...(requestId && { request_id: requestId }) }));
+    }
+
+    // useSyncExternalStore interface
+    subscribe = (listener: () => void) => {
+      this.listeners.add(listener);
+      return () => this.listeners.delete(listener);
+    };
+    getSnapshot = (): WsSnapshot => this._snapshot;
+  }
+
+  export const wsManager = new WebSocketManager();
+  ```
+
+  ### React Hook (hooks/useWebSocket.ts)
+
+  ```typescript
+  import { useCallback, useSyncExternalStore } from "react";
+  import { wsManager } from "@/lib/websocket";
+
+  export function useWebSocket() {
+    const snapshot = useSyncExternalStore(wsManager.subscribe, wsManager.getSnapshot);
+    const sendMessage = useCallback(
+      (type: string, payload: Record<string, unknown>, requestId?: string) => {
+        wsManager.send(type, payload, requestId);
+      }, [],
+    );
+    return { sendMessage, lastMessage: snapshot.lastMessage, isConnected: snapshot.isConnected };
+  }
+  ```
+
+  ### Connection Lifecycle (AuthContext)
+
+  Connection is controlled ONLY by AuthContext — never by individual components:
+
+  ```typescript
+  // On login
+  const token = getAccessToken();
+  if (token) wsManager.connect(token);
+
+  // On logout
+  wsManager.disconnect();
+
+  // On silent refresh (mount)
+  const token = getAccessToken();
+  if (token) wsManager.connect(token);
+  ```
+
+  ### Reconnect Strategy
+
+  - Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (max 6 attempts)
+  - On reconnect: replay last presence view + subscription, drain offline queue
+  - Intentional close (logout) skips reconnect entirely
+
+usage_notes: |
+  - NEVER create WebSocket inside useEffect — use singleton class
+  - NEVER close/reopen WS from component lifecycle
+  - Connection is tied to auth state, not component mount/unmount
+  - Discovered during DocketIQ Phase 4 — initial useEffect approach caused StrictMode double-mount issues
+  - setTimeout workarounds are hacks — refactor to singleton instead

@@ -1,0 +1,120 @@
+name: domain-exceptions
+category: backend
+description: "DocketIQ exception hierarchy with structured data for frontend error handling"
+tags: ["exceptions", "error-handling", "validation", "conflict"]
+created: "2026-04-01"
+content: |
+  ## Domain Exception Hierarchy
+
+  Source: `app/core/exceptions.py`
+
+  All domain exceptions inherit from `DocketIQException`. Services raise these; global error handlers convert them to HTTP responses.
+
+  ### Exception Classes
+
+  ```python
+  class DocketIQException(Exception):
+      """Base exception for all DocketIQ errors."""
+
+
+  class NotFoundError(DocketIQException):
+      """Raised when a requested resource does not exist. -> 404"""
+
+
+  class ConflictError(DocketIQException):
+      """Raised on optimistic concurrency or uniqueness conflicts. -> 409
+
+      When current_version and current_entity are provided the global
+      exception handler returns the canonical 409 body that the frontend
+      ConflictDialog relies on.
+      """
+      def __init__(
+          self,
+          message: str = "Conflict: entity was modified by another user",
+          *,
+          current_version: int | None = None,
+          current_entity: dict | None = None,
+      ) -> None:
+          super().__init__(message)
+          self.current_version = current_version
+          self.current_entity = current_entity
+
+
+  class AuthenticationError(DocketIQException):
+      """Raised on invalid credentials or tokens. -> 401"""
+
+
+  class ForbiddenError(DocketIQException):
+      """Raised when the user lacks permission for the action. -> 403"""
+
+
+  class BusinessValidationError(DocketIQException):
+      """Raised when a business rule is violated. -> 422"""
+
+
+  class WarningValidationError(DocketIQException):
+      """Raised when write-path validation produces warnings that need overrides. -> 422
+
+      The global exception handler returns a 422 with the structured warnings list
+      so the frontend can display the WarningDialog.
+      """
+      def __init__(
+          self,
+          warnings: list[dict],
+          message: str = "Validation warnings require override",
+      ) -> None:
+          super().__init__(message)
+          self.warnings = warnings
+  ```
+
+  ### Exception -> HTTP Status Mapping
+
+  | Exception                | HTTP Status | Frontend Handling       |
+  |--------------------------|-------------|------------------------|
+  | NotFoundError            | 404         | Toast / redirect       |
+  | ConflictError            | 409         | ConflictDialog         |
+  | AuthenticationError      | 401         | Redirect to login      |
+  | ForbiddenError           | 403         | Permission denied page |
+  | BusinessValidationError  | 422         | Form error display     |
+  | WarningValidationError   | 422         | WarningDialog          |
+
+  ### ConflictError Structured Data
+
+  The ConflictError carries `current_version` and `current_entity` so the frontend
+  can show the user what changed and allow them to retry with the new version:
+
+  ```python
+  raise ConflictError(
+      "Conflict: entity was modified by another user",
+      current_version=job.version,
+      current_entity=JobRead.model_validate(job).model_dump(mode="json"),
+  )
+  ```
+
+  ### WarningValidationError Structured Warnings
+
+  Carries a list of warning dicts for the frontend WarningDialog:
+
+  ```python
+  raise WarningValidationError(
+      warnings=[
+          {"type": "DUPLICATE_DISPLAY_ID", "overridable": True, "severity": "warning",
+           "message": "Display ID 42 is already used by another job", "details": {...}},
+      ]
+  )
+  ```
+
+  ### Who Raises What
+
+  | Layer      | Raises                              | Never Raises    |
+  |------------|-------------------------------------|-----------------|
+  | Repository | Nothing (returns None or empty list) | Any exception   |
+  | Service    | NotFoundError, ConflictError, etc.  | HTTPException   |
+  | Router     | HTTPException(404) for simple cases | Domain errors   |
+
+usage_notes: |
+  - Always raise domain exceptions from service layer, never HTTPException
+  - ConflictError should include current_version and current_entity for optimistic concurrency
+  - WarningValidationError carries structured warnings list for the frontend WarningDialog
+  - Global error handlers in the app convert these to HTTP responses automatically
+  - BaseRepository.update() catches SQLAlchemy StaleDataError and raises ConflictError

@@ -1,0 +1,116 @@
+name: optimistic-concurrency
+category: backend
+description: "Version-based optimistic concurrency with ConflictError carrying current entity state"
+tags: ["concurrency", "version", "conflict", "stale-data"]
+created: "2026-04-01"
+content: |
+  ## Optimistic Concurrency Pattern
+
+  Sources: `app/services/job.py`, `app/repositories/base.py`, `app/schemas/job.py`, `app/core/exceptions.py`
+
+  Prevents lost updates when multiple users edit the same entity concurrently.
+
+  ### How It Works
+
+  1. Client reads entity, receives `version: N` in the response
+  2. Client sends update with `version: N` (required field on Update schema)
+  3. Service checks if the DB version matches the submitted version
+  4. If mismatch: raises ConflictError with current entity state
+  5. If match: proceeds with update, version auto-increments
+
+  ### Schema: version is required on Update
+
+  ```python
+  class JobUpdate(BaseModel):
+      """PATCH semantics -- all fields optional except version."""
+      display_id: int | None = None
+      amount: float | None = None
+      notes: str | None = None
+      version: int  # Required -- forces optimistic concurrency
+  ```
+
+  ### Service: explicit version check
+
+  ```python
+  class JobService:
+      def __init__(self, db: AsyncSession) -> None:
+          self.db = db
+          self.repo = JobRepository(db)
+
+      async def check_version(self, job: Job, version: int) -> None:
+          """Check optimistic concurrency version."""
+          if job.version != version:
+              raise ConflictError(
+                  "Conflict: entity was modified by another user",
+                  current_version=job.version,
+                  current_entity=JobRead.model_validate(job).model_dump(mode="json"),
+              )
+  ```
+
+  ### ConflictError: carries current state for frontend
+
+  ```python
+  class ConflictError(DocketIQException):
+      """409 -- carries current_version and current_entity for the ConflictDialog."""
+      def __init__(
+          self,
+          message: str = "Conflict: entity was modified by another user",
+          *,
+          current_version: int | None = None,
+          current_entity: dict | None = None,
+      ) -> None:
+          super().__init__(message)
+          self.current_version = current_version
+          self.current_entity = current_entity
+  ```
+
+  ### Repository: catches SQLAlchemy StaleDataError
+
+  ```python
+  async def update(self, obj: ModelT, data: dict[str, Any]) -> ModelT:
+      for key, value in data.items():
+          setattr(obj, key, value)
+      try:
+          await self.session.flush()
+      except orm_exc.StaleDataError as exc:
+          raise ConflictError(
+              "Conflict: entity was modified by another user",
+          ) from exc
+      await self.session.refresh(obj)
+      return obj
+  ```
+
+  ### Model: version column with server-side increment
+
+  ```python
+  class Job(TimestampMixin, Base):
+      __tablename__ = "job"
+      # ...
+      version: Mapped[int] = mapped_column(default=1, nullable=False)
+  ```
+
+  ### Full Flow
+
+  ```
+  Client: GET /jobs/123 -> { version: 3, ... }
+  Client: PATCH /jobs/123 { notes: "updated", version: 3 }
+
+  Service:
+    job = await repo.get_or_raise(job_id)       # version is 3
+    await self.check_version(job, data.version)  # 3 == 3, OK
+    await repo.update(job, data_dict)            # version -> 4
+
+  If another user updated first (version is now 4):
+    await self.check_version(job, data.version)  # 4 != 3, CONFLICT
+    -> ConflictError(current_version=4, current_entity={...})
+    -> 409 response with current entity state
+    -> Frontend shows ConflictDialog
+  ```
+
+usage_notes: |
+  - Every mutable entity MUST have a `version: int` column
+  - Update schemas MUST require `version: int` (not optional)
+  - Service calls `check_version()` BEFORE applying the update
+  - ConflictError carries current_version + current_entity for the frontend ConflictDialog
+  - BaseRepository.update() also catches SQLAlchemy StaleDataError as a safety net
+  - Frontend must store and send back the version from the last read

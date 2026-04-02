@@ -1,0 +1,89 @@
+name: pagination-response
+category: backend
+description: "PaginatedResponse[T] generic schema with total, page, page_size, and pages fields"
+tags: ["pagination", "schema", "pydantic", "generic", "api"]
+created: "2026-04-01"
+content: |
+  ## Pagination Response Pattern
+
+  Source: `app/schemas/common.py`
+
+  Uses Python 3.12 generic syntax for a reusable paginated response wrapper.
+
+  ### PaginatedResponse Schema
+
+  ```python
+  from pydantic import BaseModel
+
+  class PaginatedResponse[T](BaseModel):
+      """Paginated list response."""
+      items: list[T]
+      total: int
+      page: int
+      page_size: int
+      pages: int
+  ```
+
+  ### Companion Schemas
+
+  ```python
+  class ErrorResponse(BaseModel):
+      """Standard error response."""
+      detail: str
+      code: str | None = None
+
+  class MessageResponse(BaseModel):
+      """Simple message response."""
+      message: str
+  ```
+
+  ### Repository Pattern (returns tuple)
+
+  The BaseRepository `get_multi()` returns `tuple[list[ModelT], int]` (items + total_count).
+  The router constructs the PaginatedResponse:
+
+  ```python
+  @router.get("", response_model=PaginatedResponse[JobRead])
+  async def list_jobs(
+      page: int = Query(1, ge=1),
+      page_size: int = Query(50, ge=1, le=100),
+      db: DBSession,
+      user: CurrentUser,
+  ):
+      service = JobService(db)
+      offset = (page - 1) * page_size
+      items, total = await service.repo.get_multi(offset=offset, limit=page_size)
+      return PaginatedResponse(
+          items=[JobRead.model_validate(j) for j in items],
+          total=total,
+          page=page,
+          page_size=page_size,
+          pages=(total + page_size - 1) // page_size,
+      )
+  ```
+
+  ### BaseRepository.get_multi() Signature
+
+  ```python
+  async def get_multi(
+      self,
+      *,
+      offset: int = 0,
+      limit: int = 50,
+      order_by: str | None = None,
+      descending: bool = False,
+      filters: dict[str, Any] | None = None,
+      options: list | None = None,
+  ) -> tuple[list[ModelT], int]:
+      """Return (items, total_count) with pagination and optional filters."""
+  ```
+
+  Default ordering is `created_at DESC` if no `order_by` is specified and the model has a `created_at` column.
+
+usage_notes: |
+  - Always use `PaginatedResponse[SpecificReadSchema]` as the response_model
+  - Calculate `pages` as `ceil(total / page_size)`
+  - Default page_size is 50, max is 100
+  - Repository returns raw (items, total) tuple; router wraps in PaginatedResponse
+  - The `pages` field is computed in the router, not in the schema
+  - Use Query params for `page` (1-indexed) and `page_size` with validation bounds

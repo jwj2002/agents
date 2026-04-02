@@ -1,0 +1,93 @@
+name: react-query-hook
+category: frontend
+description: "TanStack React Query hook pattern — useQuery for reads, useMutation for writes, cache invalidation"
+tags: ["react-query", "tanstack", "hooks", "data-fetching", "cache"]
+created: "2026-04-01"
+content: |
+  ## React Query Hook Pattern
+
+  All data fetching hooks follow this standard pattern using TanStack React Query.
+  Each entity gets its own hook file in `frontend/src/hooks/`.
+
+  ### Single Entity Query
+
+  ```typescript
+  import { useQuery } from "@tanstack/react-query";
+  import { fetchJob, type JobRead } from "@/api/jobs";
+  import { QUERY_STALE_TIMES } from "@/lib/constants";
+
+  export function useJob(jobId: string | null) {
+    return useQuery<JobRead>({
+      queryKey: ["job", jobId],
+      queryFn: () => fetchJob(jobId!),
+      enabled: !!jobId,                      // conditional — only fetch when ID exists
+      staleTime: QUERY_STALE_TIMES.SHORT,    // use constants, not magic numbers
+    });
+  }
+  ```
+
+  ### Create Mutation
+
+  ```typescript
+  import { useMutation, useQueryClient } from "@tanstack/react-query";
+  import { createJob, type JobCreate } from "@/api/jobs";
+
+  export function useCreateJob() {
+    const queryClient = useQueryClient();
+    return useMutation({
+      mutationFn: (data: JobCreate) => createJob(data),
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ["jobs"] });  // invalidate list
+      },
+    });
+  }
+  ```
+
+  ### Update Mutation
+
+  ```typescript
+  export function useUpdateJob() {
+    const queryClient = useQueryClient();
+    return useMutation({
+      mutationFn: ({ jobId, data }: { jobId: string; data: JobUpdate }) =>
+        updateJob(jobId, data),
+      onSuccess: (updated) => {
+        queryClient.invalidateQueries({ queryKey: ["jobs"] });          // list
+        queryClient.invalidateQueries({ queryKey: ["job", updated.id] }); // detail
+      },
+    });
+  }
+  ```
+
+  ### Key Conventions
+
+  | Convention | Rule |
+  |-----------|------|
+  | Query keys | `["entity"]` for lists, `["entity", id]` for detail |
+  | Conditional queries | `enabled: !!param` — prevents fetching with null/undefined |
+  | Stale times | Use `QUERY_STALE_TIMES` constants (SHORT, MEDIUM, LONG) |
+  | Cache invalidation | Invalidate both list and detail keys on mutation success |
+  | API layer | Import types and functions from `@/api/*` — hooks don't call fetch directly |
+  | Mutation input | Single object param with destructured fields for multi-arg mutations |
+
+  ### File Organization
+
+  ```
+  frontend/src/
+    hooks/
+      useJob.ts          # single job + create/update mutations
+      useJobs.ts         # job list queries (with filters)
+      useCustomers.ts    # customer queries + mutations
+      useSchedule.ts     # schedule queries + mutations
+      ...
+    api/
+      jobs.ts            # fetchJob, fetchJobs, createJob, updateJob
+      customers.ts       # API layer with typed request/response
+  ```
+
+usage_notes: |
+  - Always read the existing hook file before reusing — check prop types (COMPONENT_API pattern)
+  - Use `enabled` for conditional queries — never fetch with null IDs
+  - Invalidate all affected query keys on mutation success
+  - Keep API calls in @/api/* layer — hooks compose them with React Query
+  - Types (JobRead, JobCreate, JobUpdate) come from the API layer, not defined in hooks
