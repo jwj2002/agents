@@ -1,6 +1,6 @@
 ---
 type: base-agent
-version: 3.0
+version: 4.0
 purpose: Shared behaviors inherited by all agents
 ---
 
@@ -321,19 +321,56 @@ This enables `/metrics` to correlate success rates with specific agent versions.
 
 ---
 
-## 15. When to Escalate
+## 15. Escalation Policy
 
-**STOP and report to orchestrator** if:
+**Tiered response when BLOCKED** (waiting on user, ambiguous requirement, missing access):
+
+| Duration | Action |
+|----------|--------|
+| < 2 min | Wait for user input |
+| 2-5 min | Proceed with safest assumption, tag with `[ASSUMED]` in code/artifact |
+| > 5 min | STOP, report what you assumed and what needs human verification |
+
+**Hard escalation triggers** (STOP immediately, no assumptions):
 - Complexity seems wrong (SIMPLE issue is actually COMPLEX)
-- Missing information blocks progress
 - Constraint violation required to proceed
-- Issue scope is ambiguous
+- Security-sensitive change with ambiguous scope
+- Same approach has failed twice with the same root cause
 
-**Do NOT** proceed with assumptions. Ask for clarification.
+**`[ASSUMED]` handling**: Any `[ASSUMED]` tags are flagged by PROVE for human review. Document each assumption with: what was assumed, why, and the safest alternative.
+
+**Two-failure rule**: If the same approach fails twice on the same issue with the same root cause, STOP. Do not attempt a third time — escalate to user or delegate to Codex (`/codex:rescue`).
 
 ---
 
-## 16. Failure Context Awareness
+## 16. Anti-Pattern Self-Check
+
+Before each phase, check if you are exhibiting any of these patterns. If you recognize one, **name it and course-correct** before continuing.
+
+| Anti-Pattern | Signal | Correction |
+|-------------|--------|------------|
+| **Kitchen Sink Session** | Fixing unrelated issues alongside the main task | Revert scope to the issue. Document extras for a separate issue. |
+| **Correcting Over and Over** | Same fix applied 3+ times without resolving | The approach is wrong. Step back, re-read the error, try a different strategy. |
+| **Infinite Exploration** | Read 15+ files without forming a plan | Stop reading. Write a hypothesis with what you know. Verify targeted files only. |
+| **Trust Then Verify Gap** | Assuming code works because it looks right | Run it. Every time. `ruff check`, `pytest`, `npm run build`. |
+| **Architectural Astronautics** | Building abstractions for hypothetical future needs | Delete the abstraction. Build for today's requirement only. |
+| **Flip-Flop Implementation** | Implementing A, reverting, implementing B, reverting | Stop. Validate with data BEFORE implementing. Run the test first. |
+
+---
+
+## 17. Runbook Check
+
+When encountering an error during any phase, check runbooks BEFORE investigating from scratch:
+
+```bash
+cat .claude/memory/runbooks.md 2>/dev/null
+```
+
+If the error matches a runbook entry, apply the documented fix directly. Do not re-diagnose known problems.
+
+---
+
+## 18. Failure Context Awareness
 
 When spawned with a `## Prior Failure` block in your prompt:
 1. Read the root cause and prevention fields carefully
@@ -345,7 +382,7 @@ This is the **highest priority** context — a prior PATCH already failed on thi
 
 ---
 
-## 17. Swarm-Aware Behavior
+## 19. Swarm-Aware Behavior
 
 When spawned as a **scoped sub-task** (e.g., PATCH-backend, PATCH-frontend, PROVE-backend):
 

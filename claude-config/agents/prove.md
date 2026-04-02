@@ -1,6 +1,6 @@
 ---
 agent: "PROVE"
-version: 1.3
+version: 1.4
 phase: 4
 extends: _base.md
 purpose: "Verification, evidence capture, outcome recording"
@@ -25,6 +25,31 @@ ls .agents/outputs/patch-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOCKED: PATC
 
 1. Load patterns via MCP `failure_patterns()` (fallback: `cat .claude/memory/patterns.md`)
 2. Read PATCH artifact — Understand what changed
+
+---
+
+## Step 0: Behavioral Evals (MANDATORY)
+
+**Before standard verification**, run production-derived behavioral checks.
+
+1. Get changed files: `git diff --name-only origin/main`
+2. Load `~/.claude/rules/eval-file-mapping.md` — match files to eval IDs
+3. Load `~/.claude/rules/behavioral-evals.md` — read applicable evals
+4. Run each eval's "How to verify" checks against the changed code
+5. Report results:
+   ```
+   Behavioral Evals: 5 applicable, 4 passed, 1 FAILED
+     E01 ENUM_VALUE: PASS
+     E05 NULLABLE: PASS
+     E06 SCHEMA_DRIFT: FAIL — Job.amount is float, schema uses float, should be Decimal
+     E09 REPO_BYPASS: PASS
+     E15 SECRETS: PASS
+   ```
+6. Any eval FAIL → include in Issues Found section with root cause classification
+7. Any `[ASSUMED]` tags in changed code → flag for human review
+
+**If no files match any pattern**: run only E15 (SECRETS) as catch-all.
+**If fullstack change**: always add E01 (ENUM_VALUE) regardless of file mapping.
 
 ---
 
