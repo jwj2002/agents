@@ -1,0 +1,309 @@
+name: dnd-kit-schedule
+category: frontend
+description: "Multi-view drag-and-drop scheduling with @dnd-kit — optimistic updates, queue-to-schedule, unschedule-to-queue"
+tags: ["dnd-kit", "drag-and-drop", "schedule", "react", "optimistic-update", "react-query"]
+created: "2026-04-02"
+content: |
+  ## DnD-Kit Schedule Pattern
+
+  Multi-view drag-and-drop for scheduling applications using @dnd-kit/core.
+  Supports: move events between slots, create from queue, unschedule back to queue.
+
+  ### Dependencies
+
+  ```json
+  "@dnd-kit/core": "^6.3.1",
+  "@dnd-kit/utilities": "^3.2.2"
+  ```
+
+  Note: @dnd-kit/sortable is NOT needed for schedule grids — only for reorderable lists.
+
+  ### Architecture
+
+  ```
+  ScheduleView (DndContext provider)
+    ├── useDragAndDrop hook (all DnD state + mutations)
+    ├── DragOverlay (visual feedback during drag)
+    ├── Views (DayView, WeekView, MonthView, MobileDayView)
+    │   ├── Droppable zones (useDroppable per cell/column)
+    │   └── Draggable items (useDraggable per event)
+    └── JobQueueSidebar (draggable queue items + droppable unschedule target)
+  ```
+
+  ### 1. DndContext Setup
+
+  ```tsx
+  import { DndContext, PointerSensor, TouchSensor, useSensor, useSensors, DragOverlay } from "@dnd-kit/core";
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },  // prevent accidental drags
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 200, tolerance: 5 },  // mobile: 200ms hold
+    }),
+  );
+
+  // Disable drag when offline
+  const { isOnline } = useOnlineStatus();
+
+  <DndContext
+    sensors={isOnline ? sensors : []}
+    onDragStart={handleDragStart}
+    onDragEnd={handleDragEnd}
+    onDragCancel={handleDragCancel}
+  >
+    {/* views + sidebar */}
+    <DragOverlay dropAnimation={null}>
+      {/* overlay content based on active item type */}
+    </DragOverlay>
+  </DndContext>
+  ```
+
+  ### 2. Typed Drag/Drop Data
+
+  ```typescript
+  // Drag payload — attached to useDraggable({ data })
+  interface DragData {
+    type: "schedule-event" | "queue-job";
+    event?: ScheduleJobEvent;      // for existing events
+    jobId?: string;                 // for queue items
+    jobLabel?: string;              // display label
+    jobInfo?: QueueJobInfo;         // data for optimistic insert
+  }
+
+  // Drop payload — attached to useDroppable({ data })
+  interface DropData {
+    type: "crew-column" | "queue";
+    crewId: string | null;
+    date?: string;                  // "YYYY-MM-DD"
+    time?: string;                  // "HH:00"
+  }
+  ```
+
+  ### 3. Draggable Items
+
+  ```tsx
+  function DraggableEvent({ event }: { event: ScheduleJobEvent }) {
+    const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+      id: event.id,
+      data: { type: "schedule-event", event } as DragData,
+    });
+
+    return (
+      <div
+        ref={setNodeRef}
+        {...listeners}
+        {...attributes}
+        className={isDragging ? "invisible" : ""}  // hide source during drag
+      >
+        <JobEventCard event={event} />
+      </div>
+    );
+  }
+  ```
+
+  ### 4. Droppable Zones
+
+  ```tsx
+  function DroppableCell({ crewId, date, time }: Props) {
+    const isPast = new Date(date) < today;
+    const { setNodeRef, isOver } = useDroppable({
+      id: `dispatch-${crewId}-${date}-${time}`,
+      data: { type: "crew-column", crewId, date, time } as DropData,
+      disabled: isPast,  // prevent drops on past dates
+    });
+
+    return (
+      <div
+        ref={setNodeRef}
+        className={isOver ? "bg-primary/20 ring-2 ring-primary/50 ring-inset" : ""}
+      >
+        {children}
+      </div>
+    );
+  }
+  ```
+
+  ### 5. Queue Drop Target (Unschedule)
+
+  ```tsx
+  function JobQueueSidebar() {
+    const { setNodeRef, isOver } = useDroppable({
+      id: "job-queue-drop",
+      data: { type: "queue" } as DropData,
+    });
+
+    return (
+      <aside
+        ref={setNodeRef}
+        className={isOver ? "ring-2 ring-destructive/50 bg-destructive/5" : ""}
+      >
+        {/* queue items (also draggable) */}
+      </aside>
+    );
+  }
+  ```
+
+  ### 6. DragOverlay
+
+  ```tsx
+  <DragOverlay dropAnimation={null}>
+    {activeEvent && (
+      <div className="w-[280px] rotate-2 opacity-90 shadow-lg">
+        <JobEventCard event={activeEvent} />
+      </div>
+    )}
+    {activeQueueJobId && (
+      <div className="w-[260px] rotate-2 rounded-md bg-foreground px-3 py-2 text-xs font-medium text-background shadow-lg">
+        {activeQueueJobLabel}
+      </div>
+    )}
+  </DragOverlay>
+  ```
+
+  Key styling:
+  - `rotate-2` — slight rotation for "picked up" feel
+  - `shadow-lg` — depth/elevation
+  - `dropAnimation={null}` — no snap animation on drop (instant feedback)
+
+  ### 7. useDragAndDrop Hook (Core Logic)
+
+  ```typescript
+  function useDragAndDrop(scheduleQueryKey: string[]) {
+    // Active drag state
+    const [activeId, setActiveId] = useState<string | null>(null);
+    const [activeEvent, setActiveEvent] = useState<ScheduleJobEvent | null>(null);
+    const [activeQueueJobId, setActiveQueueJobId] = useState<string | null>(null);
+
+    // Three mutation workflows
+    const moveMutation = useMutation({ ... });
+    const createFromQueueMutation = useMutation({ ... });
+    const unscheduleMutation = useMutation({ ... });
+
+    function handleDragStart(event: DragStartEvent) {
+      const data = event.active.data.current as DragData;
+      setActiveId(event.active.id as string);
+      if (data.type === "schedule-event") setActiveEvent(data.event!);
+      if (data.type === "queue-job") setActiveQueueJobId(data.jobId!);
+    }
+
+    function handleDragEnd(event: DragEndEvent) {
+      const { over } = event;
+      if (!over?.data.current) { clearState(); return; }
+
+      const dragData = event.active.data.current as DragData;
+      const dropData = over.data.current as DropData;
+
+      // Reject past dates
+      if (dropData.date && new Date(dropData.date) < today) return;
+
+      // Route to workflow
+      if (dropData.type === "queue" && dragData.type === "schedule-event") {
+        unscheduleMutation.mutate(dragData.event!);
+      } else if (dragData.type === "schedule-event") {
+        moveMutation.mutate({ event: dragData.event!, dropData });
+      } else if (dragData.type === "queue-job") {
+        createFromQueueMutation.mutate({ jobId: dragData.jobId!, dropData });
+      }
+    }
+
+    return { activeEvent, activeQueueJobId, handleDragStart, handleDragEnd, handleDragCancel };
+  }
+  ```
+
+  ### 8. Optimistic Update Pattern (Move Event)
+
+  ```typescript
+  const moveMutation = useMutation({
+    mutationFn: ({ event, dropData }) => api.moveEvent(event.id, {
+      date: dropData.date, time: dropData.time, crew_id: dropData.crewId
+    }),
+
+    onMutate: async ({ event, dropData }) => {
+      // 1. Cancel in-flight queries
+      await queryClient.cancelQueries({ queryKey: scheduleQueryKey });
+
+      // 2. Snapshot previous state
+      const previous = queryClient.getQueryData(scheduleQueryKey);
+
+      // 3. Optimistic cache update
+      queryClient.setQueryData(scheduleQueryKey, (old: ScheduleData) => ({
+        ...old,
+        job_events: old.job_events.map(e =>
+          e.id === event.id
+            ? { ...e, start: newStart, end: newEnd, crew: newCrew }
+            : e
+        ),
+      }));
+
+      return { previous };
+    },
+
+    onError: (_err, _vars, context) => {
+      // 4. Rollback on failure
+      queryClient.setQueryData(scheduleQueryKey, context?.previous);
+    },
+
+    onSettled: () => {
+      // 5. Refetch for server truth
+      queryClient.invalidateQueries({ queryKey: scheduleQueryKey });
+    },
+  });
+  ```
+
+  ### 9. Optimistic Unschedule (Drag to Queue)
+
+  ```typescript
+  onMutate: async (event) => {
+    await queryClient.cancelQueries({ queryKey: scheduleQueryKey });
+    await queryClient.cancelQueries({ queryKey: queueQueryKey });
+
+    const prevSchedule = queryClient.getQueryData(scheduleQueryKey);
+    const prevQueue = queryClient.getQueryData(queueQueryKey);
+
+    // Remove from schedule
+    queryClient.setQueryData(scheduleQueryKey, (old) => ({
+      ...old,
+      job_events: old.job_events.filter(e => e.id !== event.id),
+    }));
+
+    // Add placeholder to queue
+    queryClient.setQueryData(queueQueryKey, (old) => ({
+      ...old,
+      items: [...old.items, reconstructJobFromEvent(event)],
+      total: old.total + 1,
+    }));
+
+    return { prevSchedule, prevQueue };
+  },
+  ```
+
+  ### 10. File Organization
+
+  ```
+  frontend/src/
+    hooks/
+      useDragAndDrop.ts          # All DnD state + mutations
+    components/schedule/
+      ScheduleView.tsx           # DndContext provider + view switching
+      DragOverlay.tsx            # Visual overlay during drag
+      DayView.tsx                # Crew×hour grid (draggable + droppable)
+      WeekView.tsx               # Day columns (draggable + droppable)
+      MonthView.tsx              # Day cells (droppable only)
+      MobileDayView.tsx          # Crew tabs (draggable + droppable)
+      JobQueueSidebar.tsx        # Queue items (draggable) + unschedule target (droppable)
+      JobEventCard.tsx           # Event card (used in views + overlay)
+  ```
+
+usage_notes: |
+  - Use @dnd-kit/core only — NOT sortable (for grids, not lists)
+  - Always type drag/drop data payloads (DragData/DropData interfaces)
+  - Hide source with `isDragging ? "invisible" : ""` (not display:none)
+  - DragOverlay with `dropAnimation={null}` for instant feedback
+  - Disable sensors when offline — `sensors={isOnline ? sensors : []}`
+  - Past date protection at TWO levels: droppable `disabled` AND handleDragEnd check
+  - Optimistic updates: snapshot → update cache → rollback on error → refetch on settle
+  - Queue-to-schedule creates via API; schedule-to-queue deletes via API
+  - All DnD logic in ONE hook (useDragAndDrop) — views only handle rendering
+  - `rotate-2 shadow-lg` on DragOverlay for "picked up" visual feel
