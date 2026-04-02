@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-version: 3.0
+version: 4.0
 description: Multi-agent workflow with self-learning capabilities
 ---
 
@@ -71,6 +71,29 @@ Each session gets its own:
 - Feature branch
 
 Post-merge cleanup: `/pr --merge` removes the worktree automatically.
+
+## Session Initialization (Step -1)
+
+**Before spawning any agents**, load context for this issue:
+
+1. Load behavioral evals: `cat ~/.claude/rules/behavioral-evals.md` (if exists)
+2. Check for prior failures on this issue:
+   ```bash
+   grep "\"issue\":${ISSUE}" .claude/memory/failures.jsonl 2>/dev/null
+   ```
+   - If found: load failure context, identify root cause, brief the MAP/PATCH agent
+   - Include in prompt: `## Prior Failure\nRoot cause: X. Prevention: Y.`
+3. Check for existing artifacts: `ls .agents/outputs/*-${ISSUE}-*.md 2>/dev/null`
+   - If found: determine which phase to resume from (skip completed phases)
+4. Check recent branch activity: `git log --oneline -5`
+5. Report to user:
+   ```
+   Issue #N: [prior attempts: X | first attempt]
+   [Last failure: ROOT_CAUSE | No prior failures]
+   [Resuming from PHASE | Starting fresh]
+   ```
+
+---
 
 ## Learning Loop
 

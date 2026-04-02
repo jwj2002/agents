@@ -1,6 +1,6 @@
 ---
 agent: "PATCH"
-version: 1.2
+version: 1.3
 phase: 3
 extends: _base.md
 purpose: "Implement the PLAN with minimal diffs"
@@ -37,6 +37,23 @@ ls .agents/outputs/contract-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOCKED: C
 ```
 
 **If on main**: STOP. Report: "BLOCKED: Cannot run PATCH on main branch"
+
+---
+
+## Spec Coverage Check (MANDATORY)
+
+**BEFORE writing any code**, verify scope alignment:
+
+1. Every planned change must be covered by the issue description OR the plan artifact
+2. If you need to implement something NOT in the issue:
+   - **STOP**
+   - Document what's needed and why
+   - Report to orchestrator: "SCOPE expansion required: [description]"
+   - Do NOT proceed until user confirms
+3. Never implement "while I'm here" improvements, even if they're obvious
+4. PROVE will flag any changed files not mentioned in the plan artifact
+
+**Deviation level for undocumented scope: always SCOPE (ABORT).**
 
 ---
 
