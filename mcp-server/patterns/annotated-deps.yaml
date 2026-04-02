@@ -1,0 +1,139 @@
+name: annotated-deps
+category: backend
+description: "FastAPI Annotated type aliases for dependency injection: DBSession, CurrentUser, require_role"
+tags: ["fastapi", "dependencies", "annotated", "auth", "di"]
+created: "2026-04-01"
+content: |
+  ## Annotated Dependencies Pattern
+
+  Source: `app/core/dependencies.py`
+
+  Uses Python's `Annotated` type to create reusable dependency aliases, eliminating repeated `Depends()` boilerplate.
+
+  ### Database Session
+
+  ```python
+  from typing import Annotated
+  from collections.abc import AsyncGenerator
+  from fastapi import Depends, Request
+  from sqlalchemy.ext.asyncio import AsyncSession
+
+  async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
+      """Yield an async database session from app state."""
+      async_session = request.app.state.async_session
+      async with async_session() as session:
+          yield session
+
+  DBSession = Annotated[AsyncSession, Depends(get_db)]
+  ```
+
+  ### Bearer Token
+
+  ```python
+  from fastapi.security import OAuth2PasswordBearer
+
+  oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+  BearerToken = Annotated[str, Depends(oauth2_scheme)]
+  ```
+
+  ### Current User (authenticated)
+
+  ```python
+  async def get_current_user(
+      token: BearerToken,
+      db: DBSession,
+  ) -> User:
+      """Decode Bearer token and return the authenticated User."""
+      credentials_exception = HTTPException(
+          status_code=status.HTTP_401_UNAUTHORIZED,
+          detail="Could not validate credentials",
+          headers={"WWW-Authenticate": "Bearer"},
+      )
+
+      try:
+          payload = decode_token(token)
+      except JWTError:
+          raise credentials_exception from None
+
+      if payload.get("type") != "access":
+          raise credentials_exception
+
+      user_id_str = payload.get("sub")
+      if user_id_str is None:
+          raise credentials_exception
+
+      try:
+          user_id = uuid.UUID(user_id_str)
+      except ValueError:
+          raise credentials_exception from None
+
+      user_repo = UserRepository(db)
+      user = await user_repo.get_by_id(user_id)
+
+      if user is None or not user.is_active:
+          raise credentials_exception
+
+      return user
+
+  CurrentUser = Annotated[User, Depends(get_current_user)]
+  ```
+
+  ### Role-Based Access Control
+
+  ```python
+  from app.models.base import UserRole
+
+  def require_role(*roles: UserRole) -> Callable:
+      """Return a dependency that enforces the user has one of the given roles."""
+
+      async def _role_checker(current_user: CurrentUser) -> User:
+          if current_user.role not in roles:
+              raise HTTPException(
+                  status_code=status.HTTP_403_FORBIDDEN,
+                  detail="Insufficient permissions",
+              )
+          return current_user
+
+      return _role_checker
+  ```
+
+  ### Usage in Routers
+
+  ```python
+  @router.get("/jobs")
+  async def list_jobs(
+      db: DBSession,                          # async session
+      user: CurrentUser,                      # authenticated user
+  ):
+      service = JobService(db)
+      return await service.list_jobs()
+
+  @router.post("/admin/seed")
+  async def seed_data(
+      user: User = Depends(require_role(UserRole.ADMIN)),  # admin only
+  ):
+      ...
+
+  @router.patch("/jobs/{job_id}")
+  async def update_job(
+      user: User = Depends(require_role(UserRole.ADMIN, UserRole.SCHEDULER)),
+  ):
+      ...
+  ```
+
+  ### Dependency Chain
+
+  ```
+  get_db() -> DBSession
+  oauth2_scheme -> BearerToken
+  get_current_user(BearerToken, DBSession) -> CurrentUser
+  require_role(*roles)(CurrentUser) -> User (with role check)
+  ```
+
+usage_notes: |
+  - Use `DBSession` as a type hint instead of `db: AsyncSession = Depends(get_db)`
+  - Use `CurrentUser` for any endpoint that needs an authenticated user
+  - Use `require_role(UserRole.ADMIN)` for role-restricted endpoints
+  - `get_current_user` validates token type is "access" (prevents refresh token abuse)
+  - Inactive users are rejected even with a valid token
+  - Service factories take DBSession as parameter: `service = JobService(db)`

@@ -1,0 +1,162 @@
+name: base-repository
+category: backend
+description: "Async generic BaseRepository[ModelT] with CRUD, pagination, filtering, and existence checks"
+tags: ["repository", "sqlalchemy", "async", "crud", "generic"]
+created: "2026-04-01"
+content: |
+  ## Base Repository Pattern
+
+  Source: `app/repositories/base.py`
+
+  Generic async repository using Python 3.12 type parameter syntax with SQLAlchemy 2.0.
+
+  ### Full BaseRepository Implementation
+
+  ```python
+  import uuid
+  from typing import Any
+
+  from sqlalchemy import func, select
+  from sqlalchemy.ext.asyncio import AsyncSession
+  from sqlalchemy.orm import exc as orm_exc
+
+  from app.core.exceptions import ConflictError, NotFoundError
+  from app.models.base import Base
+
+
+  class BaseRepository[ModelT: Base]:
+      """Base repository with common CRUD operations."""
+
+      def __init__(self, session: AsyncSession, model: type[ModelT]) -> None:
+          self.session = session
+          self.model = model
+
+      # --- Single-entity retrieval ---
+
+      async def get(self, id_: uuid.UUID) -> ModelT | None:
+          result = await self.session.execute(
+              select(self.model).where(self.model.id == id_)
+          )
+          return result.scalar_one_or_none()
+
+      async def get_or_raise(self, id_: uuid.UUID) -> ModelT:
+          obj = await self.get(id_)
+          if obj is None:
+              raise NotFoundError(f"{self.model.__name__} not found")
+          return obj
+
+      # --- List with pagination ---
+
+      async def get_multi(
+          self,
+          *,
+          offset: int = 0,
+          limit: int = 50,
+          order_by: str | None = None,
+          descending: bool = False,
+          filters: dict[str, Any] | None = None,
+          options: list | None = None,
+      ) -> tuple[list[ModelT], int]:
+          """Return (items, total_count) with pagination and optional filters."""
+          stmt = select(self.model)
+          count_stmt = select(func.count()).select_from(self.model)
+
+          if options:
+              for opt in options:
+                  stmt = stmt.options(opt)
+
+          if filters:
+              for key, value in filters.items():
+                  if value is not None:
+                      col = getattr(self.model, key)
+                      stmt = stmt.where(col == value)
+                      count_stmt = count_stmt.where(col == value)
+
+          total = (await self.session.execute(count_stmt)).scalar_one()
+
+          if order_by and hasattr(self.model, order_by):
+              col = getattr(self.model, order_by)
+              stmt = stmt.order_by(col.desc() if descending else col)
+          elif hasattr(self.model, "created_at"):
+              stmt = stmt.order_by(self.model.created_at.desc())
+
+          stmt = stmt.offset(offset).limit(limit)
+          result = await self.session.execute(stmt)
+          if options:
+              return list(result.unique().scalars().all()), total
+          return list(result.scalars().all()), total
+
+      # --- Mutations (flush only, never commit) ---
+
+      async def create(self, data: dict[str, Any]) -> ModelT:
+          obj = self.model(**data)
+          self.session.add(obj)
+          await self.session.flush()
+          await self.session.refresh(obj)
+          return obj
+
+      async def update(self, obj: ModelT, data: dict[str, Any]) -> ModelT:
+          for key, value in data.items():
+              setattr(obj, key, value)
+          try:
+              await self.session.flush()
+          except orm_exc.StaleDataError as exc:
+              raise ConflictError(
+                  "Conflict: entity was modified by another user",
+              ) from exc
+          await self.session.refresh(obj)
+          return obj
+
+      async def delete(self, obj: ModelT) -> None:
+          await self.session.delete(obj)
+          await self.session.flush()
+
+      # --- Helpers ---
+
+      async def exists(self, **filters: Any) -> bool:
+          stmt = select(func.count()).select_from(self.model)
+          for key, value in filters.items():
+              stmt = stmt.where(getattr(self.model, key) == value)
+          result = (await self.session.execute(stmt)).scalar_one()
+          return result > 0
+
+      async def count(self, **filters: Any) -> int:
+          stmt = select(func.count()).select_from(self.model)
+          for key, value in filters.items():
+              if value is not None:
+                  stmt = stmt.where(getattr(self.model, key) == value)
+          return (await self.session.execute(stmt)).scalar_one()
+  ```
+
+  ### Concrete Repository Example (JobRepository)
+
+  ```python
+  class JobRepository(BaseRepository[Job]):
+      def __init__(self, session: AsyncSession) -> None:
+          super().__init__(session, Job)
+
+      async def get_with_relations(self, id_: uuid.UUID) -> Job | None:
+          result = await self.session.execute(
+              select(Job)
+              .where(Job.id == id_)
+              .options(
+                  joinedload(Job.customer),
+                  joinedload(Job.service_address),
+                  joinedload(Job.creator),
+              )
+          )
+          return result.unique().scalar_one_or_none()
+
+      async def get_multi_filtered(self, *, offset, limit, status, ...) -> tuple[list[Job], int]:
+          # Domain-specific complex filtering beyond what get_multi provides
+          ...
+  ```
+
+usage_notes: |
+  - Always extend BaseRepository[ModelT] with `super().__init__(session, Model)`
+  - Repositories flush only, NEVER commit -- service layer owns the transaction
+  - Return `ModelT | None` for single, `tuple[list[ModelT], int]` for paginated
+  - Use `get_or_raise()` when the caller expects the entity to exist
+  - Add domain-specific queries as methods on the concrete repository
+  - Use `joinedload()` for 1:1, `selectinload()` for 1:many eager loading
+  - StaleDataError from SQLAlchemy is caught and converted to ConflictError in `update()`

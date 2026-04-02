@@ -1,0 +1,71 @@
+name: implementation-routing
+category: workflow
+description: "Task complexity assessment and routing to Quick, Plan Mode, or Orchestrate workflows"
+tags: ["routing", "workflow", "orchestrate", "complexity", "codex"]
+created: "2026-04-01"
+content: |
+  ## Implementation Routing
+
+  Assess task complexity BEFORE starting work. Route to the right workflow automatically
+  — do not ask the user which mode to use.
+
+  ### Routing Table
+
+  | Complexity | Files | Criteria | Route To | Codex Role |
+  |------------|-------|----------|----------|-----------|
+  | TRIVIAL | 1 | Typo, config, rename, obvious fix | `/quick` | None |
+  | SIMPLE | 1-3 | Clear requirements, single subsystem | Plan Mode | Offer review after |
+  | MODERATE | 4-5 | Clear pattern, single subsystem | `/orchestrate` (SIMPLE tier) | Review (recommended) |
+  | COMPLEX | 6+ | Cross-cutting, architectural decisions | `/orchestrate` (COMPLEX tier) | Review (automatic) + delegate subtasks |
+  | FULLSTACK | Any | Backend + frontend changes | `/orchestrate` + CONTRACT | Review (enum/API focus) + parallel impl |
+  | PRIOR FAIL | Any | Re-attempt of a BLOCKED issue | `/codex:rescue` first | Primary implementer (different model) |
+
+  ### Modifiers
+
+  - Multiple independent issues: add `--parallel` (worktree isolation)
+  - Interrupted workflow: add `--resume` (skip completed phases)
+  - Independent subtasks: delegate to Codex via `/codex:rescue --background`
+
+  ### Workflow Pipelines
+
+  ```
+  Quick:     change → verify → done
+  Plan:      plan → implement → [offer review]
+  TRIVIAL:   MAP-PLAN → PATCH → PROVE-lite
+  SIMPLE:    MAP-PLAN → [CONTRACT*] → PLAN-CHECK → PATCH → PROVE
+  COMPLEX:   MAP → PLAN → [CONTRACT*] → PLAN-CHECK → PATCH → PROVE
+  ```
+
+  ### Codex Review by Risk Level
+
+  | Risk | Action | Command |
+  |------|--------|---------|
+  | TRIVIAL | Skip | — |
+  | SIMPLE | Offer | "Want a cross-model review?" |
+  | MODERATE | Auto after impl | `/codex:review --background` |
+  | COMPLEX | Adversarial after PROVE | `/codex:adversarial-review --background` |
+  | FULLSTACK | Enum/API focus | `/codex:adversarial-review "Focus on: enum mismatches, API contract"` |
+  | PRIOR FAIL | Before commit | `/codex:adversarial-review --wait "Focus on: {root cause}"` |
+
+  ### Review Integration Flow
+
+  ```
+  PATCH → PROVE passes → /codex:adversarial-review --background
+                                │
+                           findings?
+                           ├── No  → /pr
+                           └── Yes → fix → re-run PROVE → /pr
+  ```
+
+  ### Announce Format
+
+  State routing decision concisely:
+  - "Quick — typo in README, 1 file. No Codex."
+  - "Plan mode — 2 files, clear requirements. Will offer Codex review after."
+  - "Orchestrate (COMPLEX, fullstack) — new module + frontend. Claude backend, Codex frontend."
+
+usage_notes: |
+  - Always assess BEFORE entering any mode — read the issue, check files involved
+  - Make the routing call yourself — do not ask the user
+  - User can override any routing decision
+  - For FULLSTACK: always add E01 (ENUM_VALUE) eval regardless of file mapping

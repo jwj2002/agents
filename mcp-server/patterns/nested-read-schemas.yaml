@@ -1,0 +1,114 @@
+name: nested-read-schemas
+category: backend
+description: "Slim Summary schemas (CustomerSummary, UserSummary, AddressSummary) for nested reads without N+1 queries"
+tags: ["pydantic", "schema", "nested", "summary", "performance"]
+created: "2026-04-01"
+content: |
+  ## Nested Read Schemas (Summary Pattern)
+
+  Source: `app/schemas/job.py`
+
+  Instead of nesting the full Read schema for related entities, use slim Summary schemas
+  that include only the fields needed for display.
+
+  ### Summary Schemas
+
+  ```python
+  class UserSummary(BaseModel):
+      """Slim user representation for nested reads."""
+      model_config = {"from_attributes": True}
+
+      id: uuid.UUID
+      first_name: str
+      last_name: str
+
+
+  class CustomerSummary(BaseModel):
+      """Slim customer representation for nested reads."""
+      model_config = {"from_attributes": True}
+
+      id: uuid.UUID
+      display_name: str
+
+
+  class AddressSummary(BaseModel):
+      """Slim address representation for nested reads."""
+      model_config = {"from_attributes": True}
+
+      id: uuid.UUID
+      address_line1: str
+      city: str
+      state: str
+  ```
+
+  ### Usage in Parent Read Schema
+
+  ```python
+  class JobRead(BaseModel):
+      model_config = {"from_attributes": True}
+
+      id: uuid.UUID
+      customer_id: uuid.UUID
+      status: str
+      version: int
+      # ... other fields ...
+
+      # Nested summaries (optional because joinedload may not always be used)
+      customer: CustomerSummary | None = None
+      service_address: AddressSummary | None = None
+      creator: UserSummary | None = None
+
+      created_at: datetime
+      updated_at: datetime
+  ```
+
+  ### Repository: Eager Loading
+
+  Summary schemas work because the repository eager-loads relationships:
+
+  ```python
+  class JobRepository(BaseRepository[Job]):
+      async def get_with_relations(self, id_: uuid.UUID) -> Job | None:
+          result = await self.session.execute(
+              select(Job)
+              .where(Job.id == id_)
+              .options(
+                  joinedload(Job.customer),
+                  joinedload(Job.service_address),
+                  joinedload(Job.creator),
+              )
+          )
+          return result.unique().scalar_one_or_none()
+
+      async def get_multi_filtered(self, ...) -> tuple[list[Job], int]:
+          stmt = (
+              select(Job)
+              .options(
+                  joinedload(Job.customer),
+                  joinedload(Job.service_address),
+                  joinedload(Job.creator),
+              )
+              .order_by(Job.created_at.desc())
+          )
+          # ... filtering and pagination ...
+  ```
+
+  ### Design Principles
+
+  | Principle             | Detail                                                  |
+  |-----------------------|---------------------------------------------------------|
+  | Minimal fields        | Only id + display fields needed by the frontend         |
+  | Always from_attributes| `model_config = {"from_attributes": True}` on all       |
+  | Optional on parent    | `customer: CustomerSummary | None = None`               |
+  | No circular imports   | Summary schemas live in the parent's schema file        |
+  | joinedload for 1:1    | Use `joinedload()` for belongs-to relationships         |
+  | selectinload for 1:N  | Use `selectinload()` for has-many relationships         |
+  | unique() after join   | Always call `result.unique()` after joinedload          |
+
+usage_notes: |
+  - Create a Summary schema for any entity that appears as a nested read
+  - Include only id + fields needed for display (name, email, etc.)
+  - Mark nested fields as Optional on the parent (not always eager-loaded)
+  - Place Summary schemas in the consuming schema's file to avoid circular imports
+  - Always call `.unique()` on results when using joinedload (SQLAlchemy deduplication)
+  - Use joinedload for single-object relations, selectinload for collections

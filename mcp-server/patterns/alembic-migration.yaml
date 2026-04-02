@@ -1,0 +1,143 @@
+name: alembic-migration
+category: backend
+description: "Alembic async migration conventions: naming, FK indexes, additive-only, exclusion constraints"
+tags: ["alembic", "migration", "database", "postgresql", "async"]
+created: "2026-04-01"
+content: |
+  ## Alembic Migration Conventions
+
+  Sources: `alembic/env.py`, `alembic/versions/`
+
+  ### Async Migration Environment
+
+  ```python
+  """Alembic async migration environment."""
+  import asyncio
+  from sqlalchemy import pool
+  from sqlalchemy.ext.asyncio import create_async_engine
+  from alembic import context
+  from app.core.config import get_settings
+  from app.models import Base  # triggers all model imports
+
+  target_metadata = Base.metadata
+
+  async def run_async_migrations() -> None:
+      settings = get_settings()
+      connectable = create_async_engine(
+          settings.async_database_url,
+          poolclass=pool.NullPool,
+      )
+      async with connectable.connect() as connection:
+          await connection.run_sync(do_run_migrations)
+      await connectable.dispose()
+
+  def run_migrations_online() -> None:
+      asyncio.run(run_async_migrations())
+  ```
+
+  Key: `from app.models import Base` triggers all model imports so autogenerate sees every table.
+
+  ### Migration File Naming
+
+  Format: `YYYY_MM_DD_HHMM-<revision_id>_<description>.py`
+
+  Example: `2026_03_31_1012-ce01774087ce_initial_schema.py`
+
+  Generate with:
+  ```bash
+  alembic revision --autogenerate -m "add_personnel_schedule_table"
+  ```
+
+  ### Column Conventions
+
+  | Convention              | Example                                                    |
+  |-------------------------|------------------------------------------------------------|
+  | Primary key             | `sa.Column('id', sa.UUID(), nullable=False)`               |
+  | Foreign key with index  | `ForeignKeyConstraint(...)` + `create_index()` on FK col   |
+  | Timestamps              | `server_default=sa.text('now()')` on created_at/updated_at |
+  | Enums                   | `native_enum=False` (stored as varchar, not PG enum)       |
+  | Version column          | `sa.Column('version', sa.Integer(), nullable=False)`       |
+  | Unique constraints      | Named: `sa.UniqueConstraint(..., name='uq_table_cols')`    |
+  | Check constraints       | Named: `sa.CheckConstraint(..., name='ck_table_rule')`     |
+
+  ### Foreign Key Rules
+
+  ```python
+  # Always index FK columns
+  sa.ForeignKeyConstraint(['customer_id'], ['customer.id'], ondelete='RESTRICT'),
+  op.create_index(op.f('ix_job_customer_id'), 'job', ['customer_id'], unique=False)
+
+  # ondelete strategies:
+  # CASCADE  -- child deleted when parent deleted (addresses when customer deleted)
+  # RESTRICT -- prevent parent deletion if children exist (jobs reference customers)
+  # SET NULL -- set FK to null when parent deleted (optional references)
+  ```
+
+  ### Index Naming Conventions
+
+  | Type               | Pattern                          | Example                          |
+  |--------------------|----------------------------------|----------------------------------|
+  | Single column      | `ix_{table}_{col}`               | `ix_job_customer_id`             |
+  | Composite          | `ix_{table}_{col1}_{col2}`       | `ix_job_status_created`          |
+  | Unique             | `ix_{table}_{col}` with unique   | `ix_user_email`                  |
+  | Partial            | `ix_{table}_{col}` + where       | `ix_job_display_id` (WHERE NOT NULL) |
+  | Composite function | `ix_{table}_{purpose}`           | `ix_audit_log_entity`            |
+
+  ### Partial Index Example
+
+  ```python
+  op.create_index(
+      'ix_job_display_id', 'job', ['display_id'],
+      unique=False,
+      postgresql_where=sa.text('display_id IS NOT NULL')
+  )
+  ```
+
+  ### Exclusion Constraints (PostgreSQL)
+
+  ```python
+  # Enable btree_gist extension first
+  op.execute("CREATE EXTENSION IF NOT EXISTS btree_gist")
+
+  # Prevent overlapping date ranges for the same resource
+  op.execute("""
+      ALTER TABLE restriction ADD CONSTRAINT excl_restriction_no_overlap
+      EXCLUDE USING gist (
+          resource_id WITH =,
+          daterange(start, COALESCE("end", '9999-12-31'::date), '[]') WITH &&
+      )
+  """)
+  ```
+
+  ### Downgrade: Always Reversible
+
+  ```python
+  def downgrade() -> None:
+      # Drop constraints first
+      op.execute("ALTER TABLE restriction DROP CONSTRAINT IF EXISTS excl_restriction_no_overlap")
+      # Drop tables in reverse dependency order
+      op.drop_index(op.f('ix_job_customer_id'), table_name='job')
+      op.drop_table('job')
+      # Drop extensions last
+      op.execute("DROP EXTENSION IF EXISTS btree_gist")
+  ```
+
+  ### Enum Storage
+
+  Enums use `native_enum=False` so they are stored as varchar, not PostgreSQL native enums.
+  This avoids the need for `ALTER TYPE` migrations when adding enum values.
+
+  ```python
+  sa.Column('status', sa.Enum('ACTIVE', 'INACTIVE', 'ON_LEAVE',
+            name='personnel_status', native_enum=False), nullable=False)
+  ```
+
+usage_notes: |
+  - Always use async engine in env.py (asyncio.run wraps the migration)
+  - Import Base in env.py to trigger all model registration for autogenerate
+  - Every FK column MUST have a corresponding index
+  - Use `native_enum=False` for all enums (avoids ALTER TYPE hassle)
+  - Name all constraints explicitly (unique, check, exclusion)
+  - Prefer additive-only migrations; avoid dropping columns in production
+  - Downgrade functions must be the exact inverse of upgrade
+  - Use `server_default=sa.text('now()')` for timestamps, not Python defaults

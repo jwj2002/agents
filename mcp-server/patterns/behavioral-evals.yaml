@@ -1,0 +1,95 @@
+name: behavioral-evals
+category: workflow
+description: "Production-derived verification checks (E01-E15) with file-to-eval mapping for PROVE phase"
+tags: ["evals", "verification", "prove", "quality", "testing"]
+created: "2026-04-01"
+content: |
+  ## Behavioral Evals Catalog (E01-E15)
+
+  Each eval traces back to a real production failure. PROVE selects applicable evals
+  based on changed files using the mapping table below.
+
+  ### Eval Catalog
+
+  | ID | Name | Trigger Files | What to Check |
+  |----|------|--------------|---------------|
+  | E01 | ENUM_VALUE_MISMATCH | *.tsx, *.ts, schemas/*.py | Frontend uses enum VALUE not NAME |
+  | E02 | COMPONENT_API_MISMATCH | *.tsx, *.ts | All required props passed with correct types |
+  | E03 | HOOK_DEPENDENCY_ARRAY | *.tsx, *.ts | Every ref'd variable in useEffect/useMemo/useCallback deps |
+  | E04 | MODEL_WITHOUT_MIGRATION | models/*.py | Model column changed -> Alembic migration exists |
+  | E05 | NULLABLE_MISMATCH | models/*.py, schemas/*.py | nullable=True <-> Optional[T]; nullable=False <-> required |
+  | E06 | SCHEMA_MODEL_DRIFT | schemas/*.py, models/*.py | Pydantic fields match SQLAlchemy model fields |
+  | E07 | MIGRATION_NOT_ADDITIVE | alembic/versions/*.py | No drop_column/drop_table; downgrade() is inverse |
+  | E08 | MIGRATION_MISSING_INDEX | alembic/versions/*.py | FK columns have create_index |
+  | E09 | SERVICE_BYPASSES_REPO | services/*.py | No self.db.execute — use self.repo.* instead |
+  | E10 | STALE_DATA_UNHANDLED | services/*.py, repositories/*.py | Flush wrapped in try/except StaleDataError |
+  | E11 | AUTH_DEPENDENCY_MISSING | routers/*.py | Every endpoint has CurrentUser/AdminUser dependency |
+  | E12 | AUDIT_LOG_MISSING | routers/*.py, services/*.py | CUD operations call AuditService |
+  | E13 | MISSING_FK_INDEX | models/*.py | ForeignKey columns have index=True |
+  | E14 | DOCKER_ROOT_USER | Dockerfile | USER directive set to non-root |
+  | E15 | SECRETS_IN_CODE | *.py, *.ts, *.tsx, *.env* | No hardcoded keys/passwords/tokens |
+
+  ### File-to-Eval Mapping
+
+  PROVE uses `git diff --name-only origin/main` and matches against these patterns:
+
+  | File Pattern | Applicable Evals |
+  |-------------|-----------------|
+  | *.tsx, *.ts | E01, E02, E03, E15 |
+  | models/*.py | E04, E05, E06, E08, E13, E15 |
+  | schemas/*.py | E01, E05, E06 |
+  | alembic/versions/*.py | E07, E08 |
+  | services/*.py | E09, E10, E12, E15 |
+  | routers/*.py | E11, E12, E15 |
+  | repositories/*.py | E10, E13 |
+  | Dockerfile, docker-compose.yml | E14 |
+  | *.py (catch-all) | E15 |
+  | *.env* | E15 |
+
+  ### Override Rules
+
+  - No files match any pattern: run only E15 (SECRETS)
+  - FULLSTACK change (backend + frontend): always add E01 (ENUM_VALUE)
+  - `--thorough` flag: run ALL evals regardless of file mapping
+
+  ### PROVE Integration
+
+  ```
+  Step 0: Determine applicable evals
+    1. Run: git diff --name-only origin/main
+    2. Match each changed file against patterns
+    3. Collect unique eval IDs
+    4. Load those evals
+    5. Run each eval's verification checks
+
+  Step 1-4: Continue with standard verification levels
+  ```
+
+  ### Detailed Verification Steps
+
+  **E01 — ENUM_VALUE_MISMATCH:**
+  Grep frontend for string literals matching status/role/type. Cross-reference with
+  backend StrEnum in models/base.py. Verify VALUE ("CO-OWNER") not NAME ("CO_OWNER").
+
+  **E04 — MODEL_WITHOUT_MIGRATION:**
+  Check if model column added/removed/type-changed. Verify corresponding Alembic
+  migration exists in same commit/PR. If model changed and no migration: FAIL.
+
+  **E05 — NULLABLE_MISMATCH:**
+  For each changed model field, check nullable=True/False. Find corresponding Pydantic
+  schema field. Verify: nullable=True <-> Optional[T]; nullable=False <-> required.
+
+  **E09 — SERVICE_BYPASSES_REPO:**
+  Grep for self.db.execute, self.db.add, self.db.flush in service files. Should use
+  self.repo.* methods. Exception: complex aggregation with no natural repo home.
+
+  **E11 — AUTH_DEPENDENCY_MISSING:**
+  Every new/modified endpoint needs auth dependency (current_user: CurrentUser).
+  Exception: explicitly public endpoints (health, login) with comment.
+
+usage_notes: |
+  - PROVE runs applicable evals automatically based on changed files
+  - E15 (SECRETS) is the catch-all — always runs
+  - E01 (ENUM_VALUE) is forced on all FULLSTACK changes
+  - Each eval traces to a real production failure — none are theoretical
+  - For COMPLEX tasks, consider running --thorough to check all evals
