@@ -18,6 +18,7 @@ When given any task, assess complexity and route to the right workflow. Maximize
 **Modifiers:**
 - **Multiple independent issues** → add `--parallel` (worktree isolation, separate tabs)
 - **Interrupted workflow** → add `--resume` (skip completed phases)
+- **Ambiguous requirements** → add `--discuss` (identify gray areas before planning). Recommended for COMPLEX and FULLSTACK.
 - **Subtasks within an issue** → delegate independent subtasks to Codex via `/codex:rescue --background`
 
 ## Step 2: Maximize Codex Delegation
