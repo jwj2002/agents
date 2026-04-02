@@ -34,6 +34,7 @@ argument-hint: [issue-number]
 /orchestrate 184
 /orchestrate #184
 /orchestrate 184 --with-tests    # Include TEST-PLANNER phase
+/orchestrate 184 --discuss       # Identify gray areas before planning
 /orchestrate 184 --resume        # Resume from last completed phase
 /orchestrate 184 --parallel      # Run in isolated worktree
 /orchestrate 184 --parallel --resume  # Resume in existing worktree
@@ -43,6 +44,7 @@ If no issue provided, instruct user to create one with `/feature` or `/bug`.
 
 **Flags**:
 - `--with-tests`: Run TEST-PLANNER agent after MAP-PLAN (recommended for calculations/formulas)
+- `--discuss`: Run DISCUSS agent before MAP-PLAN to identify gray areas and capture decisions. Recommended for COMPLEX and FULLSTACK tasks.
 - `--resume`: Resume an interrupted workflow from the last completed phase
 - `--parallel`: Run workflow in an isolated git worktree (`.worktrees/issue-{N}/`). Enables concurrent orchestrate sessions on independent issues.
 
@@ -78,8 +80,8 @@ fi
 
 ```
 TRIVIAL:        MAP-PLAN → PATCH → PROVE-lite
-SIMPLE:         MAP-PLAN → [TEST-PLANNER] → CONTRACT* → PLAN-CHECK → PATCH → PROVE
-COMPLEX:        MAP → PLAN → [TEST-PLANNER] → CONTRACT* → PLAN-CHECK → PATCH → PROVE
+SIMPLE:         [DISCUSS] → MAP-PLAN → [TEST-PLANNER] → CONTRACT* → PLAN-CHECK → PATCH → PROVE
+COMPLEX:        [DISCUSS] → MAP → PLAN → [TEST-PLANNER] → CONTRACT* → PLAN-CHECK → PATCH → PROVE
 ```
 
 - `TRIVIAL` skips PLAN-CHECK and uses PROVE-lite (gates only, no Level 2-3 checks)
