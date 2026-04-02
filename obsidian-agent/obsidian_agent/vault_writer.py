@@ -23,8 +23,8 @@ from .templates import (
     render_dashboard_row,
     render_monthly,
     render_monthly_multi,
+    render_project,
     render_rollup_project_section,
-    render_status,
     render_weekly,
     render_weekly_multi,
 )
@@ -60,13 +60,19 @@ class VaultWriter:
     # Core writes
     # ------------------------------------------------------------------
 
-    def write_status(self, project_name: str, extract: SessionExtract) -> Path:
-        """Overwrite STATUS.md with current project state.
+    def write_project(self, project_name: str, extract: SessionExtract) -> Path:
+        """Write PROJECT.md — hub document with identity info.
 
-        Preserves user-edited frontmatter (health, priority, category) from
-        the existing STATUS.md before overwriting.
+        Preserves user-edited frontmatter (health, priority, category).
+        Merges new decisions with existing ones (append-only).
         """
-        path = self._project_dir(project_name) / "STATUS.md"
+        project_dir = self._project_dir(project_name)
+        path = project_dir / "PROJECT.md"
+
+        # Migrate: if STATUS.md exists but PROJECT.md doesn't, rename it
+        old_path = project_dir / "STATUS.md"
+        if old_path.exists() and not path.exists():
+            old_path.rename(path)
 
         # Preserve existing frontmatter metadata
         if path.exists():
@@ -80,7 +86,14 @@ class VaultWriter:
             if existing_meta.get("category"):
                 extract.category = existing_meta["category"]
 
-        content = render_status(project_name, extract)
+        # Get recent daily log dates for the "Recent Activity" links
+        daily_dir = project_dir / "Log" / "Daily"
+        recent_dates = []
+        if daily_dir.exists():
+            daily_files = sorted(daily_dir.glob("*.md"), reverse=True)
+            recent_dates = [f.stem for f in daily_files[:5]]
+
+        content = render_project(project_name, extract, recent_dates=recent_dates)
         path.write_text(content)
         return path
 
@@ -124,7 +137,7 @@ class VaultWriter:
         return path
 
     def write_dashboard(self) -> Path:
-        """Overwrite DASHBOARD.md by reading all STATUS.md files."""
+        """Overwrite DASHBOARD.md by reading all PROJECT.md files."""
         rows = []
 
         if not self.projects.exists():
@@ -135,13 +148,16 @@ class VaultWriter:
         for project_dir in sorted(self.projects.iterdir()):
             if not project_dir.is_dir():
                 continue
-            status_file = project_dir / "STATUS.md"
-            if not status_file.exists():
+            # Support both PROJECT.md (new) and STATUS.md (legacy)
+            project_file = project_dir / "PROJECT.md"
+            if not project_file.exists():
+                project_file = project_dir / "STATUS.md"
+            if not project_file.exists():
                 continue
 
             project_name = project_dir.name
-            extract = self._parse_status_file(status_file)
-            updated = self._get_file_date(status_file)
+            extract = self._parse_project_file(project_file)
+            updated = self._get_file_date(project_file)
             rows.append(render_dashboard_row(project_name, extract, updated))
 
         dashboard = self.vault / "DASHBOARD.md"
@@ -234,7 +250,7 @@ class VaultWriter:
                 # Get status from STATUS.md
                 status_text = "—"
                 if status_file.exists():
-                    status_extract = self._parse_status_file(status_file)
+                    status_extract = self._parse_project_file(status_file)
                     status_text = status_extract.status or "—"
 
                 # Extract data from daily log
@@ -341,8 +357,8 @@ class VaultWriter:
     # ------------------------------------------------------------------
 
     def update(self, project_name: str, extract: SessionExtract, date: str = "") -> dict[str, Path]:
-        """Full update: STATUS + Daily + DASHBOARD + Test Results."""
-        status_path = self.write_status(project_name, extract)
+        """Full update: PROJECT + Daily + DASHBOARD + Test Results."""
+        status_path = self.write_project(project_name, extract)
         daily_path = self.write_daily(project_name, extract, date)
         dashboard_path = self.write_dashboard()
 
@@ -436,8 +452,8 @@ class VaultWriter:
         return frontmatter
 
     @staticmethod
-    def _parse_status_file(path: Path) -> SessionExtract:
-        """Parse a STATUS.md back into a minimal SessionExtract for the dashboard."""
+    def _parse_project_file(path: Path) -> SessionExtract:
+        """Parse a PROJECT.md (or legacy STATUS.md) into a minimal SessionExtract."""
         content = path.read_text()
 
         # Parse frontmatter for metadata
@@ -478,12 +494,12 @@ class VaultWriter:
             return "" if text.startswith("_") else text
 
         return SessionExtract(
-            status=_section_text("Status"),
-            phase=_section_text("Phase"),
+            status="",
+            phase=_section_text("Current Phase") or _section_text("Phase"),
             summary="",
-            next_steps=_section("Follow-up") or _section("Next Steps"),
-            decisions=_section("Decisions"),
-            blockers=_section("Blockers"),
+            next_steps=_section("Active Workstreams") or _section("Follow-up") or _section("Next Steps"),
+            decisions=_section("Key Decisions") or _section("Decisions"),
+            blockers=_section("Active Blockers") or _section("Blockers"),
             github_refs=_section("GitHub References"),
             meta_status=meta.get("status", "active"),
             health=meta.get("health", "on-track"),
