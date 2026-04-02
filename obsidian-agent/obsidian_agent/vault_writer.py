@@ -341,15 +341,73 @@ class VaultWriter:
     # ------------------------------------------------------------------
 
     def update(self, project_name: str, extract: SessionExtract, date: str = "") -> dict[str, Path]:
-        """Full update: STATUS + Daily + DASHBOARD."""
+        """Full update: STATUS + Daily + DASHBOARD + Test Results."""
         status_path = self.write_status(project_name, extract)
         daily_path = self.write_daily(project_name, extract, date)
         dashboard_path = self.write_dashboard()
-        return {
+
+        # Append test results if a test plan exists for this project
+        test_path = self.write_test_results(project_name, date)
+
+        result = {
             "status": status_path,
             "daily": daily_path,
             "dashboard": dashboard_path,
         }
+        if test_path:
+            result["test_results"] = test_path
+        return result
+
+    def write_test_results(self, project_name: str, date: str = "") -> Path | None:
+        """Scan for test plan in the project source and append results to daily log.
+
+        Looks for the project source directory by checking common locations,
+        then finds ui-test-plan.md and extracts pass/fail stats.
+        """
+        from .test_results import find_test_plans, parse_test_plan, render_test_summary
+
+        date = date or datetime.now().strftime("%Y-%m-%d")
+
+        # Try to find the project source directory
+        project_paths = [
+            Path.home() / "projects" / project_name,
+            Path.home() / "projects" / project_name.replace("-", "_"),
+        ]
+
+        for project_path in project_paths:
+            plans = find_test_plans(str(project_path))
+            if not plans:
+                continue
+
+            for plan_path in plans:
+                results = parse_test_plan(plan_path)
+                summary = render_test_summary(results)
+                if not summary:
+                    continue
+
+                # Append to daily log
+                log_dir = self._log_dir(project_name, "Daily")
+                daily_path = log_dir / f"{date}.md"
+
+                # Check if test results already written today
+                if daily_path.exists():
+                    existing = daily_path.read_text()
+                    if "## UI Test Results" in existing:
+                        # Replace existing test results section
+                        import re as _re
+                        pattern = r"## UI Test Results.*?(?=\n## |\n---|\Z)"
+                        new_content = _re.sub(pattern, summary, existing, flags=_re.DOTALL)
+                        tmp = daily_path.with_suffix(".tmp")
+                        tmp.write_text(new_content)
+                        os.replace(tmp, daily_path)
+                        return daily_path
+
+                # Append new test results section
+                with open(daily_path, "a") as f:
+                    f.write(f"\n---\n\n{summary}\n")
+                return daily_path
+
+        return None
 
     # ------------------------------------------------------------------
     # Helpers
