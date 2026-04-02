@@ -226,6 +226,38 @@ gh issue view $ISSUE --json number,title,body
 
 If not found, STOP.
 
+### Step 0.5: Scan Seeds
+
+Check if any dormant seeds match this issue:
+
+```bash
+# Scan seeds directory if it exists
+if [ -d ".planning/seeds" ]; then
+  ISSUE_TITLE=$(gh issue view $ISSUE --json title --jq '.title')
+  for seed in .planning/seeds/SEED-*.md; do
+    [ -f "$seed" ] || continue
+    STATUS=$(grep "^status:" "$seed" | awk '{print $2}')
+    if [ "$STATUS" = "dormant" ]; then
+      TRIGGER=$(grep "^trigger_when:" "$seed" | cut -d'"' -f2)
+      SEED_NAME=$(grep "^# " "$seed" | head -1 | sed 's/^# //')
+      SEED_ID=$(grep "^id:" "$seed" | awk '{print $2}')
+      # Simple keyword match between trigger and issue title/body
+      echo "Checking $SEED_ID: $SEED_NAME (trigger: $TRIGGER)"
+    fi
+  done
+fi
+```
+
+If seeds match, report before proceeding:
+
+```
+Seeds surfaced:
+  SEED-001: "Add rate limiting" — trigger matches this issue's scope
+  Action: implement alongside, defer, or dismiss?
+```
+
+If no `.planning/seeds/` directory exists, skip silently.
+
 ### Step 1: Classify Complexity
 
 | Level | Criteria | Workflow |
