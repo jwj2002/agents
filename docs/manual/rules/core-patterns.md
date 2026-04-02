@@ -96,3 +96,11 @@ The rule file uses `alwaysApply: true` in its frontmatter, which means Claude Co
 Core patterns are the output of the self-learning system. The `/learn` command analyzes `metrics.jsonl` and `failures.jsonl`, clusters failures by root cause, and updates pattern files. When a pattern reaches 5+ occurrences, `/learn --apply` writes prevention checklists directly into agent definition files and bumps agent versions.
 
 The core patterns file is updated manually and rarely --- only when a new failure pattern reaches sufficient frequency to warrant always-loaded status. The current three patterns have been stable since early 2026.
+
+## Related Rules
+
+| Rule | Loaded When | Purpose |
+|------|------------|---------|
+| `behavioral-evals.md` | PROVE agent runs | Defines verification test cases by file type |
+| `eval-file-mapping.md` | PROVE agent runs | Maps changed files to relevant evals |
+| `post-merge-verification.md` | `/pr --merge` | Post-merge health checks |

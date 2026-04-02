@@ -2,7 +2,7 @@
 
 Complete listing of all files in the `~/agents/claude-config/` repository, organized by category. All paths are relative to `~/agents/claude-config/` and symlinked to `~/.claude/` via `install.sh`.
 
-## Agents (11 files)
+## Agents (12 files)
 
 Symlinked to `~/.claude/agents/`. Agent definitions are markdown files that define role, constraints, input requirements, output format, and verification gates.
 
@@ -19,8 +19,9 @@ Symlinked to `~/.claude/agents/`. Agent definitions are markdown files that defi
 | `test-planner.md` | 7.9 KB | Test architect for `--with-tests` flag (optional, phase 1.5) |
 | `spec-reviewer.md` | 6.1 KB | Spec analyst and GitHub issue creator (pre-pipeline) |
 | `code-reviewer.md` | 1.3 KB | Proactive lightweight review (runs on Haiku model) |
+| `discuss.md` | 4.5 KB | Decision capturer --- identifies gray areas before planning (optional, `--discuss` flag) |
 
-## Commands (15 files)
+## Commands (16 files)
 
 Symlinked to `~/.claude/commands/`. Slash commands invokable by the user during a session.
 
@@ -41,8 +42,9 @@ Symlinked to `~/.claude/commands/`. Slash commands invokable by the user during 
 | `quick.md` | 2.0 KB | Ad-hoc fix without orchestrate (`/quick`) |
 | `review.md` | 0.4 KB | Code review of staged changes (`/review`) |
 | `frontend-design.md` | --- | Frontend design plugin integration (`/frontend-design`) |
+| `seed.md` | 5.5 KB | Capture deferred ideas with trigger conditions for future surfacing |
 
-## Rules (7 files)
+## Rules (10 files)
 
 Symlinked to `~/.claude/rules/`. Conditional and always-loaded instruction files.
 
@@ -55,8 +57,11 @@ Symlinked to `~/.claude/rules/`. Conditional and always-loaded instruction files
 | `fastapi-layered-pattern.md` | 23.6 KB | `**/backend/**`, `**/api/**`, `**/services/**` | Full layered architecture reference |
 | `orchestrate-workflow.md` | 16.7 KB | `.agents/**/*.md` | Agent efficiency, artifact naming, CONTRACT rules |
 | `spec-review-workflow.md` | 12.0 KB | `**/specs/**`, `**/.agents/**` | Spec finalization gate and issue creation |
+| `behavioral-evals.md` | 4.2 KB | PROVE phase | Behavioral test suite for PROVE agent verification |
+| `eval-file-mapping.md` | 1.2 KB | PROVE phase | Maps changed file patterns to relevant behavioral evals |
+| `post-merge-verification.md` | 1.2 KB | `/pr --merge` | Post-merge ops checklist for /pr command |
 
-## Hooks (6 files)
+## Hooks (7 files)
 
 Symlinked to `~/.claude/hooks/`. Python scripts attached to Claude Code lifecycle events.
 
@@ -68,6 +73,7 @@ Symlinked to `~/.claude/hooks/`. Python scripts attached to Claude Code lifecycl
 | `notify_completion.py` | 3.5 KB | Stop | macOS Notification Center alert with iPhone relay via Handoff |
 | `state_manager.py` | 4.5 KB | (shared module) | Centralized PERSISTENT_STATE.yaml read/write operations |
 | `worktree_manager.py` | 6.5 KB | (shared module) | Git worktree lifecycle for `--parallel` flag |
+| `context_monitor.py` | 4.5 KB | PostToolUse | Warns when context window is running low (35% WARNING, 25% CRITICAL) |
 
 ## Skills (3 directories)
 

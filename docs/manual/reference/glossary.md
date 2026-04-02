@@ -10,10 +10,21 @@ A specialized AI role with a defined purpose, input requirements, output format,
 **Artifact**
 A markdown file produced by an agent during the orchestrate pipeline. Named with the pattern `{agent}-{issue}-{mmddyy}.md` and stored in `.agents/outputs/`. Each agent validates that its required predecessor artifacts exist before starting. After PR merge, artifacts are moved to the `archive/` subdirectory.
 
+**Atomic Commits**
+The practice of committing after each logical change group during PATCH, rather than one monolithic commit. Enables `git bisect` and granular revertability. Format: `type(#issue): description`.
+
 **Anti-Rationalization**
 A failure mode where AI agents declare a task complete when it is not. The `verify_completion.py` Stop hook combats this by checking for uncommitted changes and TODO/FIXME markers before allowing session completion.
 
+## B
+
+**Behavioral Evals**
+A set of verification checks that PROVE runs against changed files. Mapped via `eval-file-mapping.md` so only relevant evals run based on which files changed.
+
 ## C
+
+**Context Monitor**
+A PostToolUse hook (`context_monitor.py`) that warns when the context window is running low --- WARNING at 35% remaining, CRITICAL at 25%.
 
 **Context Window**
 The agent's working memory --- everything it can "see" at once, including instructions, conversation history, file contents, and tool results. When the context fills up, older content gets compressed or dropped. Every token of instructions competes with code context.
@@ -30,6 +41,11 @@ Two related tier systems are used to categorize and route tasks:
 *Routing tiers* (6 levels) determine how a task is handled: TRIVIAL (1 file, routed to `/quick`), SIMPLE (1-3 files, routed to Plan Mode), MODERATE (4-5 files, routed to `/orchestrate` with SIMPLE pipeline), COMPLEX (6+ files, routed to `/orchestrate` with COMPLEX pipeline), FULLSTACK (any file count, routed to `/orchestrate` with mandatory CONTRACT), and PRIOR FAIL (any file count, routed to `/orchestrate` with failure context injection).
 
 *Pipeline tiers* (3 levels) determine which agents run inside `/orchestrate`: TRIVIAL (MAP-PLAN, PATCH, PROVE-lite), SIMPLE (MAP-PLAN, CONTRACT*, PLAN-CHECK, PATCH, PROVE), and COMPLEX (MAP, PLAN, CONTRACT*, PLAN-CHECK, PATCH, PROVE). The MAP or MAP-PLAN agent determines the pipeline tier after investigating the codebase.
+
+## D
+
+**DISCUSS**
+An optional agent (phase 0.5) that identifies 2-5 gray areas in issue requirements and captures implementation decisions before MAP-PLAN runs. Triggered by `--discuss` flag.
 
 ## F
 
@@ -88,6 +104,9 @@ A documented failure mode with trigger conditions and prevention steps. Patterns
 **PERSISTENT_STATE**
 A YAML file (`.agents/outputs/claude_checkpoints/PERSISTENT_STATE.yaml`) that tracks the current workflow state: active issue, branch, phase, completed phases, and worktree path. Managed by `state_manager.py` and used by hooks, orchestrate, `--resume`, and `--parallel`.
 
+**Post-Merge Verification**
+An automated ops check added to the `/pr` workflow that verifies main is healthy after merging --- prevents "merged but broken" situations.
+
 **PROVE**
 The final agent phase (phase 4) that verifies implementation, records outcomes to `metrics.jsonl` and `failures.jsonl`, and classifies any failures by root cause code. Uses multi-level verification: EXISTS, SUBSTANTIVE, WIRED, FUNCTIONAL.
 
@@ -99,6 +118,9 @@ A markdown file with variable placeholders used to generate agent spawn prompts.
 
 ## R
 
+**Runbook**
+A structured troubleshooting reference stored in `.claude/memory/runbooks.md`. Agents check runbooks before investigating from scratch, reducing time on known problems.
+
 **Routing Tier**
 One of six classification levels that determine how a task is handled: TRIVIAL (`/quick`), SIMPLE (Plan Mode), MODERATE (`/orchestrate` with SIMPLE pipeline), COMPLEX (`/orchestrate` with COMPLEX pipeline), FULLSTACK (`/orchestrate` with mandatory CONTRACT), or PRIOR FAIL (`/orchestrate` with failure context). See also: Pipeline Tier.
 
@@ -106,6 +128,9 @@ One of six classification levels that determine how a task is handled: TRIVIAL (
 A markdown file in `~/.claude/rules/` that provides instructions to agents. Rules can be always-loaded (`alwaysApply: true`) or conditionally loaded based on file path globs. Rules encode failure prevention, architectural patterns, and workflow constraints.
 
 ## S
+
+**Seed**
+A deferred idea captured with a trigger condition via `/seed`. Seeds surface automatically during `/orchestrate` when the current issue's scope matches the trigger. Stored in `.planning/seeds/`.
 
 **Skill**
 A multi-step workflow defined in `~/.claude/skills/`. Skills are more complex than single commands and include their own reference documentation. Current skills: `orchestrate` (multi-agent pipeline), `test-plan` (test matrix generation), and `spec-review` (spec analysis and issue creation).

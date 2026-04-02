@@ -20,6 +20,7 @@ Runs the multi-agent pipeline for a GitHub issue. Used for MODERATE, COMPLEX, FU
 /orchestrate 184 --with-tests         # Add TEST-PLANNER phase
 /orchestrate 184 --resume             # Resume interrupted workflow
 /orchestrate 184 --parallel           # Isolated worktree execution
+/orchestrate 184 --discuss            # Add DISCUSS phase before investigation
 ```
 
 !!! example "Example: running orchestrate"
@@ -69,6 +70,22 @@ Runs a lightweight code review on staged changes using the Haiku model.
 
 ```bash
 /review
+```
+
+## Planning & Ideas Commands
+
+| Command | Usage | Purpose |
+|---------|-------|---------|
+| `/seed` | `/seed "Add rate limiting" --trigger "next major version"` | Capture deferred ideas with trigger conditions. Seeds surface during `/orchestrate` when scope matches. Supports `--list` and `--check`. |
+
+### /seed
+
+Captures deferred ideas with trigger conditions. Seeds are stored and surfaced during `/orchestrate` when the scope matches their trigger.
+
+```bash
+/seed "Add rate limiting" --trigger "next major version"
+/seed --list                          # View all captured seeds
+/seed --check                         # Check which seeds match current scope
 ```
 
 ## Issue Management Commands
@@ -233,6 +250,7 @@ Generates: `models.py`, `schemas.py`, `repository.py`, `services.py`, `deps.py`,
 | `/quick` | Workflow | No | Modified source files only |
 | `/pr` | Workflow | No | PR on GitHub |
 | `/review` | Workflow | No | None |
+| `/seed` | Planning & Ideas | No | Seed entry in store |
 | `/feature` | Issue Mgmt | No | GitHub issue |
 | `/bug` | Issue Mgmt | No | GitHub issue |
 | `/spec-draft` | Issue Mgmt | No | Spec file |

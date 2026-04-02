@@ -14,6 +14,7 @@ When you run `/orchestrate`, a team of specialized agents handles your issue. Ea
 | PLAN-CHECK | 2.8 | Plan validator | Yes | 80 / 120 |
 | PATCH | 3 | Implementer | **No** | 300 / 400 |
 | PROVE | 4 | Verifier + outcome recorder | Metrics only | 250 / 350 |
+| DISCUSS | 0.5 | Decision Capturer (optional, `--discuss`) | Yes | 80 / 120 |
 
 !!! warning "Separation of Concerns"
     Only PATCH writes code. Only PROVE records metrics. Investigation agents must never start implementing. Verification agents must never start fixing.
@@ -26,12 +27,12 @@ When you run `/orchestrate`, a team of specialized agents handles your issue. Ea
 When `/orchestrate` runs, it selects one of three pipeline tiers:
 
 ```
-TRIVIAL pipeline:  MAP-PLAN ─────────────────────────────── PATCH ── PROVE-lite
-SIMPLE pipeline:   MAP-PLAN ── [TEST-PLANNER] ── CONTRACT* ── PLAN-CHECK ── PATCH ── PROVE
-COMPLEX pipeline:  MAP ── PLAN ── [TEST-PLANNER] ── CONTRACT* ── PLAN-CHECK ── PATCH ── PROVE
+TRIVIAL pipeline:  MAP-PLAN ─────────────────────────────────────────── PATCH ── PROVE-lite
+SIMPLE pipeline:   [DISCUSS] ── MAP-PLAN ── [TEST-PLANNER] ── CONTRACT* ── PLAN-CHECK ── PATCH ── PROVE
+COMPLEX pipeline:  [DISCUSS] ── MAP ── PLAN ── [TEST-PLANNER] ── CONTRACT* ── PLAN-CHECK ── PATCH ── PROVE
 
 * = mandatory for fullstack only
-[ ] = optional, enabled with --with-tests
+[ ] = optional, enabled with --with-tests or --discuss
 ```
 
 ```
@@ -46,6 +47,8 @@ COMPLEX pipeline:  MAP ── PLAN ── [TEST-PLANNER] ── CONTRACT* ──
            v          v                     v
      TRIVIAL       SIMPLE              COMPLEX
      pipeline      pipeline            pipeline
+           |          |                     |
+           |     [DISCUSS]             [DISCUSS]
            |          |                     |
        MAP-PLAN   MAP-PLAN             MAP -> PLAN
            |          |                     |
@@ -62,7 +65,8 @@ Each agent produces a named artifact following the pattern `{agent}-{issue}-{mmd
 
 | Agent | Required Predecessor | Stops If Missing? |
 |-------|---------------------|-------------------|
-| MAP / MAP-PLAN | None (first agent) | N/A |
+| DISCUSS | None (optional first agent) | N/A |
+| MAP / MAP-PLAN | None (or DISCUSS artifact) | N/A |
 | PLAN | MAP artifact | Yes |
 | TEST-PLANNER | MAP or MAP-PLAN | Yes |
 | CONTRACT | PLAN or MAP-PLAN | Yes |
