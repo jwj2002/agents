@@ -2,47 +2,41 @@
 from datetime import datetime
 
 # ---------------------------------------------------------------------------
-# STATUS.md — overwritten each session (current state at a glance)
+# PROJECT.md — hub/identity document (slow-changing, no temporal content)
 # ---------------------------------------------------------------------------
-STATUS_TEMPLATE = """\
+PROJECT_TEMPLATE = """\
 ---
 type: project
 status: {meta_status}
 health: {meta_health}
 priority: {meta_priority}
 category: {meta_category}
+phase: "{phase}"
+top_blocker: "{top_blocker}"
 ---
 
 # {project_name}
 
 > Last updated: {updated}
 
-## Status
-{status}
-
-## Phase
+## Current Phase
 {phase}
 
-## Completed Today
-{completed_section}
+## Active Blockers
+{blockers}
 
-## Issues
-{issues_table}
-
-## Follow-up
+## Active Workstreams
 {next_steps}
 
-## Decisions
-{decisions}
+## Key Decisions
 
-## Blockers
-{blockers}
+{decisions_table}
 
 ## GitHub References
 {github_refs}
 
-## Notes
-{notes}
+## Recent Activity
+{recent_activity}
 """
 
 # ---------------------------------------------------------------------------
@@ -53,8 +47,8 @@ DASHBOARD_TEMPLATE = """\
 
 > Auto-generated: {updated}
 
-| Project | Status | Health | Priority | Category | Phase | Next Step | Last Updated |
-|---------|--------|--------|----------|----------|-------|-----------|--------------|
+| Project | Phase | Health | Priority | Category | Top Blocker | Last Updated |
+|---------|-------|--------|----------|----------|-------------|--------------|
 {rows}
 """
 
@@ -282,37 +276,66 @@ def _render_commits_table(extract) -> str:
     return "\n".join(lines)
 
 
-def render_status(project_name: str, extract, updated: str | None = None) -> str:
-    """Render STATUS.md content from a SessionExtract."""
+def render_project(
+    project_name: str,
+    extract,
+    updated: str | None = None,
+    recent_dates: list[str] | None = None,
+) -> str:
+    """Render PROJECT.md — hub document with identity info, not temporal content."""
     updated = updated or datetime.now().strftime("%Y-%m-%d %H:%M")
-    return STATUS_TEMPLATE.format(
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    # Build decisions table (date + decision + link to daily log)
+    decisions_table = _render_decisions_table(extract.decisions, today)
+
+    # Build recent activity links
+    if recent_dates:
+        recent_activity = "\n".join(f"- [[{d}]]" for d in recent_dates[:5])
+    else:
+        recent_activity = f"- [[{today}]]"
+
+    # Top blocker for frontmatter
+    top_blocker = extract.blockers[0] if extract.blockers else "none"
+
+    return PROJECT_TEMPLATE.format(
         project_name=project_name,
         updated=updated,
-        status=extract.status or "_Unknown_",
         phase=extract.phase or "_Not specified_",
-        completed_section=_render_completed_section(extract),
-        issues_table=_render_issues_table(extract),
         next_steps=_checkbox_list(extract.next_steps),
-        decisions=_bullet_list(extract.decisions),
+        decisions_table=decisions_table,
         blockers=_bullet_list(extract.blockers),
         github_refs=_bullet_list(extract.github_refs),
-        notes=_bullet_list(extract.notes),
+        recent_activity=recent_activity,
         meta_status=extract.meta_status,
         meta_health=extract.health,
         meta_priority=extract.priority,
         meta_category=extract.category,
+        top_blocker=top_blocker,
     )
+
+
+def _render_decisions_table(decisions: list[str], date: str) -> str:
+    """Render decisions as a table with date and daily log link."""
+    if not decisions:
+        return "_No decisions recorded yet_"
+    lines = [
+        "| Date | Decision | Daily Log |",
+        "|------|----------|-----------|",
+    ]
+    for d in decisions:
+        lines.append(f"| {date} | {d} | [[{date}]] |")
+    return "\n".join(lines)
 
 
 def render_dashboard_row(project_name: str, extract, updated: str) -> str:
     """Render a single row for the DASHBOARD table."""
-    status = extract.status or "—"
     phase = extract.phase or "—"
-    next_step = _first_or(extract.next_steps)
     health = extract.health
     priority = extract.priority
     category = extract.category
-    return f"| {project_name} | {status} | {health} | {priority} | {category} | {phase} | {next_step} | {updated} |"
+    top_blocker = extract.blockers[0] if extract.blockers else "—"
+    return f"| [[{project_name}]] | {phase} | {health} | {priority} | {category} | {top_blocker} | {updated} |"
 
 
 def render_dashboard(rows: list[str], updated: str | None = None) -> str:
@@ -320,7 +343,7 @@ def render_dashboard(rows: list[str], updated: str | None = None) -> str:
     updated = updated or datetime.now().strftime("%Y-%m-%d %H:%M")
     return DASHBOARD_TEMPLATE.format(
         updated=updated,
-        rows="\n".join(rows) if rows else "| _No projects yet_ | | | | | | | |",
+        rows="\n".join(rows) if rows else "| _No projects yet_ | | | | | | |",
     )
 
 
