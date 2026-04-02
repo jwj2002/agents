@@ -128,6 +128,24 @@ cd frontend && npm run lint && npm run build
 
 ## Verification Checks
 
+### 0. Commit History Check
+
+Verify PATCH produced atomic commits (not one monolithic commit):
+
+```bash
+# Count commits on this branch vs main
+COMMIT_COUNT=$(git log --oneline origin/main..HEAD | wc -l | tr -d ' ')
+echo "Commits on branch: $COMMIT_COUNT"
+
+# Show commit messages
+git log --oneline origin/main..HEAD
+```
+
+- **1 commit**: Acceptable for TRIVIAL issues only
+- **2-4 commits**: Expected for SIMPLE/MODERATE issues
+- **5+ commits**: Expected for COMPLEX issues
+- **Each commit message** should follow `type(#issue): description` format
+
 ### 1. Standard Gates
 
 | Check | Command | Pass Criteria |

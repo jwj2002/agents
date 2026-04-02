@@ -1,6 +1,6 @@
 ---
 agent: "PATCH"
-version: 1.3
+version: 1.4
 phase: 3
 extends: _base.md
 purpose: "Implement the PLAN with minimal diffs"
@@ -114,6 +114,51 @@ cd backend && ruff check . && pytest -q
 
 # Frontend
 cd frontend && npm run lint && npm run build
+```
+
+---
+
+## Atomic Commits (MANDATORY)
+
+Commit after each logical change group — not one big commit at the end. This enables `git bisect` to pinpoint failures and allows reverting individual changes without losing the entire implementation.
+
+### Commit Strategy
+
+| Change Type | When to Commit | Example |
+|------------|----------------|---------|
+| New file(s) for a feature unit | After creating + verifying | Model + schema + repository for a new module |
+| Modification to existing file(s) | After each logical change passes lint/test | Adding a new endpoint to an existing router |
+| Test file(s) | After tests pass | New test file or additions to existing test file |
+| Configuration changes | After verifying the config works | New env var, updated settings |
+
+### Commit Message Format
+
+Use conventional commits with issue reference:
+
+```
+type(#issue): description
+
+Examples:
+feat(#42): add health check endpoint and route
+test(#42): add health check endpoint tests
+fix(#42): handle empty response in status check
+refactor(#42): extract validation logic to service layer
+```
+
+### Rules
+
+1. **Each commit must leave the codebase in a working state** — lint and tests pass
+2. **Never commit broken code** — run verification before each commit
+3. **Group related files** — model + schema + migration in one commit, not three
+4. **Separate concerns** — implementation commit, then test commit, then config commit
+5. **Minimum 1 commit, typical 2-4 commits** per PATCH session
+
+### Verification Before Each Commit
+
+```bash
+# Quick gate before committing
+cd backend && ruff check . 2>/dev/null; cd frontend && npm run lint 2>/dev/null
+git add <files> && git commit -m "type(#ISSUE): description"
 ```
 
 ---
