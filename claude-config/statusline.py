@@ -24,6 +24,11 @@ def main():
     # Get username (pink)
     username = f"{PINK}{getpass.getuser()}{RESET}"
 
+    # Agent name (orange) — from MCP env or agent config
+    import os
+    agent_name = input_data.get("agent", {}).get("name") or os.environ.get("AGENT_NAME") or ""
+    agent_display = f" | {ORANGE}{agent_name}{RESET}" if agent_name else ""
+
     # Get current date in MM/DD format (orange)
     current_date = f"{ORANGE}{datetime.now().strftime('%m/%d')}{RESET}"
 
@@ -39,7 +44,7 @@ def main():
         context_display = f"{GREEN}0.0%{RESET}"
 
     # Build status line
-    status_line = f"{server} | {username} | {current_date} | {context_display} ctx"
+    status_line = f"{server} | {username} | {current_date} | {context_display} ctx{agent_display}"
 
     print(status_line)
 
