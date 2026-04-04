@@ -76,9 +76,14 @@ Create this complete directory tree:
 │   ├── requirements.txt         # Dependencies
 │   ├── .env.example             # Environment variable template
 │   └── .env                     # Local env (gitignored)
+├── scripts/
+│   ├── start.sh                 # Start all services (DB, backend, frontend)
+│   └── stop.sh                  # Stop all services
 ├── .gitignore
 └── README.md
 ```
+
+**Scripts**: Load the `dev-scripts` pattern via `get_pattern("dev-scripts")` and generate `start.sh` and `stop.sh` with the project name substituted. Make both executable (`chmod +x`).
 
 If `--with-auth` is set, also generate:
 

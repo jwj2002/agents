@@ -1,0 +1,91 @@
+name: dev-scripts
+category: backend
+description: "Start/stop scripts for local development — kills, restarts, and validates all services"
+tags: ["devops", "scripts", "docker", "uvicorn", "vite", "startup"]
+created: "2026-04-04"
+content: |
+  ## Dev Start/Stop Scripts
+  
+  Every project gets two scripts in `scripts/`:
+  
+  ### scripts/start.sh
+  
+  Kills existing processes, starts all services, validates each one.
+  
+  ```bash
+  #!/bin/bash
+  # Start all services: database, backend, frontend
+  set -e
+  ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+  cd "$ROOT"
+  
+  echo "=== Project Start ==="
+  
+  # 1. Stop anything running
+  echo "[1/4] Stopping existing services..."
+  kill $(lsof -ti:8000) 2>/dev/null || true
+  kill $(lsof -ti:5173) 2>/dev/null || true
+  sleep 2
+  
+  # 2. Start database
+  echo "[2/4] Starting database..."
+  docker start PROJECT-dev-db 2>/dev/null || true
+  sleep 2
+  if docker exec PROJECT-dev-db pg_isready -U PROJECT -q 2>/dev/null; then
+      echo "  ✓ Database ready"
+  else
+      echo "  ✗ Database failed"; exit 1
+  fi
+  
+  # 3. Start backend
+  echo "[3/4] Starting backend..."
+  nohup python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/PROJECT-backend.log 2>&1 &
+  sleep 4
+  if curl -s http://localhost:8000/api/v1/health > /dev/null 2>&1; then
+      echo "  ✓ Backend running"
+  else
+      echo "  ✗ Backend failed. Check /tmp/PROJECT-backend.log"; exit 1
+  fi
+  
+  # 4. Start frontend
+  echo "[4/4] Starting frontend..."
+  cd "$ROOT/frontend"
+  nohup npx vite --host 0.0.0.0 > /tmp/PROJECT-frontend.log 2>&1 &
+  cd "$ROOT"
+  sleep 4
+  if curl -s -o /dev/null http://localhost:5173 2>/dev/null; then
+      echo "  ✓ Frontend running"
+  else
+      echo "  ✗ Frontend failed. Check /tmp/PROJECT-frontend.log"; exit 1
+  fi
+  
+  echo ""
+  echo "=== All Services Running ==="
+  echo "  App:  http://localhost:5173"
+  echo "  API:  http://localhost:8000"
+  echo "  DB:   localhost:5433"
+  ```
+  
+  ### scripts/stop.sh
+  
+  ```bash
+  #!/bin/bash
+  # Stop all services
+  echo "=== Project Stop ==="
+  kill $(lsof -ti:8000) 2>/dev/null && echo "  ✓ Backend stopped" || echo "  - Not running"
+  kill $(lsof -ti:5173) 2>/dev/null && echo "  ✓ Frontend stopped" || echo "  - Not running"
+  docker stop PROJECT-dev-db 2>/dev/null && echo "  ✓ Database stopped" || echo "  - Not running"
+  echo "=== All Stopped ==="
+  ```
+  
+  ### Scaffold Integration
+  
+  When scaffolding a new project, replace `PROJECT` with the project slug.
+  Both scripts should be created by the scaffold command and made executable.
+usage_notes: |
+  - Replace PROJECT with project name (e.g., docketiq)
+  - Adjust ports if project uses non-standard ports
+  - Add additional services as needed (Redis, worker, etc.)
+  - Scripts are idempotent — safe to run repeatedly
+  - Logs go to /tmp/ for easy access
+  - start.sh validates each service before proceeding
