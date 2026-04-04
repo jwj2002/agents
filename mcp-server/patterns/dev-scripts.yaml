@@ -1,91 +1,111 @@
 name: dev-scripts
 category: backend
-description: "Start/stop scripts for local development — kills, restarts, and validates all services"
-tags: ["devops", "scripts", "docker", "uvicorn", "vite", "startup"]
+description: "Start/stop scripts with configurable ports for multi-project local development"
+tags: ["devops", "scripts", "docker", "uvicorn", "vite", "startup", "ports"]
 created: "2026-04-04"
 content: |
   ## Dev Start/Stop Scripts
   
-  Every project gets two scripts in `scripts/`:
+  Every project gets `scripts/start.sh` and `scripts/stop.sh` with configurable ports.
+  
+  ### Port Discovery
+  
+  Ports are configured in `.env` (source of truth):
+  ```
+  PROJECT_API_PORT=8000
+  PROJECT_UI_PORT=5173
+  PROJECT_DB_PORT=5433
+  ```
+  
+  Scripts read from env vars with defaults. Agents read `.env` to discover which ports a project uses.
+  
+  ### Port Convention for Multiple Projects
+  
+  When running multiple projects simultaneously, assign port ranges:
+  ```
+  Project A: API=8000, UI=5173, DB=5432
+  Project B: API=8001, UI=5174, DB=5433
+  Project C: API=8002, UI=5175, DB=5434
+  ```
   
   ### scripts/start.sh
   
-  Kills existing processes, starts all services, validates each one.
-  
   ```bash
   #!/bin/bash
-  # Start all services: database, backend, frontend
   set -e
   ROOT="$(cd "$(dirname "$0")/.." && pwd)"
   cd "$ROOT"
   
-  echo "=== Project Start ==="
+  PROJECT="myproject"
+  API_PORT="${PROJECT_API_PORT:-8000}"
+  UI_PORT="${PROJECT_UI_PORT:-5173}"
+  DB_CONTAINER="${PROJECT}-dev-db"
+  DB_USER="${PROJECT}"
+  DB_PORT="${PROJECT_DB_PORT:-5433}"
   
-  # 1. Stop anything running
-  echo "[1/4] Stopping existing services..."
-  kill $(lsof -ti:8000) 2>/dev/null || true
-  kill $(lsof -ti:5173) 2>/dev/null || true
+  while [[ $# -gt 0 ]]; do
+      case "$1" in
+          --api-port) API_PORT="$2"; shift 2 ;;
+          --ui-port) UI_PORT="$2"; shift 2 ;;
+          --db-port) DB_PORT="$2"; shift 2 ;;
+          *) echo "Unknown: $1"; exit 1 ;;
+      esac
+  done
+  
+  echo "=== ${PROJECT} Start ==="
+  echo "  API: :${API_PORT}  UI: :${UI_PORT}  DB: :${DB_PORT}"
+  
+  # Stop existing
+  kill $(lsof -ti:${API_PORT}) 2>/dev/null || true
+  kill $(lsof -ti:${UI_PORT}) 2>/dev/null || true
   sleep 2
   
-  # 2. Start database
-  echo "[2/4] Starting database..."
-  docker start PROJECT-dev-db 2>/dev/null || true
+  # Database
+  docker start ${DB_CONTAINER} 2>/dev/null || true
   sleep 2
-  if docker exec PROJECT-dev-db pg_isready -U PROJECT -q 2>/dev/null; then
-      echo "  ✓ Database ready"
-  else
-      echo "  ✗ Database failed"; exit 1
-  fi
+  docker exec ${DB_CONTAINER} pg_isready -U ${DB_USER} -q && echo "  DB ready" || exit 1
   
-  # 3. Start backend
-  echo "[3/4] Starting backend..."
-  nohup python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/PROJECT-backend.log 2>&1 &
+  # Backend
+  nohup python3 -m uvicorn app.main:app --host 0.0.0.0 --port ${API_PORT} > /tmp/${PROJECT}-backend.log 2>&1 &
   sleep 4
-  if curl -s http://localhost:8000/api/v1/health > /dev/null 2>&1; then
-      echo "  ✓ Backend running"
-  else
-      echo "  ✗ Backend failed. Check /tmp/PROJECT-backend.log"; exit 1
-  fi
+  curl -s http://localhost:${API_PORT}/api/v1/health > /dev/null && echo "  API ready" || exit 1
   
-  # 4. Start frontend
-  echo "[4/4] Starting frontend..."
+  # Frontend
   cd "$ROOT/frontend"
-  nohup npx vite --host 0.0.0.0 > /tmp/PROJECT-frontend.log 2>&1 &
+  nohup npx vite --host 0.0.0.0 --port ${UI_PORT} > /tmp/${PROJECT}-frontend.log 2>&1 &
   cd "$ROOT"
   sleep 4
-  if curl -s -o /dev/null http://localhost:5173 2>/dev/null; then
-      echo "  ✓ Frontend running"
-  else
-      echo "  ✗ Frontend failed. Check /tmp/PROJECT-frontend.log"; exit 1
-  fi
+  curl -s -o /dev/null http://localhost:${UI_PORT} && echo "  UI ready" || exit 1
   
-  echo ""
-  echo "=== All Services Running ==="
-  echo "  App:  http://localhost:5173"
-  echo "  API:  http://localhost:8000"
-  echo "  DB:   localhost:5433"
+  echo "All running: http://localhost:${UI_PORT}"
   ```
   
   ### scripts/stop.sh
   
   ```bash
   #!/bin/bash
-  # Stop all services
-  echo "=== Project Stop ==="
-  kill $(lsof -ti:8000) 2>/dev/null && echo "  ✓ Backend stopped" || echo "  - Not running"
-  kill $(lsof -ti:5173) 2>/dev/null && echo "  ✓ Frontend stopped" || echo "  - Not running"
-  docker stop PROJECT-dev-db 2>/dev/null && echo "  ✓ Database stopped" || echo "  - Not running"
-  echo "=== All Stopped ==="
+  PROJECT="myproject"
+  API_PORT="${PROJECT_API_PORT:-8000}"
+  UI_PORT="${PROJECT_UI_PORT:-5173}"
+  DB_CONTAINER="${PROJECT}-dev-db"
+  
+  kill $(lsof -ti:${API_PORT}) 2>/dev/null || true
+  kill $(lsof -ti:${UI_PORT}) 2>/dev/null || true
+  docker stop ${DB_CONTAINER} 2>/dev/null || true
+  echo "All stopped"
   ```
   
-  ### Scaffold Integration
+  ### Agent Port Discovery
   
-  When scaffolding a new project, replace `PROJECT` with the project slug.
-  Both scripts should be created by the scaffold command and made executable.
+  Agents should read .env to find ports:
+  ```bash
+  grep -E "API_PORT|UI_PORT|DB_PORT" .env
+  ```
+  Or check scripts/start.sh for the PROJECT name and default ports.
 usage_notes: |
-  - Replace PROJECT with project name (e.g., docketiq)
-  - Adjust ports if project uses non-standard ports
-  - Add additional services as needed (Redis, worker, etc.)
-  - Scripts are idempotent — safe to run repeatedly
-  - Logs go to /tmp/ for easy access
-  - start.sh validates each service before proceeding
+  - Replace PROJECT with project slug in both scripts
+  - Add port vars to .env: PROJECT_API_PORT, PROJECT_UI_PORT, PROJECT_DB_PORT
+  - Agents discover ports by reading .env, never hardcode
+  - Scripts accept --api-port, --ui-port, --db-port flags for one-off overrides
+  - When scaffolding, set default ports based on how many projects exist
+  - Logs go to /tmp/PROJECT-backend.log and /tmp/PROJECT-frontend.log
