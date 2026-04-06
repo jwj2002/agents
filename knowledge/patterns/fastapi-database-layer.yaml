@@ -1,7 +1,7 @@
 id: PAT-007
 category: database
 name: FastAPI database layer with SQLAlchemy
-status: draft
+status: pilot
 tier: primary
 description: Synchronous SQLAlchemy setup with session-per-request, connection pooling,
   and TimestampMixin
@@ -18,71 +18,53 @@ implementation:
   - Sync SQLAlchemy (not async) — simpler, sufficient for most apps
   - pool_pre_ping=True for stale connection detection
   - get_db() yields session with explicit rollback on exception in finally block
-  - 'TimestampMixin defined in PAT-008 — this pattern imports it, does not define it'
+  - TimestampMixin defined in PAT-008 — this pattern imports it, does not define it
   - No Active Record pattern (no CRUDMixin on Base) — repositories handle all DB ops
-  - 'Dialect-agnostic core: engine creation and get_db() are identical across databases. Only connection string and pool settings change.'
+  - 'Dialect-agnostic core: engine creation and get_db() are identical across databases.
+    Only connection string and pool settings change.'
   reference_code:
-    database_py: |
-      from sqlalchemy import create_engine
-      from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
-      from typing import Generator
-      from backend.core.config import settings
-
-      engine = create_engine(settings.DATABASE_URL, **settings.engine_kwargs)
-      SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-      class Base(DeclarativeBase):
-          pass
-
-      def get_db() -> Generator[Session, None, None]:
-          db = SessionLocal()
-          try:
-              yield db
-          except Exception:
-              db.rollback()
-              raise
-          finally:
-              db.close()
-    config_py: |
-      from pydantic_settings import BaseSettings
-
-      class Settings(BaseSettings):
-          DATABASE_URL: str = "sqlite:///./app.db"
-
-          @property
-          def engine_kwargs(self) -> dict:
-              """Dialect-specific engine configuration."""
-              base = {"pool_pre_ping": True}
-              if self.DATABASE_URL.startswith("postgresql"):
-                  base.update(pool_size=5, max_overflow=10, pool_recycle=3600)
-              return base
-
-          model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
-
-      settings = Settings()
+    database_py: "from sqlalchemy import create_engine\nfrom sqlalchemy.orm import\
+      \ DeclarativeBase, sessionmaker, Session\nfrom typing import Generator\nfrom\
+      \ backend.core.config import settings\n\nengine = create_engine(settings.DATABASE_URL,\
+      \ **settings.engine_kwargs)\nSessionLocal = sessionmaker(autocommit=False, autoflush=False,\
+      \ bind=engine)\n\nclass Base(DeclarativeBase):\n    pass\n\ndef get_db() ->\
+      \ Generator[Session, None, None]:\n    db = SessionLocal()\n    try:\n     \
+      \   yield db\n    except Exception:\n        db.rollback()\n        raise\n\
+      \    finally:\n        db.close()\n"
+    config_py: "from pydantic_settings import BaseSettings\n\nclass Settings(BaseSettings):\n\
+      \    DATABASE_URL: str = \"sqlite:///./app.db\"\n\n    @property\n    def engine_kwargs(self)\
+      \ -> dict:\n        \"\"\"Dialect-specific engine configuration.\"\"\"\n   \
+      \     base = {\"pool_pre_ping\": True}\n        if self.DATABASE_URL.startswith(\"\
+      postgresql\"):\n            base.update(pool_size=5, max_overflow=10, pool_recycle=3600)\n\
+      \        return base\n\n    model_config = {\"env_file\": \".env\", \"env_file_encoding\"\
+      : \"utf-8\"}\n\nsettings = Settings()\n"
   dialect_config:
-    note: 'Only connection string and pool settings are dialect-specific. All other code (Base, get_db, SessionLocal) is identical.'
+    note: Only connection string and pool settings are dialect-specific. All other
+      code (Base, get_db, SessionLocal) is identical.
     sqlite:
-      url_format: 'sqlite:///./app.db'
-      pool_settings: 'None — SQLite uses StaticPool by default'
-      driver: 'built-in (no extra dependency)'
-      test_url: 'sqlite://'
+      url_format: sqlite:///./app.db
+      pool_settings: None — SQLite uses StaticPool by default
+      driver: built-in (no extra dependency)
+      test_url: sqlite://
     postgresql:
-      url_format: 'postgresql+psycopg2://user:pass@host:5432/dbname'
-      pool_settings: 'pool_size=5, max_overflow=10, pool_recycle=3600'
-      driver: 'psycopg2-binary'
-      test_url: 'postgresql+psycopg2://test:test@localhost:5432/test_db'
+      url_format: postgresql+psycopg2://user:pass@host:5432/dbname
+      pool_settings: pool_size=5, max_overflow=10, pool_recycle=3600
+      driver: psycopg2-binary
+      test_url: postgresql+psycopg2://test:test@localhost:5432/test_db
   gotchas:
-  - 'engine_kwargs property in Settings handles dialect branching — database.py stays clean'
+  - engine_kwargs property in Settings handles dialect branching — database.py stays
+    clean
   - Use func.now() not datetime.utcnow() for timestamps — lets the DB be the clock
   - Never import engine at module level in tests — use dependency override
-  - 'Add new dialects by extending the engine_kwargs property, not by changing database.py'
+  - Add new dialects by extending the engine_kwargs property, not by changing database.py
 dependencies:
 - SQLAlchemy
 - pydantic-settings
 dialect_dependencies:
-  postgresql: [psycopg2-binary]
-  mysql: [pymysql]
+  postgresql:
+  - psycopg2-binary
+  mysql:
+  - pymysql
   sqlite: []
 tests:
 - test_get_db_yields_session
@@ -94,9 +76,9 @@ lifecycle:
   extracted_by: jason-agent
   draft_reviewed_at: null
   draft_reviewer: null
-  dry_run_passed_at: null
-  dry_run_project: null
-  pilot_started_at: null
+  dry_run_passed_at: '2026-04-06'
+  dry_run_project: pattern-sandbox
+  pilot_started_at: '2026-04-06'
   pilot_uses: []
   consecutive_successes: 0
   validated_at: null

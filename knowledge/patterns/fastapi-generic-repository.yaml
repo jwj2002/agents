@@ -1,7 +1,7 @@
 id: PAT-010
 category: repository
 name: Generic repository pattern with BaseRepository[T]
-status: draft
+status: pilot
 tier: primary
 description: Type-safe generic repository providing CRUD, pagination with ordering,
   filtered queries, and bulk operations
@@ -15,137 +15,87 @@ implementation:
   - core/repository.py — BaseRepository[T]
   - '{module}/repository.py — concrete repos'
   key_decisions:
-  - Generic[T] with model class attribute — concrete repos inherit all methods for free
+  - Generic[T] with model class attribute — concrete repos inherit all methods for
+    free
   - 'Constructor takes db: Session — injected per-request via FastAPI Depends'
   - Repositories NEVER commit — services control transaction boundaries
   - list_paginated requires explicit order_by (string column name)
   - partial_update with skip_none for PATCH semantics
   - exists() uses SQL EXISTS subquery (efficient, no row fetch)
   - count() with optional filters, skips None values
-  - get_with_filter(id, **filters) for tenant-scoped lookups, returns None if not found
+  - get_with_filter(id, **filters) for tenant-scoped lookups, returns None if not
+    found
   reference_code:
-    base_repository: |
-      from typing import Generic, TypeVar, Sequence
-      from sqlalchemy import select, func, exists as sa_exists, delete as sa_delete
-      from sqlalchemy.orm import Session
-      import uuid
-
-      T = TypeVar("T")
-
-      class BaseRepository(Generic[T]):
-          model: type[T]
-
-          def __init__(self, db: Session) -> None:
-              self.db = db
-
-          # --- Read ---
-
-          def get(self, id_: uuid.UUID) -> T | None:
-              """Fetch a single record by primary key. Returns None if not found."""
-              return self.db.get(self.model, id_)
-
-          def get_with_filter(self, id_: uuid.UUID, **filters) -> T | None:
-              """Fetch by PK with additional column filters (e.g., account_id). Returns None if not found."""
-              stmt = select(self.model).where(self.model.id == id_)
-              for col, val in filters.items():
-                  stmt = stmt.where(getattr(self.model, col) == val)
-              return self.db.execute(stmt).scalar_one_or_none()
-
-          def list_all(self) -> Sequence[T]:
-              """Return all records. Use sparingly — prefer list_paginated."""
-              return self.db.execute(select(self.model)).scalars().all()
-
-          def list_by(self, **filters) -> Sequence[T]:
-              """Return records matching all given column filters."""
-              stmt = select(self.model)
-              for col, val in filters.items():
-                  stmt = stmt.where(getattr(self.model, col) == val)
-              return self.db.execute(stmt).scalars().all()
-
-          def list_paginated(self, offset: int = 0, limit: int = 20, order_by: str = "created_at") -> Sequence[T]:
-              """Return paginated records ordered by the given column name (ascending)."""
-              col = getattr(self.model, order_by)
-              stmt = select(self.model).order_by(col).offset(offset).limit(limit)
-              return self.db.execute(stmt).scalars().all()
-
-          def exists(self, **filters) -> bool:
-              """Check if any record matches the filters using SQL EXISTS."""
-              stmt = select(self.model)
-              for col, val in filters.items():
-                  stmt = stmt.where(getattr(self.model, col) == val)
-              return self.db.execute(select(sa_exists(stmt))).scalar()
-
-          def count(self, **filters) -> int:
-              """Count records matching filters. Skips None values."""
-              stmt = select(func.count()).select_from(self.model)
-              for col, val in filters.items():
-                  if val is not None:
-                      stmt = stmt.where(getattr(self.model, col) == val)
-              return self.db.execute(stmt).scalar()
-
-          # --- Write (none of these call commit) ---
-
-          def add(self, obj: T) -> T:
-              """Add object to session. Does NOT commit."""
-              self.db.add(obj)
-              return obj
-
-          def add_all(self, objs: list[T]) -> list[T]:
-              """Add multiple objects to session. Does NOT commit."""
-              self.db.add_all(objs)
-              return objs
-
-          def delete(self, obj: T) -> None:
-              """Mark object for deletion. Does NOT commit."""
-              self.db.delete(obj)
-
-          def bulk_delete(self, **filters) -> int:
-              """Delete all records matching filters in a single statement. Returns count deleted. Does NOT commit."""
-              stmt = sa_delete(self.model)
-              for col, val in filters.items():
-                  stmt = stmt.where(getattr(self.model, col) == val)
-              result = self.db.execute(stmt)
-              return result.rowcount
-
-          def partial_update(self, obj: T, skip_none: bool = True, **fields) -> T:
-              """Update only the provided fields on an existing object. Does NOT commit.
-              If skip_none=True (default), fields with None values are ignored.
-              If skip_none=False, None values are written (sets column to NULL)."""
-              for key, value in fields.items():
-                  if skip_none and value is None:
-                      continue
-                  setattr(obj, key, value)
-              return obj
-
-          # --- Session helpers (exposed for services, but repos don't call these internally) ---
-
-          def flush(self) -> None:
-              self.db.flush()
-
-          def refresh(self, obj: T) -> None:
-              self.db.refresh(obj)
-
-          def commit(self) -> None:
-              self.db.commit()
-    concrete_example: |
-      from backend.core.repository import BaseRepository
-      from backend.bookmarks.models import Bookmark
-
-      class BookmarkRepository(BaseRepository[Bookmark]):
-          model = Bookmark
-
-          # Zero custom code needed for basic CRUD — all inherited from BaseRepository.
-          # Add custom methods only for domain-specific queries:
-          #
-          # def list_favorites(self, account_id: uuid.UUID) -> Sequence[Bookmark]:
-          #     return self.list_by(account_id=account_id, is_favorite=True)
+    base_repository: "from typing import Generic, TypeVar, Sequence\nfrom sqlalchemy\
+      \ import select, func, exists as sa_exists, delete as sa_delete\nfrom sqlalchemy.orm\
+      \ import Session\nimport uuid\n\nT = TypeVar(\"T\")\n\nclass BaseRepository(Generic[T]):\n\
+      \    model: type[T]\n\n    def __init__(self, db: Session) -> None:\n      \
+      \  self.db = db\n\n    # --- Read ---\n\n    def get(self, id_: uuid.UUID) ->\
+      \ T | None:\n        \"\"\"Fetch a single record by primary key. Returns None\
+      \ if not found.\"\"\"\n        return self.db.get(self.model, id_)\n\n    def\
+      \ get_with_filter(self, id_: uuid.UUID, **filters) -> T | None:\n        \"\"\
+      \"Fetch by PK with additional column filters (e.g., account_id). Returns None\
+      \ if not found.\"\"\"\n        stmt = select(self.model).where(self.model.id\
+      \ == id_)\n        for col, val in filters.items():\n            stmt = stmt.where(getattr(self.model,\
+      \ col) == val)\n        return self.db.execute(stmt).scalar_one_or_none()\n\n\
+      \    def list_all(self) -> Sequence[T]:\n        \"\"\"Return all records. Use\
+      \ sparingly — prefer list_paginated.\"\"\"\n        return self.db.execute(select(self.model)).scalars().all()\n\
+      \n    def list_by(self, **filters) -> Sequence[T]:\n        \"\"\"Return records\
+      \ matching all given column filters.\"\"\"\n        stmt = select(self.model)\n\
+      \        for col, val in filters.items():\n            stmt = stmt.where(getattr(self.model,\
+      \ col) == val)\n        return self.db.execute(stmt).scalars().all()\n\n   \
+      \ def list_paginated(self, offset: int = 0, limit: int = 20, order_by: str =\
+      \ \"created_at\") -> Sequence[T]:\n        \"\"\"Return paginated records ordered\
+      \ by the given column name (ascending).\"\"\"\n        col = getattr(self.model,\
+      \ order_by)\n        stmt = select(self.model).order_by(col).offset(offset).limit(limit)\n\
+      \        return self.db.execute(stmt).scalars().all()\n\n    def exists(self,\
+      \ **filters) -> bool:\n        \"\"\"Check if any record matches the filters\
+      \ using SQL EXISTS.\"\"\"\n        stmt = select(self.model)\n        for col,\
+      \ val in filters.items():\n            stmt = stmt.where(getattr(self.model,\
+      \ col) == val)\n        return self.db.execute(select(sa_exists(stmt))).scalar()\n\
+      \n    def count(self, **filters) -> int:\n        \"\"\"Count records matching\
+      \ filters. Skips None values.\"\"\"\n        stmt = select(func.count()).select_from(self.model)\n\
+      \        for col, val in filters.items():\n            if val is not None:\n\
+      \                stmt = stmt.where(getattr(self.model, col) == val)\n      \
+      \  return self.db.execute(stmt).scalar()\n\n    # --- Write (none of these call\
+      \ commit) ---\n\n    def add(self, obj: T) -> T:\n        \"\"\"Add object to\
+      \ session. Does NOT commit.\"\"\"\n        self.db.add(obj)\n        return\
+      \ obj\n\n    def add_all(self, objs: list[T]) -> list[T]:\n        \"\"\"Add\
+      \ multiple objects to session. Does NOT commit.\"\"\"\n        self.db.add_all(objs)\n\
+      \        return objs\n\n    def delete(self, obj: T) -> None:\n        \"\"\"\
+      Mark object for deletion. Does NOT commit.\"\"\"\n        self.db.delete(obj)\n\
+      \n    def bulk_delete(self, **filters) -> int:\n        \"\"\"Delete all records\
+      \ matching filters in a single statement. Returns count deleted. Does NOT commit.\"\
+      \"\"\n        stmt = sa_delete(self.model)\n        for col, val in filters.items():\n\
+      \            stmt = stmt.where(getattr(self.model, col) == val)\n        result\
+      \ = self.db.execute(stmt)\n        return result.rowcount\n\n    def partial_update(self,\
+      \ obj: T, skip_none: bool = True, **fields) -> T:\n        \"\"\"Update only\
+      \ the provided fields on an existing object. Does NOT commit.\n        If skip_none=True\
+      \ (default), fields with None values are ignored.\n        If skip_none=False,\
+      \ None values are written (sets column to NULL).\"\"\"\n        for key, value\
+      \ in fields.items():\n            if skip_none and value is None:\n        \
+      \        continue\n            setattr(obj, key, value)\n        return obj\n\
+      \n    # --- Session helpers (exposed for services, but repos don't call these\
+      \ internally) ---\n\n    def flush(self) -> None:\n        self.db.flush()\n\
+      \n    def refresh(self, obj: T) -> None:\n        self.db.refresh(obj)\n\n \
+      \   def commit(self) -> None:\n        self.db.commit()\n"
+    concrete_example: "from backend.core.repository import BaseRepository\nfrom backend.bookmarks.models\
+      \ import Bookmark\n\nclass BookmarkRepository(BaseRepository[Bookmark]):\n \
+      \   model = Bookmark\n\n    # Zero custom code needed for basic CRUD — all inherited\
+      \ from BaseRepository.\n    # Add custom methods only for domain-specific queries:\n\
+      \    #\n    # def list_favorites(self, account_id: uuid.UUID) -> Sequence[Bookmark]:\n\
+      \    #     return self.list_by(account_id=account_id, is_favorite=True)\n"
   gotchas:
   - Always pass order_by to list_paginated — without it, results are nondeterministic
   - Never call self.commit() inside a repository method — that's the service's job
-  - 'commit() and flush() are exposed on the repo for services to call via repo.commit(), but repos themselves never call them'
-  - partial_update does not need db.add() — the object is already tracked if fetched from the same session
-  - 'bulk_delete uses a single DELETE WHERE statement, not iterating delete() — much faster for large deletes'
-  - 'order_by parameter is a string column name (e.g., "created_at"), not an SQLAlchemy column object'
+  - commit() and flush() are exposed on the repo for services to call via repo.commit(),
+    but repos themselves never call them
+  - partial_update does not need db.add() — the object is already tracked if fetched
+    from the same session
+  - bulk_delete uses a single DELETE WHERE statement, not iterating delete() — much
+    faster for large deletes
+  - order_by parameter is a string column name (e.g., "created_at"), not an SQLAlchemy
+    column object
 dependencies:
 - SQLAlchemy
 tests:
@@ -160,9 +110,9 @@ lifecycle:
   extracted_by: jason-agent
   draft_reviewed_at: null
   draft_reviewer: null
-  dry_run_passed_at: null
-  dry_run_project: null
-  pilot_started_at: null
+  dry_run_passed_at: '2026-04-06'
+  dry_run_project: pattern-sandbox
+  pilot_started_at: '2026-04-06'
   pilot_uses: []
   consecutive_successes: 0
   validated_at: null
