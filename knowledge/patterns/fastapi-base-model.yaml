@@ -14,16 +14,79 @@ implementation:
   - database.py — Base, TimestampMixin, uuid_pk helper
   key_decisions:
   - UUID primary keys for all models — safe for distributed systems
-  - 'Dialect-agnostic UUID: use TypeDecorator that works with both PostgreSQL and SQLite'
-  - TimestampMixin as a mixin class, not baked into Base
+  - 'Dialect-agnostic UUID: GUID TypeDecorator stores as CHAR(32) hex on non-PostgreSQL, native UUID on PostgreSQL'
+  - 'TimestampMixin is OWNED by this pattern (PAT-008) — PAT-007 imports it but does not define it'
   - No soft-delete at base level — add SoftDeleteMixin only where needed
   - Use Mapped[T] and mapped_column() (SQLAlchemy 2.0 syntax)
   - Use TYPE_CHECKING for forward references to avoid circular imports
+  reference_code:
+    guid_type: |
+      import uuid
+      from sqlalchemy import CHAR, TypeDecorator
+      from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+
+      class GUID(TypeDecorator):
+          """Dialect-agnostic UUID type.
+          Uses PostgreSQL's native UUID when available, otherwise CHAR(32) with hex encoding."""
+          impl = CHAR(32)
+          cache_ok = True
+
+          def load_dialect_impl(self, dialect):
+              if dialect.name == "postgresql":
+                  return dialect.type_descriptor(PG_UUID(as_uuid=True))
+              return dialect.type_descriptor(CHAR(32))
+
+          def process_bind_param(self, value, dialect):
+              if value is None:
+                  return value
+              if dialect.name == "postgresql":
+                  return value if isinstance(value, uuid.UUID) else uuid.UUID(value)
+              return value.hex if isinstance(value, uuid.UUID) else uuid.UUID(value).hex
+
+          def process_result_value(self, value, dialect):
+              if value is None:
+                  return value
+              if isinstance(value, uuid.UUID):
+                  return value
+              return uuid.UUID(value)
+    uuid_pk_helper: |
+      from sqlalchemy.orm import Mapped, mapped_column
+
+      def uuid_pk() -> Mapped[uuid.UUID]:
+          """Standard UUID primary key column."""
+          return mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    timestamp_mixin: |
+      import datetime as dt
+      from sqlalchemy import DateTime, func
+      from sqlalchemy.orm import Mapped, mapped_column
+
+      class TimestampMixin:
+          created_at: Mapped[dt.datetime] = mapped_column(
+              DateTime(timezone=True), server_default=func.now(), nullable=False,
+          )
+          updated_at: Mapped[dt.datetime] = mapped_column(
+              DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False,
+          )
+    example_model: |
+      from backend.database import Base, TimestampMixin, GUID, uuid_pk
+      from sqlalchemy.orm import Mapped, mapped_column
+      from sqlalchemy import String, Text, Boolean
+
+      class Bookmark(TimestampMixin, Base):
+          __tablename__ = "bookmarks"
+
+          id: Mapped[uuid.UUID] = uuid_pk()
+          title: Mapped[str] = mapped_column(String(255), nullable=False)
+          url: Mapped[str] = mapped_column(String(2048), nullable=False)
+          description: Mapped[str | None] = mapped_column(Text, nullable=True)
+          is_favorite: Mapped[bool] = mapped_column(Boolean, default=False)
   gotchas:
-  - Never use from sqlalchemy.dialects.postgresql import UUID — breaks SQLite tests
+  - 'Never use `from sqlalchemy.dialects.postgresql import UUID` directly in models — use the GUID TypeDecorator instead'
+  - The GUID type imports PG_UUID internally but only uses it when dialect is postgresql
   - Use back_populates consistently, never backref
   - Document lazy loading strategy per relationship — don't mix selectin and select
     without reason
+  - 'SQLite does not support server_default=func.now() on UPDATE — onupdate=func.now() is handled by SQLAlchemy (Python-side), not the database'
 dependencies:
 - SQLAlchemy
 tests:

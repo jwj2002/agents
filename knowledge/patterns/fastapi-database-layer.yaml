@@ -17,18 +17,55 @@ implementation:
   key_decisions:
   - Sync SQLAlchemy (not async) — simpler, sufficient for most apps
   - pool_pre_ping=True for stale connection detection
-  - 'Configure pool_size=5, max_overflow=10, pool_recycle=3600 for production'
+  - 'PostgreSQL production: pool_size=5, max_overflow=10, pool_recycle=3600. SQLite: omit pool settings (uses StaticPool by default)'
   - get_db() yields session with explicit rollback on exception in finally block
-  - TimestampMixin with server_default=func.now() and onupdate=func.now()
+  - 'TimestampMixin defined in PAT-008 — this pattern imports it, does not define it'
   - No Active Record pattern (no CRUDMixin on Base) — repositories handle all DB ops
+  reference_code:
+    database_py: |
+      from sqlalchemy import create_engine
+      from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
+      from typing import Generator
+      from backend.core.config import settings
+
+      engine = create_engine(
+          settings.DATABASE_URL,
+          pool_pre_ping=True,
+          # For PostgreSQL production, add: pool_size=5, max_overflow=10, pool_recycle=3600
+          # For SQLite, omit pool settings — StaticPool is the default
+      )
+      SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+      class Base(DeclarativeBase):
+          pass
+
+      def get_db() -> Generator[Session, None, None]:
+          db = SessionLocal()
+          try:
+              yield db
+          except Exception:
+              db.rollback()
+              raise
+          finally:
+              db.close()
+    config_py: |
+      from pydantic_settings import BaseSettings
+
+      class Settings(BaseSettings):
+          DATABASE_URL: str = "sqlite:///./app.db"
+
+          model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+      settings = Settings()
   gotchas:
-  - Always configure pool_size/max_overflow for production — defaults are too low
+  - 'PostgreSQL needs pool_size/max_overflow; SQLite does NOT support them — guard with dialect check or omit'
   - Use func.now() not datetime.utcnow() for timestamps — lets the DB be the clock
   - Never import engine at module level in tests — use dependency override
+  - 'psycopg2-binary is only needed for PostgreSQL — omit for SQLite-only projects'
 dependencies:
 - SQLAlchemy
-- psycopg2-binary
 - pydantic-settings
+- 'psycopg2-binary (PostgreSQL only — not needed for SQLite)'
 tests:
 - test_get_db_yields_session
 - test_get_db_closes_on_exception
