@@ -68,6 +68,7 @@ implementation:
               DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False,
           )
     example_model: |
+      import uuid
       from backend.database import Base, TimestampMixin, GUID, uuid_pk
       from sqlalchemy.orm import Mapped, mapped_column
       from sqlalchemy import String, Text, Boolean
