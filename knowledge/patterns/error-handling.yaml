@@ -1,0 +1,66 @@
+id: PAT-006
+category: error-handling
+name: "Custom exception classes per module"
+status: validated
+tier: primary
+
+description: "Structured error handling using module-specific custom exception classes with a global exception handler for consistent API error responses"
+when_to_use: "Any multi-module application, APIs needing consistent error formats, services requiring granular error categorization"
+when_not_to_use: "Trivial single-file scripts, prototypes where error handling is not a priority"
+
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+    - "core/exceptions.py — base exception classes (AppError, NotFoundError, ValidationError, ConflictError)"
+    - "core/exception_handlers.py — FastAPI exception handler registration"
+    - "{module}/exceptions.py — module-specific exceptions inheriting from base"
+  key_decisions:
+    - "Never use bare Exception — always a custom class per module"
+    - "All exceptions carry error_code, message, and optional detail dict"
+    - "Global handler maps exception type to HTTP status code"
+    - "Exception hierarchy: AppError > DomainError > ModuleSpecificError"
+    - "Logging: all 5xx exceptions logged at ERROR level with stack trace"
+
+dependencies:
+  - "fastapi"
+
+tests:
+  - "test_not_found_response — verify 404 with correct error body"
+  - "test_validation_error_response — verify 422 with field-level details"
+  - "test_conflict_response — verify 409 for concurrent modification"
+  - "test_unhandled_exception — verify 500 with generic message (no leak)"
+  - "test_error_code_uniqueness — verify no duplicate error codes across modules"
+
+lifecycle:
+  extracted_from: docketiq
+  extracted_at: "2026-02-10"
+  extracted_by: jason-agent
+  draft_reviewed_at: "2026-02-11"
+  draft_reviewer: reviewer-agent
+  dry_run_passed_at: "2026-02-12"
+  dry_run_project: test-scaffold-errors
+  pilot_started_at: "2026-02-15"
+  pilot_uses:
+    - project: docketiq
+      date: "2026-02-15"
+      corrections: 0
+      result: success
+    - project: vitalailabs
+      date: "2026-02-28"
+      corrections: 0
+      result: success
+    - project: flotilla
+      date: "2026-03-12"
+      corrections: 0
+      result: success
+  consecutive_successes: 3
+  validated_at: "2026-03-12"
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+
+related_decisions: []
+validated_count: 3
+created_at: "2026-02-10"
+updated_at: "2026-03-12"

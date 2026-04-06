@@ -1,0 +1,68 @@
+id: PAT-005
+category: export
+name: "Streaming export"
+status: validated
+tier: primary
+
+description: "Memory-efficient data export using StreamingResponse with pluggable formatters for CSV and JSON output"
+when_to_use: "Large dataset exports, CSV/JSON download endpoints, reports that exceed reasonable memory limits"
+when_not_to_use: "Small datasets that fit in memory, exports requiring complex post-processing before sending, binary file formats"
+
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+    - "export/streaming.py — StreamingResponse wrapper with chunked iteration"
+    - "export/formatters.py — CSV and JSON formatter implementations"
+    - "export/export_service.py — query execution with cursor-based iteration"
+  key_decisions:
+    - "Chunk size: 1000 rows per iteration to balance memory and throughput"
+    - "Content-Disposition header set for browser download"
+    - "CSV formatter uses csv.writer with StringIO buffer per chunk"
+    - "JSON formatter uses streaming array format with newline-delimited chunks"
+
+dependencies:
+  - "fastapi"
+
+tests:
+  - "test_csv_export — verify CSV output with correct headers and row format"
+  - "test_json_export — verify JSON array output is valid"
+  - "test_large_export — verify memory stays bounded for 100k+ row export"
+  - "test_empty_export — verify graceful handling of zero-row result"
+  - "test_content_disposition — verify download filename in response headers"
+
+lifecycle:
+  extracted_from: docketiq
+  extracted_at: "2026-02-15"
+  extracted_by: jason-agent
+  draft_reviewed_at: "2026-02-16"
+  draft_reviewer: reviewer-agent
+  dry_run_passed_at: "2026-02-17"
+  dry_run_project: test-scaffold-export
+  pilot_started_at: "2026-02-20"
+  pilot_uses:
+    - project: docketiq
+      date: "2026-02-20"
+      corrections: 1
+      correction_details:
+        - "CSV formatter did not escape commas in field values"
+      yaml_updated: true
+      result: partial_success
+    - project: vitalailabs
+      date: "2026-03-05"
+      corrections: 0
+      result: success
+    - project: flotilla
+      date: "2026-03-18"
+      corrections: 0
+      result: success
+  consecutive_successes: 2
+  validated_at: "2026-03-18"
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+
+related_decisions: []
+validated_count: 2
+created_at: "2026-02-15"
+updated_at: "2026-03-18"

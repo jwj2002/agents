@@ -1,0 +1,29 @@
+id: D-034
+date: "2026-04-03"
+project: flotilla
+topic: database
+title: "asyncpg direct, no ORM for flotilla"
+
+context: "flotilla requires high-throughput database access for complex
+  aggregation queries. ORM overhead is measurable at scale."
+
+decision: "Use asyncpg directly without ORM for performance-critical queries."
+
+alternatives:
+  - option: "SQLAlchemy async"
+    rejected_because: "Too much overhead for complex aggregations. Query generation adds latency."
+  - option: "Tortoise ORM"
+    rejected_because: "Immature async support. Smaller ecosystem and fewer production deployments."
+
+reasoning: "Direct asyncpg gives full control over query optimization and
+  eliminates ORM overhead for performance-critical paths."
+
+outcome: "In use for flotilla aggregation pipeline. ~3x throughput improvement over ORM baseline."
+
+linked:
+  patterns: [PAT-004]
+  issues: []
+  prs: []
+  related_decisions: []
+
+created_at: "2026-04-03"

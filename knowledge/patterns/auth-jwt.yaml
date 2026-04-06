@@ -1,0 +1,68 @@
+id: PAT-001
+category: auth
+name: "JWT with refresh tokens"
+status: validated
+tier: primary
+
+description: "Stateless authentication using JWT access tokens and refresh tokens with automatic rotation"
+when_to_use: "API-first services, stateless backends, multi-client (web + mobile), microservices needing token-based auth"
+when_not_to_use: "Server-rendered apps needing server-side session state, internal-only services behind a gateway"
+
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+    - "auth/jwt_handler.py — token creation, validation, refresh"
+    - "auth/auth_middleware.py — request authentication dependency"
+    - "auth/token_service.py — token storage, rotation, and revocation"
+  key_decisions:
+    - "Access token TTL: 15 minutes (short for security)"
+    - "Refresh token TTL: 7 days (balance between security and UX)"
+    - "Token stored in httpOnly cookie, NOT localStorage (XSS protection)"
+    - "Refresh token stored in DB, not just signed (enables revocation)"
+    - "Refresh token rotation: issue new refresh on each use"
+
+dependencies:
+  - "python-jose[cryptography]"
+  - "passlib[bcrypt]"
+
+tests:
+  - "test_token_creation — verify token contains correct claims (sub, exp, iat)"
+  - "test_token_expiry — verify expired token is rejected"
+  - "test_refresh_flow — verify refresh returns new access + new refresh token"
+  - "test_revocation — verify revoked refresh token is rejected"
+  - "test_concurrent_sessions — verify multiple valid sessions per user"
+  - "test_invalid_signature — verify tampered token is rejected"
+
+lifecycle:
+  extracted_from: vitalailabs
+  extracted_at: "2026-02-20"
+  extracted_by: jason-agent
+  draft_reviewed_at: "2026-02-21"
+  draft_reviewer: reviewer-agent
+  dry_run_passed_at: "2026-02-22"
+  dry_run_project: test-scaffold-auth
+  pilot_started_at: "2026-02-25"
+  pilot_uses:
+    - project: vitalailabs
+      date: "2026-02-25"
+      corrections: 0
+      result: success
+    - project: docketiq
+      date: "2026-03-10"
+      corrections: 0
+      result: success
+    - project: flotilla
+      date: "2026-03-22"
+      corrections: 0
+      result: success
+  consecutive_successes: 3
+  validated_at: "2026-03-22"
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+
+related_decisions: []
+validated_count: 3
+created_at: "2026-02-20"
+updated_at: "2026-03-22"

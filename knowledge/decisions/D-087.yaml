@@ -1,0 +1,30 @@
+id: D-087
+date: "2026-04-04"
+project: docketiq
+topic: export
+title: "Pluggable export formatters for docketiq"
+
+context: "docketiq needs to support multiple export formats (CSV, JSON, PDF)
+  with the ability to add new formats without modifying existing code."
+
+decision: "Plugin architecture for export formats. Each formatter implements
+  a common interface registered via entry points."
+
+alternatives:
+  - option: "Switch statement per format"
+    rejected_because: "Violates open-closed principle. Every new format requires modifying the export function."
+  - option: "Separate endpoints per format"
+    rejected_because: "Duplicates validation and business logic across endpoints."
+
+reasoning: "Plugin architecture allows adding new export formats by registering
+  a new class without touching existing code. Clean separation of concerns."
+
+outcome: "CSV, JSON, and PDF formatters implemented. Adding new formats takes ~30 minutes."
+
+linked:
+  patterns: [PAT-005]
+  issues: []
+  prs: []
+  related_decisions: []
+
+created_at: "2026-04-04"

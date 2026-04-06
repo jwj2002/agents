@@ -1,0 +1,29 @@
+id: D-015
+date: "2026-02-20"
+project: vitalailabs
+topic: auth
+title: "JWT over sessions for vitalailabs"
+
+context: "vitalailabs is API-first, serving web and mobile clients.
+  Need stateless auth that scales horizontally."
+
+decision: "Use JWT with refresh tokens. Access token 15min, refresh 7 days."
+
+alternatives:
+  - option: "Redis sessions"
+    rejected_because: "Adds infrastructure dependency. Not needed for stateless API."
+  - option: "Session cookies"
+    rejected_because: "Doesn't work for mobile clients. Not stateless."
+
+reasoning: "JWT is the standard for API-first. No server-side state needed.
+  Refresh tokens handle expiry without re-login."
+
+outcome: "Implemented in PR #28. Working in production since Feb 2026."
+
+linked:
+  patterns: [PAT-001]
+  issues: ["vitalailabs#15"]
+  prs: ["vitalailabs#28"]
+  related_decisions: [D-042]
+
+created_at: "2026-02-20"
