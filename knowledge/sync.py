@@ -31,8 +31,8 @@ SCHEMA_PATH = BASE_DIR / "schema.sql"
 DB_PATH = BASE_DIR / "knowledge.db"
 PATTERNS_DIR = BASE_DIR / "patterns"
 DECISIONS_DIR = BASE_DIR / "decisions"
-LEARNING_RULES_PATH = BASE_DIR / "learning-rules" / "active.yaml"
-VELOCITY_PATH = BASE_DIR / "velocity" / "history.yaml"
+LEARNING_RULES_DIR = BASE_DIR / "learning-rules"
+VELOCITY_DIR = BASE_DIR / "velocity"
 INDEX_PATH = DECISIONS_DIR / "index.yaml"
 
 # Validation constants
@@ -296,33 +296,33 @@ def _rebuild_fts(conn: sqlite3.Connection) -> None:
 # Build: learning rules
 # ---------------------------------------------------------------------------
 
-def _build_learning_rules(conn: sqlite3.Connection, rules_path: Path) -> int:
+def _build_learning_rules(conn: sqlite3.Connection, rules_dir: Path) -> int:
     count = 0
-    data = _load_yaml(rules_path)
-    if data is None:
+    if not rules_dir.is_dir():
+        logger.warning("Learning rules directory not found: %s", rules_dir)
         return count
 
-    rules = data.get("rules", [])
-    if not isinstance(rules, list):
-        logger.warning("learning-rules/active.yaml 'rules' is not a list")
-        return count
-
-    for rule in rules:
-        if not isinstance(rule, dict) or "id" not in rule or "rule" not in rule:
-            logger.warning("Skipping malformed learning rule: %s", rule)
+    for path in sorted(rules_dir.glob("*.yaml")):
+        data = _load_yaml(path)
+        if data is None:
             continue
+
+        if not isinstance(data, dict) or "id" not in data or "rule" not in data:
+            logger.warning("Skipping malformed learning rule: %s", path.name)
+            continue
+
         conn.execute(
             """INSERT OR REPLACE INTO learning_rules
                (id, rule, source, confidence, applies_to, approved, created_at)
                VALUES (?,?,?,?,?,?,?)""",
             (
-                rule["id"],
-                rule["rule"],
-                rule.get("source"),
-                rule.get("confidence"),
-                rule.get("applies_to"),
-                1 if rule.get("approved") else 0,
-                rule.get("created_at"),
+                data["id"],
+                data["rule"],
+                data.get("source"),
+                data.get("confidence"),
+                data.get("applies_to"),
+                1 if data.get("approved") else 0,
+                data.get("created_at"),
             ),
         )
         count += 1
@@ -335,36 +335,37 @@ def _build_learning_rules(conn: sqlite3.Connection, rules_path: Path) -> int:
 # Build: velocity
 # ---------------------------------------------------------------------------
 
-def _build_velocity(conn: sqlite3.Connection, velocity_path: Path) -> int:
+def _build_velocity(conn: sqlite3.Connection, velocity_dir: Path) -> int:
     count = 0
-    data = _load_yaml(velocity_path)
-    if data is None:
+    if not velocity_dir.is_dir():
+        logger.warning("Velocity directory not found: %s", velocity_dir)
         return count
 
-    entries = data.get("entries", [])
-    if not isinstance(entries, list):
-        logger.warning("velocity/history.yaml 'entries' is not a list")
-        return count
-
-    for entry in entries:
-        if not isinstance(entry, dict):
-            logger.warning("Skipping malformed velocity entry: %s", entry)
+    for path in sorted(velocity_dir.glob("*.yaml")):
+        data = _load_yaml(path)
+        if data is None:
             continue
+
+        if not isinstance(data, dict) or "id" not in data:
+            logger.warning("Skipping malformed velocity entry: %s", path.name)
+            continue
+
         conn.execute(
-            """INSERT INTO velocity
-               (date, project, task_type, complexity, model,
+            """INSERT OR REPLACE INTO velocity
+               (id, date, project, task_type, complexity, model,
                 duration_seconds, cost_dollars, success, description)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (
-                entry.get("date"),
-                entry.get("project"),
-                entry.get("task_type"),
-                entry.get("complexity"),
-                entry.get("model"),
-                entry.get("duration_seconds"),
-                entry.get("cost_dollars"),
-                1 if entry.get("success") else 0,
-                entry.get("description"),
+                data["id"],
+                data.get("date"),
+                data.get("project"),
+                data.get("task_type"),
+                data.get("complexity"),
+                data.get("model"),
+                data.get("duration_seconds"),
+                data.get("cost_dollars"),
+                1 if data.get("success") else 0,
+                data.get("description"),
             ),
         )
         count += 1
@@ -382,8 +383,8 @@ def cmd_build(
     schema_path: Path | None = None,
     patterns_dir: Path | None = None,
     decisions_dir: Path | None = None,
-    rules_path: Path | None = None,
-    velocity_path: Path | None = None,
+    rules_dir: Path | None = None,
+    velocity_dir: Path | None = None,
 ) -> dict[str, int]:
     """Build (or rebuild) knowledge.db from YAML files.
 
@@ -393,8 +394,8 @@ def cmd_build(
     _schema = schema_path or SCHEMA_PATH
     _patterns = patterns_dir or PATTERNS_DIR
     _decisions = decisions_dir or DECISIONS_DIR
-    _rules = rules_path or LEARNING_RULES_PATH
-    _velocity = velocity_path or VELOCITY_PATH
+    _rules = rules_dir or LEARNING_RULES_DIR
+    _velocity = velocity_dir or VELOCITY_DIR
 
     conn = _connect(_db)
     try:
@@ -431,15 +432,15 @@ def cmd_export(
     db_path: Path | None = None,
     patterns_dir: Path | None = None,
     decisions_dir: Path | None = None,
-    rules_path: Path | None = None,
-    velocity_path: Path | None = None,
+    rules_dir: Path | None = None,
+    velocity_dir: Path | None = None,
 ) -> None:
     """Export new SQLite records (created_at > last_export) to YAML files."""
     _db = db_path or DB_PATH
     _patterns = patterns_dir or PATTERNS_DIR
     _decisions = decisions_dir or DECISIONS_DIR
-    _rules = rules_path or LEARNING_RULES_PATH
-    _velocity = velocity_path or VELOCITY_PATH
+    _rules = rules_dir or LEARNING_RULES_DIR
+    _velocity = velocity_dir or VELOCITY_DIR
 
     if not _db.exists():
         logger.warning("No database found at %s — nothing to export", _db)
@@ -485,8 +486,9 @@ def cmd_export(
         else:
             rules = conn.execute("SELECT * FROM learning_rules").fetchall()
 
-        if rules:
-            _export_learning_rules(rules, _rules)
+        _rules.mkdir(parents=True, exist_ok=True)
+        for rule in rules:
+            _export_learning_rule(rule, _rules)
 
         # Export velocity
         if last_export:
@@ -496,8 +498,9 @@ def cmd_export(
         else:
             velocity = conn.execute("SELECT * FROM velocity").fetchall()
 
-        if velocity:
-            _export_velocity(velocity, _velocity)
+        _velocity.mkdir(parents=True, exist_ok=True)
+        for v in velocity:
+            _export_velocity_entry(v, _velocity)
 
         # Update last_export timestamp
         now = _now_iso()
@@ -610,56 +613,39 @@ def _export_decision(row: sqlite3.Row, decisions_dir: Path) -> None:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
 
-def _export_learning_rules(rows: list[sqlite3.Row], rules_path: Path) -> None:
-    """Write learning rules to active.yaml, merging with existing."""
-    existing_data = _load_yaml(rules_path) or {}
-    existing_rules = existing_data.get("rules", [])
-    existing_ids = {r["id"] for r in existing_rules if isinstance(r, dict) and "id" in r}
-
-    for row in rows:
-        if row["id"] not in existing_ids:
-            existing_rules.append({
-                "id": row["id"],
-                "rule": row["rule"],
-                "source": row["source"],
-                "confidence": row["confidence"],
-                "applies_to": row["applies_to"],
-                "approved": bool(row["approved"]),
-                "created_at": row["created_at"],
-            })
-
-    rules_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(rules_path, "w") as f:
-        yaml.dump(
-            {"rules": existing_rules},
-            f, default_flow_style=False, sort_keys=False, allow_unicode=True,
-        )
+def _export_learning_rule(row: sqlite3.Row, rules_dir: Path) -> None:
+    """Write a single learning rule to its own YAML file."""
+    data = {
+        "id": row["id"],
+        "rule": row["rule"],
+        "source": row["source"],
+        "confidence": row["confidence"],
+        "applies_to": row["applies_to"],
+        "approved": bool(row["approved"]),
+        "created_at": row["created_at"],
+    }
+    filename = f"{row['id']}.yaml"
+    with open(rules_dir / filename, "w") as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
 
-def _export_velocity(rows: list[sqlite3.Row], velocity_path: Path) -> None:
-    """Append velocity entries to history.yaml."""
-    existing_data = _load_yaml(velocity_path) or {}
-    existing_entries = existing_data.get("entries", [])
-
-    for row in rows:
-        existing_entries.append({
-            "date": row["date"],
-            "project": row["project"],
-            "task_type": row["task_type"],
-            "complexity": row["complexity"],
-            "model": row["model"],
-            "duration_seconds": row["duration_seconds"],
-            "cost_dollars": row["cost_dollars"],
-            "success": bool(row["success"]),
-            "description": row["description"],
-        })
-
-    velocity_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(velocity_path, "w") as f:
-        yaml.dump(
-            {"entries": existing_entries},
-            f, default_flow_style=False, sort_keys=False, allow_unicode=True,
-        )
+def _export_velocity_entry(row: sqlite3.Row, velocity_dir: Path) -> None:
+    """Write a single velocity entry to its own YAML file."""
+    data = {
+        "id": row["id"],
+        "date": row["date"],
+        "project": row["project"],
+        "task_type": row["task_type"],
+        "complexity": row["complexity"],
+        "model": row["model"],
+        "duration_seconds": row["duration_seconds"],
+        "cost_dollars": row["cost_dollars"],
+        "success": bool(row["success"]),
+        "description": row["description"],
+    }
+    filename = f"V-{row['id']:04d}.yaml" if isinstance(row["id"], int) else f"V-{row['id']}.yaml"
+    with open(velocity_dir / filename, "w") as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
 
 # ---------------------------------------------------------------------------

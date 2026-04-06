@@ -55,9 +55,13 @@ Claude Code agents (query patterns, search decisions, save new knowledge)
 │   │   ├── D-002.yaml
 │   │   └── ...
 │   ├── learning-rules/          # Extracted patterns from agent sessions
-│   │   └── active.yaml
+│   │   ├── LR-001.yaml
+│   │   ├── LR-002.yaml
+│   │   └── ...
 │   ├── velocity/                # Historical performance data
-│   │   └── history.yaml
+│   │   ├── V-0001.yaml
+│   │   ├── V-0002.yaml
+│   │   └── ...
 │   ├── knowledge.db             # GENERATED — gitignored
 │   └── .gitignore               # Ignores knowledge.db
 │
@@ -191,58 +195,35 @@ by_pattern:
 
 ### Learning Rules
 
+Each learning rule is one YAML file in `knowledge/learning-rules/`.
+
 ```yaml
-# learning-rules/active.yaml
-rules:
-  - id: LR-001
-    rule: "Always use custom exception classes per module. Never use bare Exception."
-    source: "14 human corrections across docketiq and vitalailabs"
-    confidence: 0.97
-    applies_to: "all Python projects"
-    approved: true
-    created_at: "2026-03-15"
-
-  - id: LR-002
-    rule: "When fixing a concurrency bug, scan all projects for the same pattern."
-    source: "Post-incident from D-091. Bug existed in temper, docketiq, vitalailabs."
-    confidence: 1.0
-    applies_to: "all projects"
-    approved: true
-    created_at: "2026-04-02"
-
-  - id: LR-003
-    rule: "Use decimal.Decimal for all money amounts, never float."
-    source: "3 human corrections on billing code"
-    confidence: 0.85
-    applies_to: "projects with financial data"
-    approved: false              # pending human review
-    created_at: "2026-04-03"
+# learning-rules/LR-001.yaml
+id: LR-001
+rule: "Always use custom exception classes per module. Never use bare Exception."
+source: "14 human corrections across docketiq and vitalailabs"
+confidence: 0.97
+applies_to: "all Python projects"
+approved: true
+created_at: "2026-03-15"
 ```
 
 ### Velocity History
 
-```yaml
-# velocity/history.yaml
-entries:
-  - date: "2026-04-02"
-    project: docketiq
-    task_type: bug_fix
-    complexity: moderate
-    model: sonnet
-    duration_seconds: 840
-    cost_dollars: 0.72
-    success: true
-    description: "Auth concurrency fix"
+Each velocity entry is one YAML file in `knowledge/velocity/`.
 
-  - date: "2026-04-04"
-    project: docketiq
-    task_type: feature
-    complexity: simple
-    model: sonnet
-    duration_seconds: 1080
-    cost_dollars: 1.05
-    success: true
-    description: "CSV export with streaming"
+```yaml
+# velocity/V-0001.yaml
+id: 1
+date: "2026-04-02"
+project: docketiq
+task_type: bug_fix
+complexity: moderate
+model: sonnet
+duration_seconds: 840
+cost_dollars: 0.72
+success: true
+description: "Auth concurrency fix"
 ```
 
 ---
@@ -367,8 +348,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(
 4. Walk `decisions/` (skip `index.yaml`) → parse each YAML → validate required fields (`id`, `topic`, `title`, `decision`) → insert into `decisions` table. Log warning and skip on invalid. Check for duplicate IDs across files.
 5. Rebuild `decisions/index.yaml` from all decision files (group by project, topic, pattern)
 6. Rebuild `decisions_fts`: `DELETE FROM decisions_fts` then `INSERT INTO decisions_fts SELECT id, title, context, decision, reasoning FROM decisions`
-7. Read `learning-rules/active.yaml` → insert each rule into `learning_rules` table
-8. Read `velocity/history.yaml` → insert each entry into `velocity` table
+7. Walk `learning-rules/` → parse each YAML → validate required fields (`id`, `rule`) → insert into `learning_rules` table
+8. Walk `velocity/` → parse each YAML → validate required fields (`id`) → insert into `velocity` table
 9. Print summary: "Built knowledge.db: X patterns, Y decisions, Z rules, W velocity entries"
 
 ### `export` behavior
@@ -376,8 +357,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(
 1. Query SQLite for records where `created_at` > last export timestamp (stored in a `_meta` table)
 2. For each new/updated pattern: write `patterns/{id}.yaml`
 3. For each new decision: write `decisions/{id}.yaml`
-4. For new learning rules: update `learning-rules/active.yaml`
-5. For new velocity entries: append to `velocity/history.yaml`
+4. For each new learning rule: write `learning-rules/{id}.yaml`
+5. For each new velocity entry: write `velocity/V-{id}.yaml`
 6. Update `_meta.last_export` timestamp
 
 ### `sync` behavior

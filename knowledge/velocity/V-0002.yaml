@@ -1,0 +1,10 @@
+id: 2
+date: '2026-04-04'
+project: docketiq
+task_type: feature
+complexity: simple
+model: sonnet
+duration_seconds: 1080
+cost_dollars: 1.05
+success: true
+description: CSV export with streaming

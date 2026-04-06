@@ -48,15 +48,17 @@ def _seed_dir(tmp_path: Path) -> Path:
         if f.name != "index.yaml":
             shutil.copy(f, dec_dir / f.name)
 
-    # Copy learning rules
+    # Copy learning rules (individual files)
     lr_dir = dest / "learning-rules"
     lr_dir.mkdir()
-    shutil.copy(FIXTURES_DIR / "learning-rules" / "active.yaml", lr_dir / "active.yaml")
+    for f in (FIXTURES_DIR / "learning-rules").glob("*.yaml"):
+        shutil.copy(f, lr_dir / f.name)
 
-    # Copy velocity
+    # Copy velocity (individual files)
     vel_dir = dest / "velocity"
     vel_dir.mkdir()
-    shutil.copy(FIXTURES_DIR / "velocity" / "history.yaml", vel_dir / "history.yaml")
+    for f in (FIXTURES_DIR / "velocity").glob("*.yaml"):
+        shutil.copy(f, vel_dir / f.name)
 
     return dest
 
@@ -68,8 +70,8 @@ def _build_paths(base: Path) -> dict:
         schema_path=base / "schema.sql",
         patterns_dir=base / "patterns",
         decisions_dir=base / "decisions",
-        rules_path=base / "learning-rules" / "active.yaml",
-        velocity_path=base / "velocity" / "history.yaml",
+        rules_dir=base / "learning-rules",
+        velocity_dir=base / "velocity",
     )
 
 
@@ -294,8 +296,8 @@ def test_export_writes_new_records(tmp_path: Path) -> None:
         db_path=paths["db_path"],
         patterns_dir=paths["patterns_dir"],
         decisions_dir=paths["decisions_dir"],
-        rules_path=paths["rules_path"],
-        velocity_path=paths["velocity_path"],
+        rules_dir=paths["rules_dir"],
+        velocity_dir=paths["velocity_dir"],
     )
 
     exported = base / "decisions" / "D-999.yaml"
@@ -342,8 +344,8 @@ def test_export_skips_old_records(tmp_path: Path) -> None:
         db_path=paths["db_path"],
         patterns_dir=paths["patterns_dir"],
         decisions_dir=paths["decisions_dir"],
-        rules_path=paths["rules_path"],
-        velocity_path=paths["velocity_path"],
+        rules_dir=paths["rules_dir"],
+        velocity_dir=paths["velocity_dir"],
     )
 
     assert not old_file.exists(), "Old record should not be exported"
@@ -363,8 +365,8 @@ def test_export_updates_meta_timestamp(tmp_path: Path) -> None:
         db_path=paths["db_path"],
         patterns_dir=paths["patterns_dir"],
         decisions_dir=paths["decisions_dir"],
-        rules_path=paths["rules_path"],
-        velocity_path=paths["velocity_path"],
+        rules_dir=paths["rules_dir"],
+        velocity_dir=paths["velocity_dir"],
     )
 
     conn = sqlite3.connect(str(paths["db_path"]))
@@ -408,8 +410,8 @@ def test_sync_order_export_before_build(tmp_path: Path) -> None:
         db_path=paths["db_path"],
         patterns_dir=paths["patterns_dir"],
         decisions_dir=paths["decisions_dir"],
-        rules_path=paths["rules_path"],
-        velocity_path=paths["velocity_path"],
+        rules_dir=paths["rules_dir"],
+        velocity_dir=paths["velocity_dir"],
     )
 
     # Verify YAML was written
@@ -424,6 +426,51 @@ def test_sync_order_export_before_build(tmp_path: Path) -> None:
     row = conn.execute("SELECT * FROM decisions WHERE id = 'D-SQLITE'").fetchone()
     assert row is not None, "SQLite-only record should survive export->build cycle"
     conn.close()
+
+
+# -----------------------------------------------------------------------
+# test_export_idempotent
+# -----------------------------------------------------------------------
+
+def test_export_idempotent(tmp_path: Path) -> None:
+    """Verify export -> build -> export -> build produces stable file counts."""
+    base = _seed_dir(tmp_path)
+    paths = _build_paths(base)
+
+    # First cycle
+    cmd_build(**paths)
+    cmd_export(
+        db_path=paths["db_path"],
+        patterns_dir=paths["patterns_dir"],
+        decisions_dir=paths["decisions_dir"],
+        rules_dir=paths["rules_dir"],
+        velocity_dir=paths["velocity_dir"],
+    )
+
+    # Count files after first export
+    vel_count_1 = len(list((base / "velocity").glob("*.yaml")))
+    lr_count_1 = len(list((base / "learning-rules").glob("*.yaml")))
+
+    # Second cycle
+    cmd_build(**paths)
+    cmd_export(
+        db_path=paths["db_path"],
+        patterns_dir=paths["patterns_dir"],
+        decisions_dir=paths["decisions_dir"],
+        rules_dir=paths["rules_dir"],
+        velocity_dir=paths["velocity_dir"],
+    )
+
+    vel_count_2 = len(list((base / "velocity").glob("*.yaml")))
+    lr_count_2 = len(list((base / "learning-rules").glob("*.yaml")))
+
+    assert vel_count_1 == vel_count_2, f"Velocity files grew: {vel_count_1} -> {vel_count_2}"
+    assert lr_count_1 == lr_count_2, f"Learning rule files grew: {lr_count_1} -> {lr_count_2}"
+
+    # Third cycle for good measure
+    cmd_build(**paths)
+    vel_count_3 = len(list((base / "velocity").glob("*.yaml")))
+    assert vel_count_2 == vel_count_3, f"Velocity files grew after rebuild: {vel_count_2} -> {vel_count_3}"
 
 
 # -----------------------------------------------------------------------

@@ -1,0 +1,7 @@
+id: LR-003
+rule: Use decimal.Decimal for all money amounts, never float.
+source: 3 human corrections on billing code
+confidence: 0.85
+applies_to: projects with financial data
+approved: false
+created_at: '2026-04-03'

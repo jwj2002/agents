@@ -1,0 +1,10 @@
+id: 1
+date: '2026-04-02'
+project: docketiq
+task_type: bug_fix
+complexity: moderate
+model: sonnet
+duration_seconds: 840
+cost_dollars: 0.72
+success: true
+description: Auth concurrency fix
