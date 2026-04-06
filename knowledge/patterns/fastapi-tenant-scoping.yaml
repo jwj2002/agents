@@ -1,0 +1,449 @@
+id: PAT-017
+category: auth
+name: "FastAPI tenant scoping with account isolation"
+status: draft
+tier: primary
+description: >
+  Multi-tenant account isolation pattern for FastAPI layered architecture.
+  Every domain resource belongs to an Account via account_id FK. Access is
+  controlled through AccountMember membership (role-based) and enforced at
+  the dependency-injection layer so routers and services never need to
+  manually check ownership. Queries are automatically scoped via repository
+  helpers (get_for_account, list_for_account).
+
+when_to_use: >
+  Any multi-tenant FastAPI app where resources are owned by accounts/tenants
+  and access must be gated by membership role (OWNER, MEMBER, VIEWER, etc.)
+
+when_not_to_use: >
+  Single-tenant apps, apps where resources are user-scoped (not account-scoped),
+  or apps using row-level security in the database layer instead of application-layer
+  scoping
+
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+    - "accounts/enums.py -- AccountRole enum"
+    - "accounts/models.py -- Account, AccountMember models"
+    - "accounts/deps.py -- require_account_access, require_account_owner dependencies"
+    - "{module}/models.py -- domain model with account_id FK"
+    - "{module}/repository.py -- get_for_account, list_for_account methods"
+    - "{module}/services.py -- account_id parameter on all mutations"
+    - "{module}/router.py -- /accounts/{account_id}/items nested routes"
+
+  key_decisions:
+    - "Account is the tenant boundary -- every domain model has account_id FK with CASCADE delete"
+    - "AccountMember is the join table linking users to accounts with a role"
+    - "AccountRole is a str enum: OWNER, MEMBER, VIEWER (extend per domain)"
+    - "Access control lives in FastAPI Depends -- routers declare which gate they need"
+    - "require_account_access returns the Account object (read gate, any member)"
+    - "require_account_owner returns AccountMember (write gate, OWNER/MEMBER only)"
+    - "Repository uses BaseRepository.get_with_filter(id, account_id=account_id) -- no custom SQL"
+    - "Service always receives account_id and passes it to repository -- never trusts caller"
+    - "Router path is /accounts/{account_id}/items -- account_id in URL, not body"
+    - "Dependency chain: get_current_user -> require_account_access -> service call"
+
+  reference_code:
+    account_role_enum: |
+      from enum import Enum
+
+      class AccountRole(str, Enum):
+          OWNER = "OWNER"
+          MEMBER = "MEMBER"
+          VIEWER = "VIEWER"
+
+    account_model: |
+      import uuid
+      from sqlalchemy import ForeignKey, String
+      from sqlalchemy.dialects.postgresql import UUID
+      from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+      from app.database import Base, TimestampMixin
+
+      class Account(TimestampMixin, Base):
+          __tablename__ = "accounts"
+
+          id: Mapped[uuid.UUID] = mapped_column(
+              UUID(as_uuid=True),
+              primary_key=True,
+              index=True,
+              default=uuid.uuid4,
+          )
+          name: Mapped[str] = mapped_column(String(255), nullable=False)
+
+          # Relationships
+          members: Mapped[list["AccountMember"]] = relationship(
+              "AccountMember",
+              back_populates="account",
+              cascade="all, delete-orphan",
+              lazy="select",
+          )
+
+    account_member_model: |
+      import uuid
+      from sqlalchemy import Enum as SAEnum, ForeignKey, UniqueConstraint
+      from sqlalchemy.dialects.postgresql import UUID
+      from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+      from app.accounts.enums import AccountRole
+      from app.database import Base, TimestampMixin
+
+      class AccountMember(TimestampMixin, Base):
+          """Join table: which users belong to which accounts, and with what role."""
+          __tablename__ = "account_members"
+
+          id: Mapped[uuid.UUID] = mapped_column(
+              UUID(as_uuid=True),
+              primary_key=True,
+              index=True,
+              default=uuid.uuid4,
+          )
+          user_id: Mapped[uuid.UUID] = mapped_column(
+              UUID(as_uuid=True),
+              ForeignKey("users.id", ondelete="CASCADE"),
+              nullable=False,
+              index=True,
+          )
+          account_id: Mapped[uuid.UUID] = mapped_column(
+              UUID(as_uuid=True),
+              ForeignKey("accounts.id", ondelete="CASCADE"),
+              nullable=False,
+              index=True,
+          )
+          role: Mapped[AccountRole] = mapped_column(
+              SAEnum(AccountRole, name="account_role_enum"),
+              nullable=False,
+          )
+
+          # Relationships
+          account: Mapped["Account"] = relationship(
+              "Account", back_populates="members", lazy="select",
+          )
+          user: Mapped["User"] = relationship(
+              "User", back_populates="account_memberships", lazy="select",
+          )
+
+          __table_args__ = (
+              UniqueConstraint(
+                  "account_id", "user_id", name="uq_account_member_account_user"
+              ),
+          )
+
+    domain_model_with_account_fk: |
+      import uuid
+      from sqlalchemy import ForeignKey, String
+      from sqlalchemy.dialects.postgresql import UUID
+      from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+      from app.database import Base, TimestampMixin
+
+      class Item(TimestampMixin, Base):
+          __tablename__ = "items"
+
+          id: Mapped[uuid.UUID] = mapped_column(
+              UUID(as_uuid=True),
+              primary_key=True,
+              index=True,
+              default=uuid.uuid4,
+          )
+          account_id: Mapped[uuid.UUID] = mapped_column(
+              ForeignKey("accounts.id", ondelete="CASCADE"),
+              nullable=False,
+              index=True,
+          )
+          name: Mapped[str] = mapped_column(String(255), nullable=False)
+
+          # Relationship back to Account
+          account: Mapped["Account"] = relationship("Account", lazy="select")
+
+    require_account_access_dep: |
+      import uuid
+      from fastapi import Depends, HTTPException, status
+      from sqlalchemy import select
+      from sqlalchemy.orm import Session
+
+      from app.accounts.enums import AccountRole
+      from app.accounts.models import Account, AccountMember
+      from app.auth.oauth2 import get_current_user
+      from app.auth.models import User
+      from app.database import get_db
+
+
+      def require_account_access(
+          account_id: uuid.UUID,
+          db: Session = Depends(get_db),
+          current_user: User = Depends(get_current_user),
+      ) -> Account:
+          """
+          Verify user has ANY membership in the account (read access).
+
+          Dependency chain: get_current_user -> require_account_access
+          Returns the Account object so downstream code can use it.
+          Raises 404 if account missing, 403 if user has no membership.
+          """
+          account = db.scalar(
+              select(Account).where(Account.id == account_id)
+          )
+          if not account:
+              raise HTTPException(
+                  status_code=status.HTTP_404_NOT_FOUND,
+                  detail="Account not found",
+              )
+
+          member = (
+              db.query(AccountMember)
+              .filter(
+                  AccountMember.account_id == account_id,
+                  AccountMember.user_id == current_user.id,
+              )
+              .first()
+          )
+          if not member:
+              raise HTTPException(
+                  status_code=status.HTTP_403_FORBIDDEN,
+                  detail="Not authorized to access this account",
+              )
+
+          return account
+
+    require_account_owner_dep: |
+      def require_account_owner(
+          account_id: uuid.UUID,
+          db: Session = Depends(get_db),
+          current_user: User = Depends(get_current_user),
+      ) -> AccountMember:
+          """
+          Verify user is OWNER or MEMBER (write access).
+
+          Returns AccountMember so downstream code can inspect role.
+          Raises 403 if user is VIEWER or not a member.
+          """
+          account = db.scalar(
+              select(Account).where(Account.id == account_id)
+          )
+          if not account:
+              raise HTTPException(
+                  status_code=status.HTTP_404_NOT_FOUND,
+                  detail="Account not found",
+              )
+
+          member = (
+              db.query(AccountMember)
+              .filter(
+                  AccountMember.account_id == account_id,
+                  AccountMember.user_id == current_user.id,
+              )
+              .first()
+          )
+          if not member:
+              raise HTTPException(
+                  status_code=status.HTTP_403_FORBIDDEN,
+                  detail="Not a member of this account",
+              )
+
+          if member.role not in (AccountRole.OWNER, AccountRole.MEMBER):
+              raise HTTPException(
+                  status_code=status.HTTP_403_FORBIDDEN,
+                  detail="Account owner or member access required",
+              )
+
+          return member
+
+    repository_account_scoped: |
+      import uuid
+      from typing import Optional, Sequence
+
+      from app.core.repository import BaseRepository
+      from app.items.models import Item
+
+
+      class ItemRepository(BaseRepository[Item]):
+          model = Item
+
+          def get_for_account(
+              self, item_id: uuid.UUID, account_id: uuid.UUID
+          ) -> Optional[Item]:
+              """Get by ID with account ownership verification."""
+              return self.get_with_filter(item_id, account_id=account_id)
+
+          def list_for_account(self, account_id: uuid.UUID) -> Sequence[Item]:
+              """List all items for a specific account."""
+              return self.list_by(account_id=account_id)
+
+    service_account_scoped: |
+      import uuid
+      from typing import Sequence
+
+      from app.core.exceptions import EntityNotFound
+      from app.items.models import Item
+      from app.items.repository import ItemRepository
+      from app.items.schemas import ItemCreate, ItemUpdate
+
+
+      class ItemService:
+          def __init__(self, repo: ItemRepository) -> None:
+              self.repo = repo
+
+          def get(self, item_id: uuid.UUID, account_id: uuid.UUID) -> Item | None:
+              return self.repo.get_for_account(item_id, account_id)
+
+          def get_or_raise(self, item_id: uuid.UUID, account_id: uuid.UUID) -> Item:
+              item = self.get(item_id, account_id)
+              if item is None:
+                  raise EntityNotFound("Item not found")
+              return item
+
+          def list_all(self, account_id: uuid.UUID) -> Sequence[Item]:
+              return self.repo.list_for_account(account_id)
+
+          def create(self, data: ItemCreate, account_id: uuid.UUID) -> Item:
+              item = Item(
+                  account_id=account_id,
+                  **data.model_dump(),
+              )
+              self.repo.add(item)
+              self.repo.commit()
+              self.repo.refresh(item)
+              return item
+
+          def update(
+              self, item_id: uuid.UUID, account_id: uuid.UUID, data: ItemUpdate
+          ) -> Item:
+              item = self.get_or_raise(item_id, account_id)
+              self.repo.partial_update(item, **data.model_dump(exclude_unset=True))
+              self.repo.commit()
+              self.repo.refresh(item)
+              return item
+
+          def delete(self, item_id: uuid.UUID, account_id: uuid.UUID) -> None:
+              item = self.get_or_raise(item_id, account_id)
+              self.repo.delete(item)
+              self.repo.commit()
+
+    router_account_scoped: |
+      import uuid
+      from fastapi import APIRouter, Depends, status
+      from sqlalchemy.orm import Session
+
+      from app.accounts.deps import require_account_access, require_account_owner
+      from app.accounts.models import Account, AccountMember
+      from app.database import get_db
+      from app.items.repository import ItemRepository
+      from app.items.schemas import ItemCreate, ItemRead, ItemUpdate
+      from app.items.services import ItemService
+
+
+      router = APIRouter(
+          prefix="/accounts/{account_id}/items",
+          tags=["items"],
+      )
+
+
+      def get_item_service(db: Session = Depends(get_db)) -> ItemService:
+          return ItemService(ItemRepository(db))
+
+
+      @router.get("", response_model=list[ItemRead])
+      def list_items(
+          account_id: uuid.UUID,
+          account: Account = Depends(require_account_access),
+          service: ItemService = Depends(get_item_service),
+      ):
+          """List all items for this account. Requires any membership."""
+          return service.list_all(account_id)
+
+
+      @router.get("/{item_id}", response_model=ItemRead)
+      def get_item(
+          account_id: uuid.UUID,
+          item_id: uuid.UUID,
+          account: Account = Depends(require_account_access),
+          service: ItemService = Depends(get_item_service),
+      ):
+          """Get a single item. Requires any membership."""
+          return service.get_or_raise(item_id, account_id)
+
+
+      @router.post("", response_model=ItemRead, status_code=status.HTTP_201_CREATED)
+      def create_item(
+          account_id: uuid.UUID,
+          data: ItemCreate,
+          member: AccountMember = Depends(require_account_owner),
+          service: ItemService = Depends(get_item_service),
+      ):
+          """Create an item. Requires OWNER or MEMBER role."""
+          return service.create(data, account_id)
+
+
+      @router.patch("/{item_id}", response_model=ItemRead)
+      def update_item(
+          account_id: uuid.UUID,
+          item_id: uuid.UUID,
+          data: ItemUpdate,
+          member: AccountMember = Depends(require_account_owner),
+          service: ItemService = Depends(get_item_service),
+      ):
+          """Update an item. Requires OWNER or MEMBER role."""
+          return service.update(item_id, account_id, data)
+
+
+      @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+      def delete_item(
+          account_id: uuid.UUID,
+          item_id: uuid.UUID,
+          member: AccountMember = Depends(require_account_owner),
+          service: ItemService = Depends(get_item_service),
+      ):
+          """Delete an item. Requires OWNER or MEMBER role."""
+          service.delete(item_id, account_id)
+
+  gotchas:
+    - "account_id FK must have index=True -- queries filter on it constantly"
+    - "account_id FK must have ondelete=CASCADE -- deleting an account cleans up all children"
+    - "Never trust account_id from the request body -- always take it from the URL path"
+    - "require_account_access is for read endpoints, require_account_owner is for write endpoints"
+    - "Repository get_for_account uses get_with_filter(id, account_id=) from BaseRepository -- no raw SQL"
+    - "Service methods always take account_id as a parameter -- never fetch without scoping"
+    - "AccountMember has a unique constraint on (account_id, user_id) -- one membership per user per account"
+    - "The dependency chain is: get_current_user -> require_account_access/owner -> handler. FastAPI resolves get_current_user once per request"
+    - "For system admin bypass, create a mock AccountMember with role=OWNER -- check is_mock before using user_id"
+    - "Use AccountRole string enum values in API responses (OWNER not AccountRole.OWNER) -- see E01 ENUM_VALUE_MISMATCH"
+
+dependencies:
+  - SQLAlchemy
+  - FastAPI
+  - "BaseRepository[T] (PAT-010)"
+
+tests:
+  - test_require_account_access_allows_member
+  - test_require_account_access_denies_non_member
+  - test_require_account_access_returns_404_for_missing_account
+  - test_require_account_owner_denies_viewer
+  - test_require_account_owner_allows_owner
+  - test_get_for_account_scopes_by_account_id
+  - test_list_for_account_returns_only_account_items
+  - test_create_item_sets_account_id
+  - test_cross_account_access_denied
+
+lifecycle:
+  extracted_from: "mymoney-dev + fastapi-architect-agent"
+  extracted_at: null
+  extracted_by: null
+  draft_reviewed_at: null
+  draft_reviewer: null
+  dry_run_passed_at: null
+  dry_run_project: null
+  pilot_started_at: null
+  pilot_uses: []
+  consecutive_successes: 0
+  validated_at: null
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+
+related_decisions: []
+consecutive_successes: 0
+validated_count: 0
+created_at: "2026-04-06"
+updated_at: "2026-04-06"
