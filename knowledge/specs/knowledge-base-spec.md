@@ -6,7 +6,9 @@ author: Jason Job
 location: ~/agents/knowledge/ and ~/agents/knowledge-mcp/
 type: Integration
 complexity: MODERATE
-version: v1.0
+version: v1.1
+related_specs:
+  - knowledge/specs/knowledge-base-pattern-lifecycle.md
 ---
 
 # Developer Knowledge Base
@@ -82,7 +84,8 @@ Each pattern is one YAML file in `knowledge/patterns/`.
 id: PAT-001
 category: auth
 name: "JWT with refresh tokens"
-tier: primary                    # primary | secondary | deprecated
+status: validated                # draft | pilot | validated | deprecated (see pattern-lifecycle spec)
+tier: primary                    # primary | secondary (classification within validated patterns)
 description: "Stateless authentication using JWT access tokens and refresh tokens"
 when_to_use: "API-first services, stateless, multi-client"
 when_not_to_use: "Server-rendered apps needing server-side session state"
@@ -110,6 +113,11 @@ tests:
   - "test_token_expiry"
   - "test_refresh_flow"
   - "test_revocation"
+
+lifecycle:                       # See pattern-lifecycle spec for full schema
+  extracted_from: vitalailabs
+  consecutive_successes: 3
+  validated_at: "2026-04-01"
 
 related_decisions: [D-015]
 validated_count: 3               # number of projects using this successfully
@@ -244,11 +252,18 @@ entries:
 ```sql
 -- schema.sql
 
+CREATE TABLE IF NOT EXISTS _meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
 CREATE TABLE IF NOT EXISTS patterns (
     id TEXT PRIMARY KEY,
     category TEXT NOT NULL,
     name TEXT NOT NULL,
-    tier TEXT NOT NULL CHECK (tier IN ('primary', 'secondary', 'deprecated')),
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft', 'pilot', 'validated', 'deprecated')),
+    tier TEXT NOT NULL CHECK (tier IN ('primary', 'secondary')),
     description TEXT,
     when_to_use TEXT,
     when_not_to_use TEXT,
@@ -258,6 +273,8 @@ CREATE TABLE IF NOT EXISTS patterns (
     reference_project TEXT,
     reference_path TEXT,
     related_decisions TEXT,       -- JSON array of decision IDs
+    lifecycle TEXT,               -- JSON blob of lifecycle data (see pattern-lifecycle spec)
+    consecutive_successes INTEGER DEFAULT 0,
     validated_count INTEGER DEFAULT 0,
     created_at TEXT,
     updated_at TEXT
@@ -273,13 +290,17 @@ CREATE TABLE IF NOT EXISTS decisions (
     decision TEXT NOT NULL,
     alternatives TEXT,            -- JSON array of {option, rejected_because}
     reasoning TEXT,
-    outcome TEXT,
+    outcome TEXT,                 -- Set at creation time; decisions are append-only (see note below)
     linked_patterns TEXT,         -- JSON array of pattern IDs
     linked_issues TEXT,           -- JSON array of issue references
     linked_prs TEXT,              -- JSON array of PR references
     related_decisions TEXT,       -- JSON array of decision IDs
     created_at TEXT
 );
+
+-- Decisions are append-only. To record an outcome or revision, create a new
+-- decision that references the original via related_decisions. This avoids
+-- mutable-record complexity and matches how decisions work in practice.
 
 CREATE TABLE IF NOT EXISTS learning_rules (
     id TEXT PRIMARY KEY,
@@ -307,12 +328,19 @@ CREATE TABLE IF NOT EXISTS velocity (
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_patterns_category ON patterns(category);
 CREATE INDEX IF NOT EXISTS idx_patterns_tier ON patterns(tier);
+CREATE INDEX IF NOT EXISTS idx_patterns_status ON patterns(status);
 CREATE INDEX IF NOT EXISTS idx_decisions_project ON decisions(project);
 CREATE INDEX IF NOT EXISTS idx_decisions_topic ON decisions(topic);
 CREATE INDEX IF NOT EXISTS idx_learning_rules_approved ON learning_rules(approved);
 CREATE INDEX IF NOT EXISTS idx_velocity_project ON velocity(project);
 CREATE INDEX IF NOT EXISTS idx_velocity_task_type ON velocity(task_type);
 CREATE INDEX IF NOT EXISTS idx_velocity_complexity ON velocity(complexity);
+CREATE INDEX IF NOT EXISTS idx_velocity_date ON velocity(date);
+
+-- Full-text search for decisions (standalone — rebuilt from scratch during build)
+CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(
+    id, title, context, decision, reasoning
+);
 ```
 
 ---
@@ -329,23 +357,25 @@ CREATE INDEX IF NOT EXISTS idx_velocity_complexity ON velocity(complexity);
 |---------|-------------|
 | `python sync.py build` | Read all YAML files → create/rebuild SQLite DB |
 | `python sync.py export` | Read SQLite for records newer than last export → write YAML files → update index.yaml |
-| `python sync.py sync` | `git pull` → `build` → `export` → `git add` → `git commit` → `git push` |
+| `python sync.py sync` | `git pull` → `export` → `build` → `git add` → `git commit` → `git push` |
 
 ### `build` behavior
 
 1. Read `schema.sql` → create tables if not exist
 2. Clear all tables (rebuild from scratch)
-3. Walk `patterns/` → parse each YAML → insert into `patterns` table
-4. Walk `decisions/` (skip `index.yaml`) → parse each YAML → insert into `decisions` table
-5. Read `learning-rules/active.yaml` → insert each rule into `learning_rules` table
-6. Read `velocity/history.yaml` → insert each entry into `velocity` table
-7. Print summary: "Built knowledge.db: X patterns, Y decisions, Z rules, W velocity entries"
+3. Walk `patterns/` → parse each YAML → validate required fields (`id`, `category`, `name`, `status`, `tier`) and enum values → insert into `patterns` table. Log warning and skip on invalid.
+4. Walk `decisions/` (skip `index.yaml`) → parse each YAML → validate required fields (`id`, `topic`, `title`, `decision`) → insert into `decisions` table. Log warning and skip on invalid. Check for duplicate IDs across files.
+5. Rebuild `decisions/index.yaml` from all decision files (group by project, topic, pattern)
+6. Rebuild `decisions_fts`: `DELETE FROM decisions_fts` then `INSERT INTO decisions_fts SELECT id, title, context, decision, reasoning FROM decisions`
+7. Read `learning-rules/active.yaml` → insert each rule into `learning_rules` table
+8. Read `velocity/history.yaml` → insert each entry into `velocity` table
+9. Print summary: "Built knowledge.db: X patterns, Y decisions, Z rules, W velocity entries"
 
 ### `export` behavior
 
 1. Query SQLite for records where `created_at` > last export timestamp (stored in a `_meta` table)
 2. For each new/updated pattern: write `patterns/{id}.yaml`
-3. For each new decision: write `decisions/{id}.yaml`, update `decisions/index.yaml`
+3. For each new decision: write `decisions/{id}.yaml`
 4. For new learning rules: update `learning-rules/active.yaml`
 5. For new velocity entries: append to `velocity/history.yaml`
 6. Update `_meta.last_export` timestamp
@@ -353,9 +383,9 @@ CREATE INDEX IF NOT EXISTS idx_velocity_complexity ON velocity(complexity);
 ### `sync` behavior
 
 1. `git pull --rebase` (get changes from other machines)
-2. Run `build` (rebuild DB from latest YAML)
-3. Run `export` (write any local-only changes to YAML)
-4. `git add -A knowledge/` (stage changes — excludes knowledge.db via .gitignore)
+2. Run `export` (write any SQLite-only changes to YAML — MUST run before `build` to prevent data loss)
+3. Run `build` (rebuild DB from latest YAML, regenerate index.yaml)
+4. `git add knowledge/patterns/ knowledge/decisions/ knowledge/learning-rules/ knowledge/velocity/ knowledge/schema.sql` (stage specific subdirectories — excludes knowledge.db via .gitignore)
 5. `git commit -m "knowledge sync: {summary}"` (skip if nothing changed)
 6. `git push`
 
@@ -402,14 +432,15 @@ Get standard patterns by category.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `category` | string | no | Filter by category (auth, caching, database, etc.). Omit for all. |
-| `tier` | string | no | Filter by tier (primary, secondary, deprecated). |
+| `tier` | string | no | Filter by tier (primary, secondary). |
+| `status` | string | no | Filter by lifecycle status (draft, pilot, validated, deprecated). Defaults to "validated" so agents get proven patterns unless they ask otherwise. |
 
-**Returns:** Array of pattern objects.
+**Returns:** Array of pattern objects including `status` field.
 
 **Example:**
 ```
 Agent calls: get_patterns(category: "auth", tier: "primary")
-Returns: [{ id: "PAT-001", name: "JWT with refresh tokens", ... }]
+Returns: [{ id: "PAT-001", name: "JWT with refresh tokens", status: "validated", ... }]
 ```
 
 #### `get_pattern_detail`
@@ -424,16 +455,16 @@ Get full detail for a specific pattern including implementation notes.
 
 #### `search_decisions`
 
-Search decision history.
+Search decision history. Uses FTS5 for ranked full-text search when `query` is provided.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `query` | string | no | Full-text search across title, context, decision, reasoning |
+| `query` | string | no | Full-text search across title, context, decision, reasoning (uses FTS5 with ranked results) |
 | `project` | string | no | Filter by project name |
 | `topic` | string | no | Filter by topic (auth, caching, etc.) |
 | `limit` | number | no | Max results (default: 10) |
 
-**Returns:** Array of decision objects matching the query.
+**Returns:** Array of decision objects matching the query, ranked by relevance when using full-text search.
 
 **Example:**
 ```
@@ -485,14 +516,15 @@ Save a new decision to the knowledge base.
 | `title` | string | yes | Short title |
 | `context` | string | yes | Why this decision was needed |
 | `decision` | string | yes | What was decided |
-| `alternatives` | string | no | JSON string of alternatives considered |
+| `alternatives` | array | no | Array of `{ option: string, rejected_because: string }` objects |
 | `reasoning` | string | no | Why this alternative was chosen |
 
 **Behavior:**
 1. Generate ID: `D-{next_sequence_number}`
-2. Insert into SQLite `decisions` table
-3. Run `sync.py export` to write YAML and push to git
-4. Return: `{ id: "D-XXX", status: "saved" }`
+2. Insert into SQLite `decisions` table (serialize `alternatives` to JSON for storage)
+3. Return: `{ id: "D-XXX", status: "saved" }`
+
+Note: Data is written to SQLite only. Run `sync.py sync` to persist to YAML and git.
 
 #### `save_learning_rule`
 
@@ -508,8 +540,9 @@ Save a new learning rule (pending human approval).
 **Behavior:**
 1. Generate ID: `LR-{next_sequence_number}`
 2. Insert into SQLite with `approved=0` (pending)
-3. Run `sync.py export`
-4. Return: `{ id: "LR-XXX", status: "pending_approval" }`
+3. Return: `{ id: "LR-XXX", status: "pending_approval" }`
+
+Note: Data is written to SQLite only. Run `sync.py sync` to persist to YAML and git.
 
 #### `save_velocity`
 
@@ -528,23 +561,24 @@ Record a completed task for velocity tracking.
 
 **Behavior:**
 1. Insert into SQLite `velocity` table
-2. Run `sync.py export`
-3. Return: `{ status: "recorded" }`
+2. Return: `{ status: "recorded" }`
+
+Note: Data is written to SQLite only. Run `sync.py sync` to persist to YAML and git.
 
 ---
 
 ## How Agents Load This
 
-Add to any project's `.mcp.json`:
+Add to any project's `.mcp.json` (paths must be absolute — `~` is not expanded in JSON config):
 
 ```json
 {
   "mcpServers": {
     "knowledge": {
       "command": "npx",
-      "args": ["tsx", "/home/jjob/agents/knowledge-mcp/index.ts"],
+      "args": ["tsx", "/Users/jasonjob/agents/knowledge-mcp/index.ts"],
       "env": {
-        "KNOWLEDGE_DB_PATH": "/home/jjob/agents/knowledge/knowledge.db"
+        "KNOWLEDGE_DB_PATH": "/Users/jasonjob/agents/knowledge/knowledge.db"
       }
     }
   }
@@ -558,7 +592,7 @@ Or add to `~/.claude/settings.json` to make it available in ALL projects:
   "mcpServers": {
     "knowledge": {
       "command": "npx",
-      "args": ["tsx", "/home/jjob/agents/knowledge-mcp/index.ts"]
+      "args": ["tsx", "/Users/jasonjob/agents/knowledge-mcp/index.ts"]
     }
   }
 }
@@ -581,6 +615,12 @@ This integration is a separate issue in the vitalai-channels repo. It is NOT par
 
 ---
 
+## Related Specs
+
+- **[Pattern Lifecycle](knowledge-base-pattern-lifecycle.md)** — defines the EXTRACT → DRAFT → PILOT → VALIDATED → DEPRECATED workflow for patterns. This spec adds the `status` and `lifecycle` fields to the pattern schema defined here. The lifecycle spec governs process; this spec governs infrastructure.
+
+---
+
 ## Implementation Order
 
 1. **Create `knowledge/schema.sql`** — SQLite table definitions
@@ -595,18 +635,24 @@ This integration is a separate issue in the vitalai-channels repo. It is NOT par
 
 ## Acceptance Criteria
 
-- [ ] `python sync.py build` creates knowledge.db from YAML files
-- [ ] `python sync.py export` writes new SQLite records to YAML and updates index
-- [ ] `python sync.py sync` does full git pull → build → export → commit → push
+- [ ] `python sync.py build` creates knowledge.db from YAML files with validation (warns on invalid/duplicate)
+- [ ] `python sync.py build` regenerates `decisions/index.yaml` from all decision files
+- [ ] `python sync.py build` populates FTS5 index for decision full-text search
+- [ ] `python sync.py export` writes new SQLite records to YAML
+- [ ] `python sync.py sync` runs in correct order: git pull → export → build → commit → push
+- [ ] `python sync.py sync` stages specific subdirectories, not `git add -A`
 - [ ] knowledge.db is gitignored
 - [ ] Knowledge MCP loads in Claude Code via `.mcp.json`
-- [ ] `get_patterns("auth")` returns JWT and Redis session patterns
+- [ ] `get_patterns("auth")` returns JWT and Redis session patterns (validated by default)
+- [ ] `get_patterns(status="pilot")` returns only pilot-stage patterns
+- [ ] `search_decisions(query="JWT")` returns ranked FTS5 results
 - [ ] `search_decisions(topic="auth", project="docketiq")` returns relevant decisions
 - [ ] `get_learning_rules()` returns approved rules only by default
 - [ ] `get_velocity(task_type="bug_fix")` returns history + summary stats
-- [ ] `save_decision(...)` inserts into SQLite and exports to YAML
+- [ ] `save_decision(...)` inserts into SQLite only (no auto git push)
+- [ ] `save_decision(alternatives=[...])` accepts structured array, not JSON string
 - [ ] `save_learning_rule(...)` inserts with approved=false (pending)
 - [ ] `save_velocity(...)` records task completion
 - [ ] Sync script uses stdlib only (no pip dependencies)
 - [ ] Knowledge MCP has no dependency on vitalai-channels
-- [ ] Works on any machine where ~/agents is cloned
+- [ ] Works on any machine where ~/agents is cloned (absolute paths in MCP config)
