@@ -56,20 +56,14 @@ implementation:
     account_model: |
       import uuid
       from sqlalchemy import ForeignKey, String
-      from sqlalchemy.dialects.postgresql import UUID
       from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-      from app.database import Base, TimestampMixin
+      from backend.database import Base, TimestampMixin, GUID, uuid_pk
 
       class Account(TimestampMixin, Base):
           __tablename__ = "accounts"
 
-          id: Mapped[uuid.UUID] = mapped_column(
-              UUID(as_uuid=True),
-              primary_key=True,
-              index=True,
-              default=uuid.uuid4,
-          )
+          id: Mapped[uuid.UUID] = uuid_pk()
           name: Mapped[str] = mapped_column(String(255), nullable=False)
 
           # Relationships
@@ -83,30 +77,24 @@ implementation:
     account_member_model: |
       import uuid
       from sqlalchemy import Enum as SAEnum, ForeignKey, UniqueConstraint
-      from sqlalchemy.dialects.postgresql import UUID
       from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-      from app.accounts.enums import AccountRole
-      from app.database import Base, TimestampMixin
+      from backend.accounts.enums import AccountRole
+      from backend.database import Base, TimestampMixin, GUID, uuid_pk
 
       class AccountMember(TimestampMixin, Base):
           """Join table: which users belong to which accounts, and with what role."""
           __tablename__ = "account_members"
 
-          id: Mapped[uuid.UUID] = mapped_column(
-              UUID(as_uuid=True),
-              primary_key=True,
-              index=True,
-              default=uuid.uuid4,
-          )
+          id: Mapped[uuid.UUID] = uuid_pk()
           user_id: Mapped[uuid.UUID] = mapped_column(
-              UUID(as_uuid=True),
+              GUID(),
               ForeignKey("users.id", ondelete="CASCADE"),
               nullable=False,
               index=True,
           )
           account_id: Mapped[uuid.UUID] = mapped_column(
-              UUID(as_uuid=True),
+              GUID(),
               ForeignKey("accounts.id", ondelete="CASCADE"),
               nullable=False,
               index=True,
@@ -133,21 +121,16 @@ implementation:
     domain_model_with_account_fk: |
       import uuid
       from sqlalchemy import ForeignKey, String
-      from sqlalchemy.dialects.postgresql import UUID
       from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-      from app.database import Base, TimestampMixin
+      from backend.database import Base, TimestampMixin, GUID, uuid_pk
 
       class Item(TimestampMixin, Base):
           __tablename__ = "items"
 
-          id: Mapped[uuid.UUID] = mapped_column(
-              UUID(as_uuid=True),
-              primary_key=True,
-              index=True,
-              default=uuid.uuid4,
-          )
+          id: Mapped[uuid.UUID] = uuid_pk()
           account_id: Mapped[uuid.UUID] = mapped_column(
+              GUID(),
               ForeignKey("accounts.id", ondelete="CASCADE"),
               nullable=False,
               index=True,
@@ -163,11 +146,11 @@ implementation:
       from sqlalchemy import select
       from sqlalchemy.orm import Session
 
-      from app.accounts.enums import AccountRole
-      from app.accounts.models import Account, AccountMember
-      from app.auth.oauth2 import get_current_user
-      from app.auth.models import User
-      from app.database import get_db
+      from backend.accounts.enums import AccountRole
+      from backend.accounts.models import Account, AccountMember
+      from backend.auth.oauth2 import get_current_user
+      from backend.auth.models import User
+      from backend.database import get_db
 
 
       def require_account_access(
@@ -254,8 +237,8 @@ implementation:
       import uuid
       from typing import Optional, Sequence
 
-      from app.core.repository import BaseRepository
-      from app.items.models import Item
+      from backend.core.repository import BaseRepository
+      from backend.items.models import Item
 
 
       class ItemRepository(BaseRepository[Item]):
@@ -275,10 +258,10 @@ implementation:
       import uuid
       from typing import Sequence
 
-      from app.core.exceptions import EntityNotFound
-      from app.items.models import Item
-      from app.items.repository import ItemRepository
-      from app.items.schemas import ItemCreate, ItemUpdate
+      from backend.core.exceptions import EntityNotFound
+      from backend.items.models import Item
+      from backend.items.repository import ItemRepository
+      from backend.items.schemas import ItemCreate, ItemUpdate
 
 
       class ItemService:
@@ -326,12 +309,12 @@ implementation:
       from fastapi import APIRouter, Depends, status
       from sqlalchemy.orm import Session
 
-      from app.accounts.deps import require_account_access, require_account_owner
-      from app.accounts.models import Account, AccountMember
-      from app.database import get_db
-      from app.items.repository import ItemRepository
-      from app.items.schemas import ItemCreate, ItemRead, ItemUpdate
-      from app.items.services import ItemService
+      from backend.accounts.deps import require_account_access, require_account_owner
+      from backend.accounts.models import Account, AccountMember
+      from backend.database import get_db
+      from backend.items.repository import ItemRepository
+      from backend.items.schemas import ItemCreate, ItemRead, ItemUpdate
+      from backend.items.services import ItemService
 
 
       router = APIRouter(
@@ -398,6 +381,144 @@ implementation:
           """Delete an item. Requires OWNER or MEMBER role."""
           service.delete(item_id, account_id)
 
+    account_schemas: |
+      """accounts/schemas.py — Account and AccountMember Pydantic schemas."""
+      import uuid
+      from typing import Optional
+
+      from pydantic import BaseModel, ConfigDict, Field
+
+      from backend.accounts.enums import AccountRole
+
+
+      class AccountCreate(BaseModel):
+          name: str = Field(..., min_length=1, max_length=255)
+
+
+      class AccountRead(BaseModel):
+          id: uuid.UUID
+          name: str
+
+          model_config = ConfigDict(from_attributes=True)
+
+
+      class AccountMemberRead(BaseModel):
+          id: uuid.UUID
+          user_id: uuid.UUID
+          account_id: uuid.UUID
+          role: str  # Use string value, not enum name (E01)
+
+          model_config = ConfigDict(from_attributes=True)
+
+
+      class AccountMemberCreate(BaseModel):
+          user_id: uuid.UUID
+          role: AccountRole = AccountRole.MEMBER
+
+    account_router: |
+      """accounts/router.py — Account CRUD and member management."""
+      import uuid
+
+      from fastapi import APIRouter, Depends, HTTPException, status
+      from sqlalchemy.orm import Session
+
+      from backend.accounts.deps import require_account_access, require_account_owner
+      from backend.accounts.enums import AccountRole
+      from backend.accounts.models import Account, AccountMember
+      from backend.accounts.schemas import (
+          AccountCreate,
+          AccountMemberCreate,
+          AccountMemberRead,
+          AccountRead,
+      )
+      from backend.auth.models import User
+      from backend.auth.oauth2 import get_current_user
+      from backend.database import get_db
+
+      router = APIRouter(prefix="/accounts", tags=["accounts"])
+
+
+      @router.post("", response_model=AccountRead, status_code=status.HTTP_201_CREATED)
+      def create_account(
+          data: AccountCreate,
+          db: Session = Depends(get_db),
+          current_user: User = Depends(get_current_user),
+      ):
+          """Create a new account. Creator becomes OWNER."""
+          account = Account(name=data.name)
+          db.add(account)
+          db.flush()
+
+          membership = AccountMember(
+              user_id=current_user.id,
+              account_id=account.id,
+              role=AccountRole.OWNER,
+          )
+          db.add(membership)
+          db.commit()
+          db.refresh(account)
+          return account
+
+
+      @router.get("/{account_id}", response_model=AccountRead)
+      def get_account(
+          account_id: uuid.UUID,
+          account: Account = Depends(require_account_access),
+      ):
+          """Get account details. Requires any membership."""
+          return account
+
+
+      @router.get("/{account_id}/members", response_model=list[AccountMemberRead])
+      def list_members(
+          account_id: uuid.UUID,
+          account: Account = Depends(require_account_access),
+          db: Session = Depends(get_db),
+      ):
+          """List all members of an account. Requires any membership."""
+          return (
+              db.query(AccountMember)
+              .filter(AccountMember.account_id == account_id)
+              .all()
+          )
+
+
+      @router.post(
+          "/{account_id}/members",
+          response_model=AccountMemberRead,
+          status_code=status.HTTP_201_CREATED,
+      )
+      def add_member(
+          account_id: uuid.UUID,
+          data: AccountMemberCreate,
+          member: AccountMember = Depends(require_account_owner),
+          db: Session = Depends(get_db),
+      ):
+          """Add a member to the account. Requires OWNER or MEMBER role."""
+          existing = (
+              db.query(AccountMember)
+              .filter(
+                  AccountMember.account_id == account_id,
+                  AccountMember.user_id == data.user_id,
+              )
+              .first()
+          )
+          if existing:
+              raise HTTPException(
+                  status_code=status.HTTP_409_CONFLICT,
+                  detail="User is already a member of this account",
+              )
+
+          new_member = AccountMember(
+              user_id=data.user_id,
+              account_id=account_id,
+              role=data.role,
+          )
+          db.add(new_member)
+          db.commit()
+          db.refresh(new_member)
+          return new_member
+
   gotchas:
     - "account_id FK must have index=True -- queries filter on it constantly"
     - "account_id FK must have ondelete=CASCADE -- deleting an account cleans up all children"
@@ -409,6 +530,9 @@ implementation:
     - "The dependency chain is: get_current_user -> require_account_access/owner -> handler. FastAPI resolves get_current_user once per request"
     - "For system admin bypass, create a mock AccountMember with role=OWNER -- check is_mock before using user_id"
     - "Use AccountRole string enum values in API responses (OWNER not AccountRole.OWNER) -- see E01 ENUM_VALUE_MISMATCH"
+    - "User model needs account_memberships relationship added when using this pattern -- PAT-016's User model doesn't include it by default"
+    - "Reference code uses `backend.` package prefix -- adapt if your project package has a different name"
+    - "Use GUID() from PAT-008 for UUID columns, not sqlalchemy.dialects.postgresql.UUID -- ensures SQLite compatibility"
 
 dependencies:
   - SQLAlchemy

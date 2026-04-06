@@ -21,7 +21,8 @@ implementation:
   key_files:
   - 'core/cors.py'
   - 'core/config.py — CORS_ORIGINS setting'
-  - 'main.py — health endpoints, CORS middleware registration'
+  - 'health/router.py — health endpoints (/health liveness, /health/ready readiness)'
+  - 'main.py — CORS middleware registration, router wiring'
   - 'Dockerfile'
   - 'docker-compose.yml'
   - '.env.example'
@@ -40,6 +41,7 @@ implementation:
   - "Docker: COPY requirements.txt before COPY . to leverage layer caching — pip install only reruns when deps change"
   - "Docker: Always pin base image to a minor version (python:3.12-slim not python:3-slim) for reproducible builds"
   - "docker-compose: Use 127.0.0.1:PORT:PORT not just PORT:PORT for postgres to avoid exposing DB on all interfaces"
+  - "docker-compose.yml should be at the repo root, with build context pointing to backend/ (context: ./backend)"
   - ".env.example: Never put real secrets in this file — it is committed to git"
   - "Health: /health/ready must use a short DB query timeout (2-3s) to avoid blocking the readiness probe"
   reference_code:
