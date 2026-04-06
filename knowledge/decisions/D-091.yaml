@@ -1,29 +1,25 @@
 id: D-091
-date: "2026-04-02"
+date: '2026-04-02'
 project: docketiq
 topic: auth
-title: "Async lock for concurrency in docketiq"
-
-context: "Concurrent session writes in docketiq caused race conditions
-  where session data was overwritten. Needed synchronization mechanism."
-
-decision: "Use asyncio.Lock for concurrent session writes to Redis."
-
+title: Async lock for concurrency in docketiq
+context: Concurrent session writes in docketiq caused race conditions where session
+  data was overwritten. Needed synchronization mechanism.
+decision: Use asyncio.Lock for concurrent session writes to Redis.
 alternatives:
-  - option: "Redis WATCH/MULTI transactions"
-    rejected_because: "Adds complexity for single-instance deployment. Overkill for current scale."
-  - option: "Optimistic locking with version counter"
-    rejected_because: "Requires retry logic that complicates the session middleware."
-
-reasoning: "asyncio.Lock is the simplest solution for single-process concurrency.
-  If docketiq scales to multiple workers, can upgrade to Redis distributed locks."
-
-outcome: "Fixed auth concurrency bug. No more session data races in production."
-
+- option: Redis WATCH/MULTI transactions
+  rejected_because: Adds complexity for single-instance deployment. Overkill for current
+    scale.
+- option: Optimistic locking with version counter
+  rejected_because: Requires retry logic that complicates the session middleware.
+reasoning: asyncio.Lock is the simplest solution for single-process concurrency. If
+  docketiq scales to multiple workers, can upgrade to Redis distributed locks.
+outcome: Fixed auth concurrency bug. No more session data races in production.
 linked:
-  patterns: [PAT-002]
+  patterns:
+  - PAT-002
   issues: []
   prs: []
-  related_decisions: [D-042]
-
-created_at: "2026-04-02"
+  related_decisions:
+  - D-042
+created_at: '2026-04-02'

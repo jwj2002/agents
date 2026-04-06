@@ -1,58 +1,56 @@
 id: PAT-003
 category: caching
-name: "Redis TTL caching"
+name: Redis TTL caching
 status: pilot
 tier: primary
-
-description: "Application-level caching using Redis with TTL-based automatic cache invalidation for read-heavy endpoints"
-when_to_use: "Read-heavy endpoints, expensive queries or computations, data that tolerates brief staleness"
-when_not_to_use: "Write-heavy workloads, data requiring real-time consistency, simple apps where in-memory cache suffices"
-
+description: Application-level caching using Redis with TTL-based automatic cache
+  invalidation for read-heavy endpoints
+when_to_use: Read-heavy endpoints, expensive queries or computations, data that tolerates
+  brief staleness
+when_not_to_use: Write-heavy workloads, data requiring real-time consistency, simple
+  apps where in-memory cache suffices
 implementation:
   language: python
   framework: FastAPI
   key_files:
-    - "cache/redis_cache.py — cache get/set/delete with TTL management"
-    - "cache/cache_decorator.py — decorator for automatic endpoint caching"
-    - "cache/cache_keys.py — key generation and namespace management"
+  - cache/redis_cache.py — cache get/set/delete with TTL management
+  - cache/cache_decorator.py — decorator for automatic endpoint caching
+  - cache/cache_keys.py — key generation and namespace management
   key_decisions:
-    - "Default TTL: 5 minutes for API responses, 1 hour for computed aggregates"
-    - "Cache key includes query params and user context for correctness"
-    - "Cache-aside pattern: check cache first, compute on miss, store result"
-    - "Explicit invalidation on write operations, not just TTL expiry"
-
+  - 'Default TTL: 5 minutes for API responses, 1 hour for computed aggregates'
+  - Cache key includes query params and user context for correctness
+  - 'Cache-aside pattern: check cache first, compute on miss, store result'
+  - Explicit invalidation on write operations, not just TTL expiry
 dependencies:
-  - "aioredis"
-  - "redis"
-
+- aioredis
+- redis
 tests:
-  - "test_cache_hit — verify cached response returned on second request"
-  - "test_cache_miss — verify fresh computation on cache miss"
-  - "test_cache_expiry — verify stale cache entry is recomputed after TTL"
-  - "test_cache_invalidation — verify write operation clears related cache keys"
-  - "test_cache_key_isolation — verify different users get different cache entries"
-
+- test_cache_hit — verify cached response returned on second request
+- test_cache_miss — verify fresh computation on cache miss
+- test_cache_expiry — verify stale cache entry is recomputed after TTL
+- test_cache_invalidation — verify write operation clears related cache keys
+- test_cache_key_isolation — verify different users get different cache entries
 lifecycle:
   extracted_from: docketiq
-  extracted_at: "2026-03-15"
+  extracted_at: '2026-03-15'
   extracted_by: jason-agent
-  draft_reviewed_at: "2026-03-16"
+  draft_reviewed_at: '2026-03-16'
   draft_reviewer: reviewer-agent
-  dry_run_passed_at: "2026-03-17"
+  dry_run_passed_at: '2026-03-17'
   dry_run_project: test-scaffold-caching
-  pilot_started_at: "2026-03-20"
+  pilot_started_at: '2026-03-20'
   pilot_uses:
-    - project: docketiq
-      date: "2026-03-20"
-      corrections: 0
-      result: success
+  - project: docketiq
+    date: '2026-03-20'
+    corrections: 0
+    result: success
   consecutive_successes: 1
   validated_at: null
   deprecated_at: null
   deprecated_reason: null
   replaced_by: null
-
 related_decisions: []
+consecutive_successes: 0
 validated_count: 1
-created_at: "2026-03-15"
-updated_at: "2026-03-20"
+created_at: '2026-03-15'
+updated_at: '2026-03-20'

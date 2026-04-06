@@ -1,29 +1,24 @@
 id: D-042
-date: "2026-03-28"
+date: '2026-03-28'
 project: docketiq
 topic: auth
-title: "Redis session cache for docketiq"
-
-context: "docketiq has a server-rendered dashboard requiring server-side
-  session state. High-frequency reads make database sessions too slow."
-
-decision: "Use Redis-backed sessions for server-rendered dashboard."
-
+title: Redis session cache for docketiq
+context: docketiq has a server-rendered dashboard requiring server-side session state.
+  High-frequency reads make database sessions too slow.
+decision: Use Redis-backed sessions for server-rendered dashboard.
 alternatives:
-  - option: "JWT"
-    rejected_because: "Need server-side session state for SSR. JWT is stateless by design."
-  - option: "Database sessions"
-    rejected_because: "Too slow for high-frequency reads. Would need caching layer anyway."
-
-reasoning: "Redis provides the speed needed for session lookups on every
-  request while maintaining server-side state required for SSR."
-
-outcome: "Deployed to docketiq production. Session reads under 1ms."
-
+- option: JWT
+  rejected_because: Need server-side session state for SSR. JWT is stateless by design.
+- option: Database sessions
+  rejected_because: Too slow for high-frequency reads. Would need caching layer anyway.
+reasoning: Redis provides the speed needed for session lookups on every request while
+  maintaining server-side state required for SSR.
+outcome: Deployed to docketiq production. Session reads under 1ms.
 linked:
-  patterns: [PAT-002]
+  patterns:
+  - PAT-002
   issues: []
   prs: []
-  related_decisions: [D-015]
-
-created_at: "2026-03-28"
+  related_decisions:
+  - D-015
+created_at: '2026-03-28'

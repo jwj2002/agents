@@ -1,57 +1,55 @@
 id: PAT-004
 category: database
-name: "asyncpg direct (no ORM)"
+name: asyncpg direct (no ORM)
 status: pilot
 tier: secondary
-
-description: "Direct PostgreSQL access using asyncpg for high-performance queries without ORM overhead"
-when_to_use: "High-performance requirements, complex queries needing full SQL control, bulk data operations, reporting endpoints"
-when_not_to_use: "CRUD-heavy apps where ORM saves time, teams unfamiliar with raw SQL, projects needing automatic migration generation"
-
+description: Direct PostgreSQL access using asyncpg for high-performance queries without
+  ORM overhead
+when_to_use: High-performance requirements, complex queries needing full SQL control,
+  bulk data operations, reporting endpoints
+when_not_to_use: CRUD-heavy apps where ORM saves time, teams unfamiliar with raw SQL,
+  projects needing automatic migration generation
 implementation:
   language: python
   framework: FastAPI
   key_files:
-    - "db/pool.py — asyncpg connection pool setup and lifecycle"
-    - "db/queries.py — parameterized query definitions"
-    - "db/repository.py — data access layer wrapping asyncpg calls"
+  - db/pool.py — asyncpg connection pool setup and lifecycle
+  - db/queries.py — parameterized query definitions
+  - db/repository.py — data access layer wrapping asyncpg calls
   key_decisions:
-    - "Connection pool: min 5, max 20 connections per worker"
-    - "All queries use parameterized statements ($1, $2) to prevent SQL injection"
-    - "Prepared statements for hot-path queries"
-    - "Manual migration management with explicit SQL files"
-
+  - 'Connection pool: min 5, max 20 connections per worker'
+  - All queries use parameterized statements ($1, $2) to prevent SQL injection
+  - Prepared statements for hot-path queries
+  - Manual migration management with explicit SQL files
 dependencies:
-  - "asyncpg"
-
+- asyncpg
 tests:
-  - "test_connection_pool — verify pool initializes and recycles connections"
-  - "test_parameterized_query — verify query parameters are safely bound"
-  - "test_transaction_rollback — verify failed transaction rolls back cleanly"
-  - "test_concurrent_queries — verify pool handles concurrent requests"
-  - "test_connection_recovery — verify pool recovers after connection drop"
-
+- test_connection_pool — verify pool initializes and recycles connections
+- test_parameterized_query — verify query parameters are safely bound
+- test_transaction_rollback — verify failed transaction rolls back cleanly
+- test_concurrent_queries — verify pool handles concurrent requests
+- test_connection_recovery — verify pool recovers after connection drop
 lifecycle:
   extracted_from: flotilla
-  extracted_at: "2026-03-10"
+  extracted_at: '2026-03-10'
   extracted_by: jason-agent
-  draft_reviewed_at: "2026-03-11"
+  draft_reviewed_at: '2026-03-11'
   draft_reviewer: reviewer-agent
-  dry_run_passed_at: "2026-03-12"
+  dry_run_passed_at: '2026-03-12'
   dry_run_project: test-scaffold-asyncpg
-  pilot_started_at: "2026-03-15"
+  pilot_started_at: '2026-03-15'
   pilot_uses:
-    - project: flotilla
-      date: "2026-03-15"
-      corrections: 0
-      result: success
+  - project: flotilla
+    date: '2026-03-15'
+    corrections: 0
+    result: success
   consecutive_successes: 1
   validated_at: null
   deprecated_at: null
   deprecated_reason: null
   replaced_by: null
-
 related_decisions: []
+consecutive_successes: 0
 validated_count: 1
-created_at: "2026-03-10"
-updated_at: "2026-03-15"
+created_at: '2026-03-10'
+updated_at: '2026-03-15'

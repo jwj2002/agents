@@ -1,69 +1,67 @@
 id: PAT-002
 category: auth
-name: "Redis session cache"
+name: Redis session cache
 status: validated
 tier: primary
-
-description: "Server-side session management using Redis for fast session lookup and automatic expiry"
-when_to_use: "Server-rendered apps, need server-side session state, require immediate session invalidation"
-when_not_to_use: "Stateless API-first services, microservices where JWT is more appropriate, environments without Redis"
-
+description: Server-side session management using Redis for fast session lookup and
+  automatic expiry
+when_to_use: Server-rendered apps, need server-side session state, require immediate
+  session invalidation
+when_not_to_use: Stateless API-first services, microservices where JWT is more appropriate,
+  environments without Redis
 implementation:
   language: python
   framework: FastAPI
   key_files:
-    - "auth/session_manager.py — session creation, retrieval, and destruction"
-    - "auth/session_middleware.py — request session injection"
-    - "auth/redis_client.py — Redis connection pool management"
+  - auth/session_manager.py — session creation, retrieval, and destruction
+  - auth/session_middleware.py — request session injection
+  - auth/redis_client.py — Redis connection pool management
   key_decisions:
-    - "Session TTL: 30 minutes with sliding expiry"
-    - "Session ID stored in httpOnly secure cookie"
-    - "Redis key prefix per environment to avoid collisions"
-    - "Session data serialized as JSON for safety (avoid unsafe deserialization)"
-
+  - 'Session TTL: 30 minutes with sliding expiry'
+  - Session ID stored in httpOnly secure cookie
+  - Redis key prefix per environment to avoid collisions
+  - Session data serialized as JSON for safety (avoid unsafe deserialization)
 dependencies:
-  - "aioredis"
-  - "redis"
-
+- aioredis
+- redis
 tests:
-  - "test_session_creation — verify session stored in Redis with correct TTL"
-  - "test_session_retrieval — verify session data returned for valid session ID"
-  - "test_session_expiry — verify expired sessions are rejected"
-  - "test_session_invalidation — verify logout destroys session in Redis"
-  - "test_sliding_expiry — verify TTL resets on each request"
-
+- test_session_creation — verify session stored in Redis with correct TTL
+- test_session_retrieval — verify session data returned for valid session ID
+- test_session_expiry — verify expired sessions are rejected
+- test_session_invalidation — verify logout destroys session in Redis
+- test_sliding_expiry — verify TTL resets on each request
 lifecycle:
   extracted_from: docketiq
-  extracted_at: "2026-02-28"
+  extracted_at: '2026-02-28'
   extracted_by: jason-agent
-  draft_reviewed_at: "2026-03-01"
+  draft_reviewed_at: '2026-03-01'
   draft_reviewer: reviewer-agent
-  dry_run_passed_at: "2026-03-02"
+  dry_run_passed_at: '2026-03-02'
   dry_run_project: test-scaffold-sessions
-  pilot_started_at: "2026-03-05"
+  pilot_started_at: '2026-03-05'
   pilot_uses:
-    - project: docketiq
-      date: "2026-03-05"
-      corrections: 1
-      correction_details:
-        - "missed Redis connection pool max size configuration"
-      yaml_updated: true
-      result: partial_success
-    - project: vitalailabs
-      date: "2026-03-18"
-      corrections: 0
-      result: success
-    - project: flotilla
-      date: "2026-03-28"
-      corrections: 0
-      result: success
+  - project: docketiq
+    date: '2026-03-05'
+    corrections: 1
+    correction_details:
+    - missed Redis connection pool max size configuration
+    yaml_updated: true
+    result: partial_success
+  - project: vitalailabs
+    date: '2026-03-18'
+    corrections: 0
+    result: success
+  - project: flotilla
+    date: '2026-03-28'
+    corrections: 0
+    result: success
   consecutive_successes: 2
-  validated_at: "2026-03-28"
+  validated_at: '2026-03-28'
   deprecated_at: null
   deprecated_reason: null
   replaced_by: null
-
 related_decisions: []
+consecutive_successes: 0
 validated_count: 2
-created_at: "2026-02-28"
-updated_at: "2026-03-28"
+created_at: '2026-02-28'
+updated_at: '2026-03-28'

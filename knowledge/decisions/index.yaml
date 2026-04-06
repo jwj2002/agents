@@ -1,20 +1,43 @@
 by_project:
-  docketiq:
-    - { id: D-042, topic: auth, title: "Redis session cache", date: "2026-03-28" }
-    - { id: D-087, topic: export, title: "Pluggable export formatters", date: "2026-04-04" }
-    - { id: D-091, topic: auth, title: "Async lock for concurrency", date: "2026-04-02" }
   vitalailabs:
-    - { id: D-015, topic: auth, title: "JWT over sessions", date: "2026-02-20" }
+  - id: D-015
+    topic: auth
+    title: JWT over sessions for vitalailabs
+    date: '2026-02-20'
   flotilla:
-    - { id: D-034, topic: database, title: "asyncpg direct, no ORM", date: "2026-04-03" }
-
+  - id: D-034
+    topic: database
+    title: asyncpg direct, no ORM for flotilla
+    date: '2026-04-03'
+  docketiq:
+  - id: D-042
+    topic: auth
+    title: Redis session cache for docketiq
+    date: '2026-03-28'
+  - id: D-087
+    topic: export
+    title: Pluggable export formatters for docketiq
+    date: '2026-04-04'
+  - id: D-091
+    topic: auth
+    title: Async lock for concurrency in docketiq
+    date: '2026-04-02'
 by_topic:
-  auth: [D-015, D-042, D-091]
-  export: [D-087]
-  database: [D-034]
-
+  auth:
+  - D-015
+  - D-042
+  - D-091
+  database:
+  - D-034
+  export:
+  - D-087
 by_pattern:
-  PAT-001: [D-015]
-  PAT-002: [D-042, D-091]
-  PAT-004: [D-034]
-  PAT-005: [D-087]
+  PAT-001:
+  - D-015
+  PAT-004:
+  - D-034
+  PAT-002:
+  - D-042
+  - D-091
+  PAT-005:
+  - D-087
