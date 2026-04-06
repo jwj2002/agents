@@ -1,7 +1,7 @@
 id: PAT-011
 category: service
 name: FastAPI service layer pattern
-status: draft
+status: pilot
 tier: primary
 description: Business logic layer that receives repositories via injection, controls
   transactions, raises domain exceptions
@@ -27,6 +27,43 @@ implementation:
   - For service-to-service calls, inject both services in the router and pass data
     between them
   - Use flush() not commit() when you need an ID mid-operation
+  reference_code:
+    example_service: "\"\"\"Example service layer (bookmarks shown as reference).\n\
+      \nBusiness logic lives here. Never raises HTTPException — only domain\nexceptions\
+      \ from core.exceptions. Owns transaction boundaries (commit/refresh).\n\"\"\"\
+      \n\nimport uuid\nfrom typing import Sequence\n\nfrom backend.{module}.models\
+      \ import {Entity}\nfrom backend.{module}.repository import {Entity}Repository\n\
+      from backend.{module}.schemas import {Entity}Create, {Entity}Update\nfrom backend.core.exceptions\
+      \ import EntityNotFound\n\n\nclass BookmarkService:\n    def __init__(self,\
+      \ repo: BookmarkRepository) -> None:\n        self.repo = repo\n\n    # ---\
+      \ reads ---\n\n    def get(self, bookmark_id: uuid.UUID) -> Bookmark | None:\n\
+      \        return self.repo.get(bookmark_id)\n\n    def get_or_raise(self, bookmark_id:\
+      \ uuid.UUID) -> Bookmark:\n        bookmark = self.repo.get(bookmark_id)\n \
+      \       if bookmark is None:\n            raise EntityNotFound(\n          \
+      \      f\"Bookmark {bookmark_id} not found\",\n                context={\"entity\"\
+      : \"Bookmark\", \"id\": str(bookmark_id)},\n            )\n        return bookmark\n\
+      \n    def list_paginated(\n        self, offset: int = 0, limit: int = 20\n\
+      \    ) -> tuple[Sequence[Bookmark], int]:\n        \"\"\"Return (items, total)\
+      \ for paginated list endpoints.\"\"\"\n        items = self.repo.list_paginated(offset=offset,\
+      \ limit=limit)\n        total = self.repo.count()\n        return items, total\n\
+      \n    # --- writes ---\n\n    def create(self, data: BookmarkCreate) -> Bookmark:\n\
+      \        bookmark = Bookmark(**data.model_dump())\n        self.repo.add(bookmark)\n\
+      \        self.repo.commit()\n        self.repo.refresh(bookmark)\n        return\
+      \ bookmark\n\n    def update(self, bookmark_id: uuid.UUID, data: BookmarkUpdate)\
+      \ -> Bookmark:\n        bookmark = self.get_or_raise(bookmark_id)\n        fields\
+      \ = data.model_dump(exclude_unset=True)\n        self.repo.partial_update(bookmark,\
+      \ **fields)\n        self.repo.commit()\n        self.repo.refresh(bookmark)\n\
+      \        return bookmark\n\n    def delete(self, bookmark_id: uuid.UUID) ->\
+      \ None:\n        bookmark = self.get_or_raise(bookmark_id)\n        self.repo.delete(bookmark)\n\
+      \        self.repo.commit()\n"
+    example_deps: "\"\"\"Dependency factories for a module (bookmarks shown as reference).\n\
+      \nChain: get_db -> get_{entity}_repo -> get_{entity}_service\n\"\"\"\n\nfrom\
+      \ fastapi import Depends\nfrom sqlalchemy.orm import Session\n\nfrom backend.bookmarks.repository\
+      \ import BookmarkRepository\nfrom backend.bookmarks.services import BookmarkService\n\
+      from backend.database import get_db\n\n\ndef get_bookmark_repo(db: Session =\
+      \ Depends(get_db)) -> BookmarkRepository:\n    return BookmarkRepository(db)\n\
+      \n\ndef get_bookmark_service(\n    repo: BookmarkRepository = Depends(get_bookmark_repo),\n\
+      ) -> BookmarkService:\n    return BookmarkService(repo)\n"
 dependencies:
 - FastAPI
 - SQLAlchemy
@@ -41,9 +78,9 @@ lifecycle:
   extracted_by: jason-agent
   draft_reviewed_at: null
   draft_reviewer: null
-  dry_run_passed_at: null
-  dry_run_project: null
-  pilot_started_at: null
+  dry_run_passed_at: '2026-04-06'
+  dry_run_project: pattern-sandbox
+  pilot_started_at: '2026-04-06'
   pilot_uses: []
   consecutive_successes: 0
   validated_at: null

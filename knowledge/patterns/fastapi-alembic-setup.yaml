@@ -14,6 +14,7 @@ implementation:
   - alembic.ini
   - alembic/env.py
   - alembic/versions/
+  - alembic/script.py.mako
   key_decisions:
   - Import ALL models in env.py inside try/except — ensures Base.metadata is fully
     populated
@@ -26,6 +27,45 @@ implementation:
   - Never duplicate DB URL in alembic.ini — read from settings
   - Test downgrade paths — they're easy to get wrong
   - For enum type changes, handle DuplicateObject exceptions gracefully
+  reference_code:
+    env_py: "\"\"\"Alembic env.py — migration environment configuration.\n\nReads\
+      \ DB URL from pydantic-settings (single source of truth).\nImports all models\
+      \ so Base.metadata is fully populated for autogenerate.\nUses NullPool for migration\
+      \ connections.\n\"\"\"\n\nfrom logging.config import fileConfig\n\nfrom alembic\
+      \ import context\nfrom sqlalchemy import engine_from_config, pool\n\nfrom backend.core.config\
+      \ import settings\nfrom backend.database import Base\n\n# --- Import ALL models\
+      \ here so autogenerate detects them ---\n# If autogenerate misses a model, it\
+      \ wasn't imported here.\ntry:\n    from backend.bookmarks.models import Bookmark\
+      \  # noqa: F401\nexcept ImportError:\n    pass\n# Add future model imports here\
+      \ inside try/except blocks.\n\n# Alembic Config object\nconfig = context.config\n\
+      \n# Set the DB URL from settings (never duplicate in alembic.ini)\nconfig.set_main_option(\"\
+      sqlalchemy.url\", settings.DATABASE_URL)\n\n# Logging setup\nif config.config_file_name\
+      \ is not None:\n    fileConfig(config.config_file_name)\n\n# Target metadata\
+      \ for autogenerate\ntarget_metadata = Base.metadata\n\n\ndef run_migrations_offline()\
+      \ -> None:\n    \"\"\"Run migrations in 'offline' mode.\n\n    Generates SQL\
+      \ script without requiring a live database connection.\n    \"\"\"\n    url\
+      \ = config.get_main_option(\"sqlalchemy.url\")\n    context.configure(\n   \
+      \     url=url,\n        target_metadata=target_metadata,\n        literal_binds=True,\n\
+      \        dialect_opts={\"paramstyle\": \"named\"},\n    )\n\n    with context.begin_transaction():\n\
+      \        context.run_migrations()\n\n\ndef run_migrations_online() -> None:\n\
+      \    \"\"\"Run migrations in 'online' mode.\n\n    Creates an engine and associates\
+      \ a connection with the context.\n    Uses NullPool to avoid connection leaks\
+      \ during migrations.\n    \"\"\"\n    connectable = engine_from_config(\n  \
+      \      config.get_section(config.config_ini_section, {}),\n        prefix=\"\
+      sqlalchemy.\",\n        poolclass=pool.NullPool,\n    )\n\n    with connectable.connect()\
+      \ as connection:\n        context.configure(connection=connection, target_metadata=target_metadata)\n\
+      \n        with context.begin_transaction():\n            context.run_migrations()\n\
+      \n\nif context.is_offline_mode():\n    run_migrations_offline()\nelse:\n   \
+      \ run_migrations_online()\n"
+    script_py_mako: "\"\"\"${message}\n\nRevision ID: ${up_revision}\nRevises: ${down_revision\
+      \ | comma,n}\nCreate Date: ${create_date}\n\n\"\"\"\nfrom typing import Sequence,\
+      \ Union\n\nfrom alembic import op\nimport sqlalchemy as sa\n${imports if imports\
+      \ else \"\"}\n\n# revision identifiers, used by Alembic.\nrevision: str = ${repr(up_revision)}\n\
+      down_revision: Union[str, None] = ${repr(down_revision)}\nbranch_labels: Union[str,\
+      \ Sequence[str], None] = ${repr(branch_labels)}\ndepends_on: Union[str, Sequence[str],\
+      \ None] = ${repr(depends_on)}\n\n\ndef upgrade() -> None:\n    ${upgrades if\
+      \ upgrades else \"pass\"}\n\n\ndef downgrade() -> None:\n    ${downgrades if\
+      \ downgrades else \"pass\"}\n"
 dependencies:
 - alembic
 - SQLAlchemy

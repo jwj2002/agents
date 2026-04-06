@@ -3,8 +3,8 @@ category: testing
 name: FastAPI test fixtures with transaction rollback
 status: draft
 tier: primary
-description: Test infrastructure with session-per-test rollback, factory fixtures, mock
-  auth, and TestClient
+description: Test infrastructure with session-per-test rollback, factory fixtures,
+  mock auth, and TestClient
 when_to_use: Any FastAPI project with a database
 when_not_to_use: Unit tests that don't touch the database
 implementation:
@@ -18,14 +18,44 @@ implementation:
     rollback
   - Transaction rollback per test — each test gets a clean slate without table recreation
   - TestClient fixture overrides get_db dependency
-  - mock_current_user fixture creates full user setup (User + Profile + Account + Member)
-    and overrides get_current_user
+  - mock_current_user fixture creates full user setup (User + Profile + Account +
+    Member) and overrides get_current_user
   - 'Factory fixtures return closures for composable test data: user_factory(), account_factory()'
   - Reduce bcrypt rounds in tests (4 instead of 12) for speed
   gotchas:
   - SQLite won't catch PostgreSQL-specific bugs (UUID, Enum, JSON, partial indexes)
   - Always use session-scoped engine but function-scoped sessions for isolation
   - mock_current_user avoids JWT overhead — use auth_client for auth-specific tests
+  - Always call Base.metadata.create_all(engine) in the engine fixture
+  - Always call engine.dispose() in teardown
+  - mock_current_user and bcrypt rounds reduction are conditional — only needed if
+    auth is present
+  reference_code:
+    conftest_py: "\"\"\"Test fixtures with transaction rollback isolation.\n\nEngine\
+      \ fixture (session-scoped) creates tables once.\ndb_session fixture (function-scoped)\
+      \ wraps each test in a rolled-back transaction.\nclient fixture overrides get_db\
+      \ to use the test session.\n\"\"\"\n\nimport pytest\nfrom fastapi.testclient\
+      \ import TestClient\nfrom sqlalchemy import create_engine\nfrom sqlalchemy.orm\
+      \ import sessionmaker\n\nfrom backend.database import Base, get_db\nfrom backend.main\
+      \ import app\n\n# --- Optional: only needed if auth is present ---\n# from backend.{module}.repository\
+      \ import {Entity}Repository\n\n\n@pytest.fixture(scope=\"session\")\ndef engine():\n\
+      \    \"\"\"SQLite in-memory engine, session-scoped.\"\"\"\n    eng = create_engine(\n\
+      \        \"sqlite://\", echo=False, connect_args={\"check_same_thread\": False}\n\
+      \    )\n    Base.metadata.create_all(eng)\n    yield eng\n    eng.dispose()\n\
+      \n\n@pytest.fixture(scope=\"function\")\ndef db_session(engine):\n    \"\"\"\
+      Function-scoped session with transaction rollback for test isolation.\"\"\"\n\
+      \    connection = engine.connect()\n    transaction = connection.begin()\n \
+      \   Session = sessionmaker(bind=connection)\n    session = Session()\n\n   \
+      \ yield session\n\n    session.close()\n    transaction.rollback()\n    connection.close()\n\
+      \n\n@pytest.fixture\ndef client(db_session):\n    \"\"\"TestClient with get_db\
+      \ overridden to use the test session.\"\"\"\n\n    def _override_get_db():\n\
+      \        yield db_session\n\n    app.dependency_overrides[get_db] = _override_get_db\n\
+      \    with TestClient(app) as c:\n        yield c\n    app.dependency_overrides.clear()\n\
+      \n\n# --- Optional: only needed if auth is present ---\n# @pytest.fixture\n\
+      # def mock_current_user(db_session):\n#     \"\"\"Override get_current_user\
+      \ to skip JWT validation in tests.\"\"\"\n#     ...\n\n# --- Optional: module-specific\
+      \ repo fixture ---\n# @pytest.fixture\n# def bookmark_repo(db_session):\n# \
+      \    \"\"\"Repository backed by the test session.\"\"\"\n#     return BookmarkRepository(db_session)\n"
 dependencies:
 - pytest
 - httpx

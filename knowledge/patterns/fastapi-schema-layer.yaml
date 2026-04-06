@@ -1,7 +1,7 @@
 id: PAT-009
 category: schema
 name: Pydantic schema layer with Create/Update/Read pattern
-status: draft
+status: pilot
 tier: primary
 description: Structured schema design with base schemas, CRUD variants, paginated
   responses, and error responses
@@ -27,8 +27,39 @@ implementation:
   - Always use exclude_unset=True with model_dump() for Update schemas — None means
     'set to null', missing means 'don't change'
   - Don't duplicate field lists between Create and Read — use composition or inheritance
-  - Add Field() constraints that mirror SQLAlchemy column constraints (max_length, ge,
-    le)
+  - Add Field() constraints that mirror SQLAlchemy column constraints (max_length,
+    ge, le)
+  reference_code:
+    core_schemas_py: "\"\"\"Core schema primitives.\n\nBaseSchema, PaginationParams\
+      \ (injectable dependency), PaginatedResponse[T],\nand ErrorResponse.\n\"\"\"\
+      \n\nimport uuid\nfrom datetime import datetime\nfrom typing import Any, Generic,\
+      \ TypeVar\n\nfrom pydantic import BaseModel, ConfigDict, Field\n\nT = TypeVar(\"\
+      T\")\n\n\nclass BaseSchema(BaseModel):\n    \"\"\"All Read schemas inherit this\
+      \ — enables ORM -> Pydantic via from_attributes.\"\"\"\n\n    model_config =\
+      \ ConfigDict(from_attributes=True)\n\n\nclass PaginationParams:\n    \"\"\"\
+      Injectable FastAPI dependency for offset/limit pagination.\n\n    Usage in router:\
+      \ pagination: PaginationParams = Depends()\n    FastAPI reads __init__ params\
+      \ as query parameters.\n    \"\"\"\n\n    def __init__(self, offset: int = 0,\
+      \ limit: int = 20) -> None:\n        self.offset = offset\n        self.limit\
+      \ = limit\n\n\nclass PaginatedResponse(BaseModel, Generic[T]):\n    \"\"\"Generic\
+      \ paginated wrapper returned by list endpoints.\"\"\"\n\n    items: list[T]\n\
+      \    total: int\n    offset: int\n    limit: int\n\n\nclass ErrorResponse(BaseModel):\n\
+      \    \"\"\"Matches the JSON shape produced by error_handlers.\"\"\"\n\n    code:\
+      \ str\n    message: str\n    context: dict[str, Any] = Field(default_factory=dict)\n"
+    example_schemas: "\"\"\"Example CRUD schemas for a module (bookmarks shown as\
+      \ reference).\n\nEntityCreate  — required fields only, no id/timestamps.\nEntityUpdate\
+      \  — all fields Optional (PATCH semantics, use exclude_unset=True).\nEntityRead\
+      \    — extends BaseSchema, adds id + timestamps.\n\"\"\"\n\nimport uuid\nfrom\
+      \ datetime import datetime\nfrom typing import Optional\n\nfrom pydantic import\
+      \ BaseModel, Field\n\nfrom backend.core.schemas import BaseSchema\n\n\nclass\
+      \ BookmarkCreate(BaseModel):\n    title: str = Field(..., max_length=255)\n\
+      \    url: str = Field(..., max_length=2048)\n    description: str | None = None\n\
+      \    is_favorite: bool = False\n\n\nclass BookmarkUpdate(BaseModel):\n    title:\
+      \ Optional[str] = Field(None, max_length=255)\n    url: Optional[str] = Field(None,\
+      \ max_length=2048)\n    description: Optional[str] = None\n    is_favorite:\
+      \ Optional[bool] = None\n\n\nclass BookmarkRead(BaseSchema):\n    id: uuid.UUID\n\
+      \    title: str\n    url: str\n    description: str | None\n    is_favorite:\
+      \ bool\n    created_at: datetime\n    updated_at: datetime\n"
 dependencies:
 - pydantic
 - email-validator
@@ -42,9 +73,9 @@ lifecycle:
   extracted_by: jason-agent
   draft_reviewed_at: null
   draft_reviewer: null
-  dry_run_passed_at: null
-  dry_run_project: null
-  pilot_started_at: null
+  dry_run_passed_at: '2026-04-06'
+  dry_run_project: pattern-sandbox
+  pilot_started_at: '2026-04-06'
   pilot_uses: []
   consecutive_successes: 0
   validated_at: null

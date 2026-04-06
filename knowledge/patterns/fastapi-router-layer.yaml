@@ -1,7 +1,7 @@
 id: PAT-012
 category: router
 name: FastAPI thin router pattern
-status: draft
+status: pilot
 tier: primary
 description: Thin routers that parse requests, delegate to services, and return responses
   with proper HTTP semantics
@@ -25,8 +25,58 @@ implementation:
   gotchas:
   - Never raise HTTPException for business errors — let domain exceptions bubble to
     global handlers
-  - "Always pass tags as a list: tags=['items'] not tags='items'"
+  - 'Always pass tags as a list: tags=[''items''] not tags=''items'''
   - Keep router methods under 15 lines — if longer, logic belongs in the service
+  reference_code:
+    example_router: "\"\"\"Example thin router (bookmarks shown as reference).\n\n\
+      5 CRUD endpoints. No business logic — parse input, call service, return response.\n\
+      Domain exceptions bubble to global handlers.\n\"\"\"\n\nimport uuid\n\nfrom\
+      \ fastapi import APIRouter, Depends, status\n\nfrom backend.bookmarks.deps import\
+      \ get_bookmark_service\nfrom backend.bookmarks.schemas import BookmarkCreate,\
+      \ BookmarkRead, BookmarkUpdate\nfrom backend.bookmarks.services import BookmarkService\n\
+      from backend.core.schemas import PaginatedResponse, PaginationParams\n\nrouter\
+      \ = APIRouter(prefix=\"/bookmarks\", tags=[\"bookmarks\"])\n\n\n@router.get(\"\
+      \", response_model=PaginatedResponse[BookmarkRead])\ndef list_bookmarks(\n \
+      \   pagination: PaginationParams = Depends(),\n    service: BookmarkService\
+      \ = Depends(get_bookmark_service),\n):\n    items, total = service.list_paginated(\n\
+      \        offset=pagination.offset, limit=pagination.limit\n    )\n    return\
+      \ PaginatedResponse(\n        items=items, total=total, offset=pagination.offset,\
+      \ limit=pagination.limit\n    )\n\n\n@router.get(\"/{bookmark_id}\", response_model=BookmarkRead)\n\
+      def get_bookmark(\n    bookmark_id: uuid.UUID,\n    service: BookmarkService\
+      \ = Depends(get_bookmark_service),\n):\n    return service.get_or_raise(bookmark_id)\n\
+      \n\n@router.post(\"\", response_model=BookmarkRead, status_code=status.HTTP_201_CREATED)\n\
+      def create_bookmark(\n    data: BookmarkCreate,\n    service: BookmarkService\
+      \ = Depends(get_bookmark_service),\n):\n    return service.create(data)\n\n\n\
+      @router.patch(\"/{bookmark_id}\", response_model=BookmarkRead)\ndef update_bookmark(\n\
+      \    bookmark_id: uuid.UUID,\n    data: BookmarkUpdate,\n    service: BookmarkService\
+      \ = Depends(get_bookmark_service),\n):\n    return service.update(bookmark_id,\
+      \ data)\n\n\n@router.delete(\"/{bookmark_id}\", status_code=status.HTTP_204_NO_CONTENT)\n\
+      def delete_bookmark(\n    bookmark_id: uuid.UUID,\n    service: BookmarkService\
+      \ = Depends(get_bookmark_service),\n):\n    service.delete(bookmark_id)\n"
+    main_py: '"""FastAPI application entry point.
+
+
+      Registers error handlers (PAT-013) and includes routers (PAT-012).
+
+      """
+
+
+      from fastapi import FastAPI
+
+
+      from backend.core.error_handlers import register_error_handlers
+
+      from backend.main_router import api_router
+
+
+      app = FastAPI(title="My App")
+
+
+      register_error_handlers(app)
+
+      app.include_router(api_router)
+
+      '
 dependencies:
 - FastAPI
 tests:
@@ -40,9 +90,9 @@ lifecycle:
   extracted_by: jason-agent
   draft_reviewed_at: null
   draft_reviewer: null
-  dry_run_passed_at: null
-  dry_run_project: null
-  pilot_started_at: null
+  dry_run_passed_at: '2026-04-06'
+  dry_run_project: pattern-sandbox
+  pilot_started_at: '2026-04-06'
   pilot_uses: []
   consecutive_successes: 0
   validated_at: null
