@@ -80,9 +80,18 @@ implementation:
           url: Mapped[str] = mapped_column(String(2048), nullable=False)
           description: Mapped[str | None] = mapped_column(Text, nullable=True)
           is_favorite: Mapped[bool] = mapped_column(Boolean, default=False)
+  dialect_config:
+    note: 'The GUID TypeDecorator is the dialect abstraction layer for this pattern. Models use GUID() everywhere — it resolves to the correct storage at runtime.'
+    sqlite:
+      uuid_storage: 'CHAR(32) hex-encoded string'
+      timestamp_onupdate: 'Handled by SQLAlchemy Python-side (not database trigger)'
+    postgresql:
+      uuid_storage: 'Native UUID column type'
+      timestamp_onupdate: 'Handled by SQLAlchemy Python-side (onupdate=func.now())'
   gotchas:
   - 'Never use `from sqlalchemy.dialects.postgresql import UUID` directly in models — use the GUID TypeDecorator instead'
-  - The GUID type imports PG_UUID internally but only uses it when dialect is postgresql
+  - 'The GUID type imports PG_UUID internally but only activates it when dialect.name == "postgresql"'
+  - 'Models are 100% dialect-agnostic — they use GUID() and uuid_pk(), never raw dialect types'
   - Use back_populates consistently, never backref
   - Document lazy loading strategy per relationship — don't mix selectin and select
     without reason
