@@ -1,0 +1,55 @@
+id: PAT-015
+category: migrations
+name: Alembic migration setup for FastAPI
+status: draft
+tier: primary
+description: Alembic configuration with model auto-imports, settings-driven DB URL,
+  and NullPool for migrations
+when_to_use: Any FastAPI project with SQLAlchemy models
+when_not_to_use: Projects using Base.metadata.create_all() only (no migrations)
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+  - alembic.ini
+  - alembic/env.py
+  - alembic/versions/
+  key_decisions:
+  - Import ALL models in env.py inside try/except — ensures Base.metadata is fully
+    populated
+  - Read DB URL from pydantic-settings, not from alembic.ini — single source of truth
+  - Use NullPool for migration connections
+  - Downgrade function in every migration — always reversible
+  - 'Naming convention: Alembic default hash + descriptive slug'
+  gotchas:
+  - If autogenerate misses a model, it wasn't imported in env.py
+  - Never duplicate DB URL in alembic.ini — read from settings
+  - Test downgrade paths — they're easy to get wrong
+  - For enum type changes, handle DuplicateObject exceptions gracefully
+dependencies:
+- alembic
+- SQLAlchemy
+tests:
+- test_upgrade_head
+- test_downgrade_base
+- test_autogenerate_detects_new_model
+lifecycle:
+  extracted_from: mymoney-dev + fastapi-architect-agent
+  extracted_at: '2026-04-06'
+  extracted_by: jason-agent
+  draft_reviewed_at: null
+  draft_reviewer: null
+  dry_run_passed_at: null
+  dry_run_project: null
+  pilot_started_at: null
+  pilot_uses: []
+  consecutive_successes: 0
+  validated_at: null
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+related_decisions: []
+consecutive_successes: 0
+validated_count: 0
+created_at: '2026-04-06'
+updated_at: '2026-04-06'

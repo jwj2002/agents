@@ -1,0 +1,55 @@
+id: PAT-007
+category: database
+name: FastAPI database layer with SQLAlchemy
+status: draft
+tier: primary
+description: Synchronous SQLAlchemy setup with session-per-request, connection pooling,
+  and TimestampMixin
+when_to_use: Any FastAPI project with a relational database
+when_not_to_use: Serverless functions, projects needing async (use asyncpg pattern
+  instead)
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+  - database.py — engine, SessionLocal, get_db, Base, TimestampMixin
+  - core/config.py — database URL from pydantic-settings
+  key_decisions:
+  - Sync SQLAlchemy (not async) — simpler, sufficient for most apps
+  - pool_pre_ping=True for stale connection detection
+  - 'Configure pool_size=5, max_overflow=10, pool_recycle=3600 for production'
+  - get_db() yields session with explicit rollback on exception in finally block
+  - TimestampMixin with server_default=func.now() and onupdate=func.now()
+  - No Active Record pattern (no CRUDMixin on Base) — repositories handle all DB ops
+  gotchas:
+  - Always configure pool_size/max_overflow for production — defaults are too low
+  - Use func.now() not datetime.utcnow() for timestamps — lets the DB be the clock
+  - Never import engine at module level in tests — use dependency override
+dependencies:
+- SQLAlchemy
+- psycopg2-binary
+- pydantic-settings
+tests:
+- test_get_db_yields_session
+- test_get_db_closes_on_exception
+- test_timestamp_mixin_sets_created_at
+lifecycle:
+  extracted_from: mymoney-dev + fastapi-architect-agent
+  extracted_at: '2026-04-06'
+  extracted_by: jason-agent
+  draft_reviewed_at: null
+  draft_reviewer: null
+  dry_run_passed_at: null
+  dry_run_project: null
+  pilot_started_at: null
+  pilot_uses: []
+  consecutive_successes: 0
+  validated_at: null
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+related_decisions: []
+consecutive_successes: 0
+validated_count: 0
+created_at: '2026-04-06'
+updated_at: '2026-04-06'

@@ -1,0 +1,59 @@
+id: PAT-010
+category: repository
+name: Generic repository pattern with BaseRepository[T]
+status: draft
+tier: primary
+description: Type-safe generic repository providing CRUD, pagination with ordering,
+  filtered queries, and bulk operations
+when_to_use: Any FastAPI project with SQLAlchemy models
+when_not_to_use: Projects using raw SQL (use asyncpg pattern), single-table simple
+  apps
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+  - core/repository.py — BaseRepository[T]
+  - '{module}/repository.py — concrete repos'
+  key_decisions:
+  - Generic[T] with model class attribute — concrete repos inherit 15+ methods for
+    free
+  - 'Constructor takes db: Session — injected per-request via FastAPI Depends'
+  - Repositories NEVER commit — services control transaction boundaries
+  - list_paginated(offset, limit, order_by) — always requires explicit ordering
+  - partial_update(obj, skip_none=True, **fields) — PATCH semantics
+  - exists() uses SQL EXISTS subquery (efficient, no row fetch)
+  - count() with optional filters, skips None values
+  - get_with_filter(id, **filters) for tenant-scoped lookups
+  gotchas:
+  - Always pass order_by to list_paginated — without it, results are nondeterministic
+  - Never commit in a repository — that's the service's job
+  - partial_update doesn't need db.add() if object was fetched in same session
+  - For bulk deletes, use a single DELETE WHERE statement, not iterating delete()
+dependencies:
+- SQLAlchemy
+tests:
+- test_get_by_id
+- test_list_paginated_with_ordering
+- test_partial_update_skip_none
+- test_exists_returns_bool
+- test_count_with_filters
+lifecycle:
+  extracted_from: mymoney-dev + fastapi-architect-agent
+  extracted_at: '2026-04-06'
+  extracted_by: jason-agent
+  draft_reviewed_at: null
+  draft_reviewer: null
+  dry_run_passed_at: null
+  dry_run_project: null
+  pilot_started_at: null
+  pilot_uses: []
+  consecutive_successes: 0
+  validated_at: null
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+related_decisions: []
+consecutive_successes: 0
+validated_count: 0
+created_at: '2026-04-06'
+updated_at: '2026-04-06'

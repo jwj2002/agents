@@ -1,0 +1,57 @@
+id: PAT-013
+category: error-handling
+name: FastAPI structured error handling with domain exceptions
+status: draft
+tier: primary
+description: Exception hierarchy with structured JSON responses, global handlers, and
+  consistent error shape
+when_to_use: Any FastAPI project
+when_not_to_use: None — always use this
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+  - core/exceptions.py — AppError hierarchy
+  - core/error_handlers.py — global handlers
+  - main.py — registration
+  key_decisions:
+  - AppError base with message + context dict
+  - '6 subclasses: EntityNotFound(404), ConflictError(409), BusinessValidationError(422),
+    PermissionDenied(403), AuthenticationError(401), ExternalServiceError(502)'
+  - 'Every handler returns same shape: {error: {code, message, context}}'
+  - Include RequestValidationError handler for consistent Pydantic error format
+  - Catch-all handler for unexpected exceptions (500) with logging
+  - Module-specific exceptions MUST inherit from AppError
+  gotchas:
+  - Never create exceptions that don't inherit AppError — they'll bypass handlers and
+    return raw 500s
+  - Always add logging in the 500 catch-all handler
+  - BusinessValidationError (422) conflicts with FastAPI's default 422 — handle RequestValidationError
+    separately
+dependencies:
+- FastAPI
+tests:
+- test_entity_not_found_returns_404
+- test_error_shape_consistent
+- test_request_validation_error_handled
+- test_unexpected_error_returns_500
+lifecycle:
+  extracted_from: mymoney-dev + fastapi-architect-agent
+  extracted_at: '2026-04-06'
+  extracted_by: jason-agent
+  draft_reviewed_at: null
+  draft_reviewer: null
+  dry_run_passed_at: null
+  dry_run_project: null
+  pilot_started_at: null
+  pilot_uses: []
+  consecutive_successes: 0
+  validated_at: null
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+related_decisions: []
+consecutive_successes: 0
+validated_count: 0
+created_at: '2026-04-06'
+updated_at: '2026-04-06'

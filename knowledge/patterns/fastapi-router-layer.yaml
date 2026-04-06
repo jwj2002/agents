@@ -1,0 +1,56 @@
+id: PAT-012
+category: router
+name: FastAPI thin router pattern
+status: draft
+tier: primary
+description: Thin routers that parse requests, delegate to services, and return responses
+  with proper HTTP semantics
+when_to_use: Any FastAPI REST API
+when_not_to_use: GraphQL APIs, WebSocket-only endpoints
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+  - '{module}/router.py'
+  - main_router.py — registration
+  key_decisions:
+  - '5 standard endpoints per resource: GET list, GET single, POST create, PATCH update,
+    DELETE'
+  - POST returns 201, DELETE returns 204, PATCH returns 200
+  - PATCH not PUT — partial updates only, no full replacement
+  - Routers are thin — parse input, call service, return response. No business logic.
+  - Use service.get_or_raise() — never check None in the router
+  - Wire PaginationParams to list endpoints via Depends
+  - response_model on every endpoint
+  gotchas:
+  - Never raise HTTPException for business errors — let domain exceptions bubble to
+    global handlers
+  - "Always pass tags as a list: tags=['items'] not tags='items'"
+  - Keep router methods under 15 lines — if longer, logic belongs in the service
+dependencies:
+- FastAPI
+tests:
+- test_list_returns_paginated
+- test_create_returns_201
+- test_delete_returns_204
+- test_get_nonexistent_returns_404
+lifecycle:
+  extracted_from: mymoney-dev + fastapi-architect-agent
+  extracted_at: '2026-04-06'
+  extracted_by: jason-agent
+  draft_reviewed_at: null
+  draft_reviewer: null
+  dry_run_passed_at: null
+  dry_run_project: null
+  pilot_started_at: null
+  pilot_uses: []
+  consecutive_successes: 0
+  validated_at: null
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+related_decisions: []
+consecutive_successes: 0
+validated_count: 0
+created_at: '2026-04-06'
+updated_at: '2026-04-06'

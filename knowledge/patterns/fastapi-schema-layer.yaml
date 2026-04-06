@@ -1,0 +1,58 @@
+id: PAT-009
+category: schema
+name: Pydantic schema layer with Create/Update/Read pattern
+status: draft
+tier: primary
+description: Structured schema design with base schemas, CRUD variants, paginated
+  responses, and error responses
+when_to_use: Any FastAPI project with CRUD endpoints
+when_not_to_use: Simple single-endpoint APIs
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+  - core/schemas.py — BaseSchema, PaginationParams, PaginatedResponse[T], ErrorResponse
+  - '{module}/schemas.py — EntityCreate, EntityUpdate, EntityRead'
+  key_decisions:
+  - BaseSchema with model_config = ConfigDict(from_attributes=True) — all Read schemas
+    inherit it
+  - 'Create schema: required fields only, no id/timestamps'
+  - 'Update schema: all fields Optional (PATCH semantics)'
+  - 'Read schema: extends BaseSchema, adds id, created_at, updated_at'
+  - PaginatedResponse[T] generic for all list endpoints — includes items, total, offset,
+    limit
+  - PaginationParams as injectable FastAPI dependency class
+  - ErrorResponse schema with code, message, context fields
+  gotchas:
+  - Always use exclude_unset=True with model_dump() for Update schemas — None means
+    'set to null', missing means 'don't change'
+  - Don't duplicate field lists between Create and Read — use composition or inheritance
+  - Add Field() constraints that mirror SQLAlchemy column constraints (max_length, ge,
+    le)
+dependencies:
+- pydantic
+- email-validator
+tests:
+- test_create_schema_validates
+- test_update_schema_all_optional
+- test_paginated_response_generic
+lifecycle:
+  extracted_from: mymoney-dev + fastapi-architect-agent
+  extracted_at: '2026-04-06'
+  extracted_by: jason-agent
+  draft_reviewed_at: null
+  draft_reviewer: null
+  dry_run_passed_at: null
+  dry_run_project: null
+  pilot_started_at: null
+  pilot_uses: []
+  consecutive_successes: 0
+  validated_at: null
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+related_decisions: []
+consecutive_successes: 0
+validated_count: 0
+created_at: '2026-04-06'
+updated_at: '2026-04-06'

@@ -1,0 +1,57 @@
+id: PAT-011
+category: service
+name: FastAPI service layer pattern
+status: draft
+tier: primary
+description: Business logic layer that receives repositories via injection, controls
+  transactions, raises domain exceptions
+when_to_use: Any FastAPI project beyond trivial CRUD
+when_not_to_use: Simple pass-through APIs with no business logic
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+  - '{module}/services.py'
+  - '{module}/deps.py — dependency factories'
+  key_decisions:
+  - Service receives repository via constructor injection (not creates its own)
+  - Services own transaction boundaries — call repo.commit() and repo.refresh()
+  - 'For multi-step operations: use repo.flush() for IDs, single commit() at end'
+  - Raise domain exceptions (EntityNotFound, BusinessValidationError), never HTTPException
+  - 'get_or_raise() pattern: fetch + raise EntityNotFound if None'
+  - 'Dependency factories in deps.py: get_repo(db=Depends(get_db)) -> get_service(repo=Depends(get_repo))'
+  gotchas:
+  - Never let services reach through to repo.db for raw queries — add a repo method
+    instead
+  - Never raise ValueError or HTTPException from services — always use domain exceptions
+  - For service-to-service calls, inject both services in the router and pass data
+    between them
+  - Use flush() not commit() when you need an ID mid-operation
+dependencies:
+- FastAPI
+- SQLAlchemy
+tests:
+- test_get_or_raise_found
+- test_get_or_raise_not_found
+- test_create_commits
+- test_multi_step_uses_flush
+lifecycle:
+  extracted_from: mymoney-dev + fastapi-architect-agent
+  extracted_at: '2026-04-06'
+  extracted_by: jason-agent
+  draft_reviewed_at: null
+  draft_reviewer: null
+  dry_run_passed_at: null
+  dry_run_project: null
+  pilot_started_at: null
+  pilot_uses: []
+  consecutive_successes: 0
+  validated_at: null
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+related_decisions: []
+consecutive_successes: 0
+validated_count: 0
+created_at: '2026-04-06'
+updated_at: '2026-04-06'

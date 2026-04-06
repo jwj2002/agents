@@ -1,0 +1,52 @@
+id: PAT-008
+category: database
+name: SQLAlchemy base model with UUID and timestamps
+status: draft
+tier: primary
+description: Base model class with UUID primary keys, timezone-aware timestamps, and
+  dialect-agnostic UUID type
+when_to_use: Any SQLAlchemy model in a FastAPI project
+when_not_to_use: Projects using integer auto-increment PKs
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+  - database.py — Base, TimestampMixin, uuid_pk helper
+  key_decisions:
+  - UUID primary keys for all models — safe for distributed systems
+  - 'Dialect-agnostic UUID: use TypeDecorator that works with both PostgreSQL and SQLite'
+  - TimestampMixin as a mixin class, not baked into Base
+  - No soft-delete at base level — add SoftDeleteMixin only where needed
+  - Use Mapped[T] and mapped_column() (SQLAlchemy 2.0 syntax)
+  - Use TYPE_CHECKING for forward references to avoid circular imports
+  gotchas:
+  - Never use from sqlalchemy.dialects.postgresql import UUID — breaks SQLite tests
+  - Use back_populates consistently, never backref
+  - Document lazy loading strategy per relationship — don't mix selectin and select
+    without reason
+dependencies:
+- SQLAlchemy
+tests:
+- test_uuid_pk_generated
+- test_created_at_auto_set
+- test_updated_at_changes_on_update
+lifecycle:
+  extracted_from: mymoney-dev + fastapi-architect-agent
+  extracted_at: '2026-04-06'
+  extracted_by: jason-agent
+  draft_reviewed_at: null
+  draft_reviewer: null
+  dry_run_passed_at: null
+  dry_run_project: null
+  pilot_started_at: null
+  pilot_uses: []
+  consecutive_successes: 0
+  validated_at: null
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+related_decisions: []
+consecutive_successes: 0
+validated_count: 0
+created_at: '2026-04-06'
+updated_at: '2026-04-06'

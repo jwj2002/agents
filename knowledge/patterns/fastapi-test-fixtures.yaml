@@ -1,0 +1,56 @@
+id: PAT-014
+category: testing
+name: FastAPI test fixtures with transaction rollback
+status: draft
+tier: primary
+description: Test infrastructure with session-per-test rollback, factory fixtures, mock
+  auth, and TestClient
+when_to_use: Any FastAPI project with a database
+when_not_to_use: Unit tests that don't touch the database
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+  - tests/conftest.py — engine, db_session, client fixtures
+  - tests/fixtures/ — factory fixtures per domain
+  key_decisions:
+  - SQLite in-memory for speed, session-scoped engine, function-scoped session with
+    rollback
+  - Transaction rollback per test — each test gets a clean slate without table recreation
+  - TestClient fixture overrides get_db dependency
+  - mock_current_user fixture creates full user setup (User + Profile + Account + Member)
+    and overrides get_current_user
+  - 'Factory fixtures return closures for composable test data: user_factory(), account_factory()'
+  - Reduce bcrypt rounds in tests (4 instead of 12) for speed
+  gotchas:
+  - SQLite won't catch PostgreSQL-specific bugs (UUID, Enum, JSON, partial indexes)
+  - Always use session-scoped engine but function-scoped sessions for isolation
+  - mock_current_user avoids JWT overhead — use auth_client for auth-specific tests
+dependencies:
+- pytest
+- httpx
+- SQLAlchemy
+tests:
+- test_session_rollback_isolates_tests
+- test_client_overrides_db
+- test_factory_creates_valid_data
+lifecycle:
+  extracted_from: mymoney-dev
+  extracted_at: '2026-04-06'
+  extracted_by: jason-agent
+  draft_reviewed_at: null
+  draft_reviewer: null
+  dry_run_passed_at: null
+  dry_run_project: null
+  pilot_started_at: null
+  pilot_uses: []
+  consecutive_successes: 0
+  validated_at: null
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+related_decisions: []
+consecutive_successes: 0
+validated_count: 0
+created_at: '2026-04-06'
+updated_at: '2026-04-06'
