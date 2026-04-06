@@ -99,6 +99,16 @@
         "-y",
         "@upstash/context7-mcp@latest"
       ]
+    },
+    "knowledge": {
+      "command": "npx",
+      "args": [
+        "tsx",
+        "/Users/jasonjob/agents/knowledge-mcp/index.ts"
+      ],
+      "env": {
+        "KNOWLEDGE_DB_PATH": "/Users/jasonjob/agents/knowledge/knowledge.db"
+      }
     }
   }
 }
