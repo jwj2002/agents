@@ -24,9 +24,20 @@ def main():
     # Get username (pink)
     username = f"{PINK}{getpass.getuser()}{RESET}"
 
-    # Agent name (orange) — from MCP env or agent config
+    # Agent name (orange) — from .mcp.json in cwd, agent config, or env
     import os
     agent_name = input_data.get("agent", {}).get("name") or os.environ.get("AGENT_NAME") or ""
+    if not agent_name:
+        try:
+            mcp_path = os.path.join(os.getcwd(), ".mcp.json")
+            with open(mcp_path) as f:
+                mcp = json.load(f)
+            for srv in mcp.get("mcpServers", {}).values():
+                agent_name = srv.get("env", {}).get("AGENT_NAME", "")
+                if agent_name:
+                    break
+        except Exception:
+            pass
     agent_display = f" | {ORANGE}{agent_name}{RESET}" if agent_name else ""
 
     # Get current date in MM/DD format (orange)
