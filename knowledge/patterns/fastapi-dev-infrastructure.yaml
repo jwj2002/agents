@@ -1,255 +1,163 @@
 id: PAT-018
 category: infrastructure
-name: "FastAPI dev infrastructure (CORS, health, Docker)"
-status: draft
+name: FastAPI dev infrastructure (CORS, health, Docker)
+status: pilot
 tier: primary
-description: >
-  Development infrastructure for a FastAPI backend serving a React frontend.
-  Covers CORS middleware, health endpoints, Dockerfile, docker-compose, and
-  environment configuration. These files are scaffolded once at project start
-  and rarely change — getting them right upfront avoids hours of debugging
-  cross-origin errors, broken containers, and missing env vars.
-when_to_use: >
-  Any new FastAPI project that serves a React (or other SPA) frontend, or any
-  project that needs containerized local development with Postgres.
-when_not_to_use: >
-  Internal-only APIs with no browser clients (CORS not needed). Serverless
+description: 'Development infrastructure for a FastAPI backend serving a React frontend.
+  Covers CORS middleware, health endpoints, Dockerfile, docker-compose, and environment
+  configuration. These files are scaffolded once at project start and rarely change
+  — getting them right upfront avoids hours of debugging cross-origin errors, broken
+  containers, and missing env vars.
+
+  '
+when_to_use: 'Any new FastAPI project that serves a React (or other SPA) frontend,
+  or any project that needs containerized local development with Postgres.
+
+  '
+when_not_to_use: 'Internal-only APIs with no browser clients (CORS not needed). Serverless
   deployments where Docker is replaced by platform-specific packaging.
+
+  '
 implementation:
   language: python
   framework: FastAPI
   key_files:
-  - 'core/cors.py'
-  - 'core/config.py — CORS_ORIGINS setting'
-  - 'health/router.py — health endpoints (/health liveness, /health/ready readiness)'
-  - 'main.py — CORS middleware registration, router wiring'
-  - 'Dockerfile'
-  - 'docker-compose.yml'
-  - '.env.example'
+  - core/cors.py
+  - core/config.py — CORS_ORIGINS setting
+  - health/router.py — health endpoints (/health liveness, /health/ready readiness)
+  - main.py — CORS middleware registration, router wiring
+  - Dockerfile
+  - docker-compose.yml
+  - .env.example
   key_decisions:
   - Settings-driven CORS origins — never hardcode production URLs in code
-  - Dev uses allow_origin_regex for any localhost port; production uses explicit allow list
+  - Dev uses allow_origin_regex for any localhost port; production uses explicit allow
+    list
   - allow_credentials=True required for httpOnly cookie auth (refresh tokens)
-  - Health endpoint has no auth — load balancers and orchestrators need unauthenticated access
+  - Health endpoint has no auth — load balancers and orchestrators need unauthenticated
+    access
   - /health/ready checks DB connectivity; /health (liveness) does not
   - Multi-stage Docker build keeps image small (~150MB vs ~900MB)
   - Non-root USER in Dockerfile (E14 compliance)
   - docker-compose postgres uses healthcheck so backend waits for DB readiness
   gotchas:
-  - "CORS: allow_origins=['*'] with allow_credentials=True is REJECTED by browsers — you must list explicit origins"
-  - "CORS: forgetting http://127.0.0.1:PORT in addition to localhost:PORT causes intermittent failures on some OS/browser combos"
-  - "Docker: COPY requirements.txt before COPY . to leverage layer caching — pip install only reruns when deps change"
-  - "Docker: Always pin base image to a minor version (python:3.12-slim not python:3-slim) for reproducible builds"
-  - "docker-compose: Use 127.0.0.1:PORT:PORT not just PORT:PORT for postgres to avoid exposing DB on all interfaces"
-  - "docker-compose.yml should be at the repo root, with build context pointing to backend/ (context: ./backend)"
-  - ".env.example: Never put real secrets in this file — it is committed to git"
-  - "Health: /health/ready must use a short DB query timeout (2-3s) to avoid blocking the readiness probe"
+  - 'CORS: allow_origins=[''*''] with allow_credentials=True is REJECTED by browsers
+    — you must list explicit origins'
+  - 'CORS: forgetting http://127.0.0.1:PORT in addition to localhost:PORT causes intermittent
+    failures on some OS/browser combos'
+  - 'Docker: COPY requirements.txt before COPY . to leverage layer caching — pip install
+    only reruns when deps change'
+  - 'Docker: Always pin base image to a minor version (python:3.12-slim not python:3-slim)
+    for reproducible builds'
+  - 'docker-compose: Use 127.0.0.1:PORT:PORT not just PORT:PORT for postgres to avoid
+    exposing DB on all interfaces'
+  - 'docker-compose.yml should be at the repo root, with build context pointing to
+    backend/ (context: ./backend)'
+  - '.env.example: Never put real secrets in this file — it is committed to git'
+  - 'Health: /health/ready must use a short DB query timeout (2-3s) to avoid blocking
+    the readiness probe'
   reference_code:
-    cors_py: |
-      """CORS middleware — settings-driven origins with dev regex fallback.
+    cors_py: "\"\"\"CORS middleware — settings-driven origins with dev regex fallback.\n\
+      \nProduction: reads CORS_ORIGINS from env (comma-separated list).\nDevelopment:\
+      \ additionally allows any localhost/127.0.0.1 origin via regex.\n\"\"\"\n\n\
+      from __future__ import annotations\n\nfrom fastapi import FastAPI\nfrom fastapi.middleware.cors\
+      \ import CORSMiddleware\n\nfrom backend.core.config import settings\n\n\ndef\
+      \ add_cors_middleware(app: FastAPI) -> None:\n    origins = settings.CORS_ORIGINS\n\
+      \n    allow_origin_regex = None\n    if settings.ENVIRONMENT == \"dev\":\n \
+      \       # Allow any localhost/127.* origin in dev to avoid port mismatches\n\
+      \        # when switching between CRA (:3000) and Vite (:5173).\n        allow_origin_regex\
+      \ = r\"^https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?$\"\n\n    app.add_middleware(\n\
+      \        CORSMiddleware,\n        allow_origins=origins,\n        allow_origin_regex=allow_origin_regex,\n\
+      \        allow_credentials=True,\n        allow_methods=[\"GET\", \"POST\",\
+      \ \"PUT\", \"DELETE\", \"PATCH\", \"OPTIONS\"],\n        allow_headers=[\"Content-Type\"\
+      , \"Authorization\"],\n    )\n"
+    config_cors_fields: "# In core/config.py Settings class:\n\n# CORS\nCORS_ORIGINS:\
+      \ list[str] = Field(\n    default=[\"http://localhost:3000\", \"http://localhost:5173\"\
+      ]\n)\n\n# To override in production, set the env var as a JSON array:\n#   CORS_ORIGINS='[\"\
+      https://app.example.com\"]'\n#\n# Or use comma-separated with a validator:\n\
+      #   CORS_ORIGINS=https://app.example.com,https://admin.example.com\n"
+    health_endpoints: "\"\"\"Health endpoints — no auth required.\n\n/health     \
+      \   — liveness probe (always returns ok)\n/health/ready  — readiness probe (verifies\
+      \ DB connection)\n\"\"\"\n\nfrom fastapi import APIRouter, Depends\nfrom sqlalchemy\
+      \ import text\nfrom sqlalchemy.orm import Session\n\nfrom backend.database import\
+      \ get_db\n\nrouter = APIRouter(prefix=\"/health\", tags=[\"health\"])\n\n\n\
+      @router.get(\"\")\ndef health_check():\n    \"\"\"Liveness probe. Always returns\
+      \ ok if the process is running.\"\"\"\n    return {\"status\": \"ok\"}\n\n\n\
+      @router.get(\"/ready\")\ndef readiness_check(db: Session = Depends(get_db)):\n\
+      \    \"\"\"Readiness probe. Verifies database connectivity.\"\"\"\n    try:\n\
+      \        db.execute(text(\"SELECT 1\"))\n        return {\"status\": \"ok\"\
+      , \"database\": \"connected\"}\n    except Exception:\n        return {\"status\"\
+      : \"degraded\", \"database\": \"unreachable\"}\n"
+    main_py_registration: "# In main.py start_application():\n\nfrom backend.core.cors\
+      \ import add_cors_middleware\n\napp = FastAPI(\n    title=settings.PROJECT_NAME,\n\
+      \    version=settings.PROJECT_VERSION,\n)\n\n# CORS must be added BEFORE routes\n\
+      add_cors_middleware(app)\n\n# Register routes (health has no auth)\nfrom backend.health.router\
+      \ import router as health_router\nfrom backend.main_router import api_router\n\
+      \napp.include_router(health_router)\napp.include_router(api_router)\n"
+    dockerfile: "# --- Stage 1: Builder ---\nFROM python:3.12-slim AS builder\n\n\
+      WORKDIR /build\n\n# Install build dependencies\nRUN apt-get update && \\\n \
+      \   apt-get install -y --no-install-recommends gcc libpq-dev && \\\n    rm -rf\
+      \ /var/lib/apt/lists/*\n\n# Copy and install Python dependencies first (layer\
+      \ caching)\nCOPY requirements.txt .\nRUN pip install --no-cache-dir --prefix=/install\
+      \ -r requirements.txt\n\n# Copy application code\nCOPY . .\nRUN pip install\
+      \ --no-cache-dir --prefix=/install -e .\n\n# --- Stage 2: Runtime ---\nFROM\
+      \ python:3.12-slim\n\nWORKDIR /app\n\n# Install runtime-only system dependencies\n\
+      RUN apt-get update && \\\n    apt-get install -y --no-install-recommends libpq5\
+      \ && \\\n    rm -rf /var/lib/apt/lists/*\n\n# Copy installed Python packages\
+      \ from builder\nCOPY --from=builder /install /usr/local\n\n# Copy application\
+      \ code\nCOPY . .\n\n# Create non-root user (E14: DOCKER_ROOT_USER)\nRUN adduser\
+      \ --disabled-password --gecos \"\" appuser\nUSER appuser\n\nEXPOSE 8000\n\n\
+      CMD [\"uvicorn\", \"backend.main:app\", \"--host\", \"0.0.0.0\", \"--port\"\
+      , \"8000\"]\n"
+    docker_compose_yml: "services:\n  backend:\n    build:\n      context: ./backend\n\
+      \      dockerfile: Dockerfile\n    container_name: app-backend\n    restart:\
+      \ unless-stopped\n    env_file:\n      - ./backend/.env\n    ports:\n      -\
+      \ \"127.0.0.1:8000:8000\"\n    depends_on:\n      db:\n        condition: service_healthy\n\
+      \    volumes:\n      # Mount source for hot-reload in dev\n      - ./backend:/app\n\
+      \    command: >\n      uvicorn backend.main:app\n      --host 0.0.0.0 --port\
+      \ 8000 --reload\n\n  db:\n    image: postgres:16-alpine\n    container_name:\
+      \ app-db\n    restart: unless-stopped\n    environment:\n      POSTGRES_USER:\
+      \ ${POSTGRES_USER:-postgres}\n      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}\n\
+      \      POSTGRES_DB: ${POSTGRES_DB:-appdb}\n    ports:\n      - \"127.0.0.1:5432:5432\"\
+      \n    volumes:\n      - pg_data:/var/lib/postgresql/data\n    healthcheck:\n\
+      \      test: [\"CMD-SHELL\", \"pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}\"\
+      ]\n      interval: 5s\n      timeout: 5s\n      retries: 20\n\nvolumes:\n  pg_data:\n"
+    env_example: '# Database
 
-      Production: reads CORS_ORIGINS from env (comma-separated list).
-      Development: additionally allows any localhost/127.0.0.1 origin via regex.
-      """
-
-      from __future__ import annotations
-
-      from fastapi import FastAPI
-      from fastapi.middleware.cors import CORSMiddleware
-
-      from backend.core.config import settings
-
-
-      def add_cors_middleware(app: FastAPI) -> None:
-          origins = settings.CORS_ORIGINS
-
-          allow_origin_regex = None
-          if settings.ENVIRONMENT == "dev":
-              # Allow any localhost/127.* origin in dev to avoid port mismatches
-              # when switching between CRA (:3000) and Vite (:5173).
-              allow_origin_regex = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
-
-          app.add_middleware(
-              CORSMiddleware,
-              allow_origins=origins,
-              allow_origin_regex=allow_origin_regex,
-              allow_credentials=True,
-              allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-              allow_headers=["Content-Type", "Authorization"],
-          )
-
-    config_cors_fields: |
-      # In core/config.py Settings class:
-
-      # CORS
-      CORS_ORIGINS: list[str] = Field(
-          default=["http://localhost:3000", "http://localhost:5173"]
-      )
-
-      # To override in production, set the env var as a JSON array:
-      #   CORS_ORIGINS='["https://app.example.com"]'
-      #
-      # Or use comma-separated with a validator:
-      #   CORS_ORIGINS=https://app.example.com,https://admin.example.com
-
-    health_endpoints: |
-      """Health endpoints — no auth required.
-
-      /health        — liveness probe (always returns ok)
-      /health/ready  — readiness probe (verifies DB connection)
-      """
-
-      from fastapi import APIRouter, Depends
-      from sqlalchemy import text
-      from sqlalchemy.orm import Session
-
-      from backend.database import get_db
-
-      router = APIRouter(prefix="/health", tags=["health"])
-
-
-      @router.get("")
-      def health_check():
-          """Liveness probe. Always returns ok if the process is running."""
-          return {"status": "ok"}
-
-
-      @router.get("/ready")
-      def readiness_check(db: Session = Depends(get_db)):
-          """Readiness probe. Verifies database connectivity."""
-          try:
-              db.execute(text("SELECT 1"))
-              return {"status": "ok", "database": "connected"}
-          except Exception:
-              return {"status": "degraded", "database": "unreachable"}
-
-    main_py_registration: |
-      # In main.py start_application():
-
-      from backend.core.cors import add_cors_middleware
-
-      app = FastAPI(
-          title=settings.PROJECT_NAME,
-          version=settings.PROJECT_VERSION,
-      )
-
-      # CORS must be added BEFORE routes
-      add_cors_middleware(app)
-
-      # Register routes (health has no auth)
-      from backend.health.router import router as health_router
-      from backend.main_router import api_router
-
-      app.include_router(health_router)
-      app.include_router(api_router)
-
-    dockerfile: |
-      # --- Stage 1: Builder ---
-      FROM python:3.12-slim AS builder
-
-      WORKDIR /build
-
-      # Install build dependencies
-      RUN apt-get update && \
-          apt-get install -y --no-install-recommends gcc libpq-dev && \
-          rm -rf /var/lib/apt/lists/*
-
-      # Copy and install Python dependencies first (layer caching)
-      COPY requirements.txt .
-      RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
-
-      # Copy application code
-      COPY . .
-      RUN pip install --no-cache-dir --prefix=/install -e .
-
-      # --- Stage 2: Runtime ---
-      FROM python:3.12-slim
-
-      WORKDIR /app
-
-      # Install runtime-only system dependencies
-      RUN apt-get update && \
-          apt-get install -y --no-install-recommends libpq5 && \
-          rm -rf /var/lib/apt/lists/*
-
-      # Copy installed Python packages from builder
-      COPY --from=builder /install /usr/local
-
-      # Copy application code
-      COPY . .
-
-      # Create non-root user (E14: DOCKER_ROOT_USER)
-      RUN adduser --disabled-password --gecos "" appuser
-      USER appuser
-
-      EXPOSE 8000
-
-      CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
-
-    docker_compose_yml: |
-      services:
-        backend:
-          build:
-            context: ./backend
-            dockerfile: Dockerfile
-          container_name: app-backend
-          restart: unless-stopped
-          env_file:
-            - ./backend/.env
-          ports:
-            - "127.0.0.1:8000:8000"
-          depends_on:
-            db:
-              condition: service_healthy
-          volumes:
-            # Mount source for hot-reload in dev
-            - ./backend:/app
-          command: >
-            uvicorn backend.main:app
-            --host 0.0.0.0 --port 8000 --reload
-
-        db:
-          image: postgres:16-alpine
-          container_name: app-db
-          restart: unless-stopped
-          environment:
-            POSTGRES_USER: ${POSTGRES_USER:-postgres}
-            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-            POSTGRES_DB: ${POSTGRES_DB:-appdb}
-          ports:
-            - "127.0.0.1:5432:5432"
-          volumes:
-            - pg_data:/var/lib/postgresql/data
-          healthcheck:
-            test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-            interval: 5s
-            timeout: 5s
-            retries: 20
-
-      volumes:
-        pg_data:
-
-    env_example: |
-      # Database
       POSTGRES_USER=postgres
+
       POSTGRES_PASSWORD=postgres
+
       POSTGRES_SERVER=localhost
+
       POSTGRES_PORT=5432
+
       POSTGRES_DB=myapp
 
+
       # Auth
+
       SECRET_KEY=change-me-generate-with-python-secrets
+
       ALGORITHM=HS256
+
       ACCESS_TOKEN_EXPIRE_MINUTES=60
+
       REFRESH_TOKEN_EXPIRE_DAYS=7
 
+
       # CORS (JSON array for production, dev defaults are built-in)
+
       CORS_ORIGINS=["http://localhost:3000","http://localhost:5173"]
 
+
       # App
+
       ENVIRONMENT=dev
+
       AUTO_CREATE_TABLES=true
 
+      '
 dependencies:
 - FastAPI
 - CORSMiddleware (starlette)
@@ -268,9 +176,9 @@ lifecycle:
   extracted_by: null
   draft_reviewed_at: null
   draft_reviewer: null
-  dry_run_passed_at: null
-  dry_run_project: null
-  pilot_started_at: null
+  dry_run_passed_at: '2026-04-06'
+  dry_run_project: pattern-sandbox
+  pilot_started_at: '2026-04-06'
   pilot_uses: []
   consecutive_successes: 0
   validated_at: null

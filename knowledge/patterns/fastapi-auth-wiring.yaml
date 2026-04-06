@@ -1,21 +1,24 @@
 id: PAT-016
 category: auth
-name: "FastAPI auth wiring with JWT and CORS"
-status: draft
+name: FastAPI auth wiring with JWT and CORS
+status: pilot
 tier: primary
-description: >
-  Wires JWT authentication into the FastAPI layered architecture (PAT-007 through
-  PAT-012). This is NOT about JWT itself (that's PAT-001) — it's about how auth
-  integrates with the layers: the get_current_user dependency, login/signup router,
+description: 'Wires JWT authentication into the FastAPI layered architecture (PAT-007
+  through PAT-012). This is NOT about JWT itself (that''s PAT-001) — it''s about how
+  auth integrates with the layers: the get_current_user dependency, login/signup router,
   refresh tokens with httpOnly cookie rotation, password hashing, and CORS config
   for React frontends. Follows the repository-service-router pattern with auth as
   a first-class module.
-when_to_use: >
-  Any FastAPI project using the layered architecture that needs user authentication
+
+  '
+when_to_use: 'Any FastAPI project using the layered architecture that needs user authentication
   with JWT access tokens and refresh token rotation via httpOnly cookies.
-when_not_to_use: >
-  Session-based auth (use PAT-002 redis sessions), API-key-only services,
+
+  '
+when_not_to_use: 'Session-based auth (use PAT-002 redis sessions), API-key-only services,
   or projects not using the layered architecture.
+
+  '
 implementation:
   language: python
   framework: FastAPI
@@ -29,626 +32,289 @@ implementation:
   - core/hashing.py — Hasher class wrapping bcrypt
   - core/config.py — Settings additions for auth (SECRET_KEY, token expiry, CORS)
   key_decisions:
-  - "OAuth2PasswordBearer(tokenUrl='/login') — tokenUrl MUST match the actual login\
-    \ route path"
-  - "get_current_user is a Depends() that decodes JWT, fetches user from DB, raises\
-    \ 401 if invalid — every protected endpoint uses this"
-  - "Access tokens are short-lived (30min default), refresh tokens are long-lived\
-    \ (7 days default) stored in httpOnly cookies"
-  - "Refresh token rotation: on /auth/refresh, old token JTI is revoked (stored in\
-    \ DB), new token pair issued"
-  - "Password hashing uses bcrypt via a Hasher utility class with configurable rounds\
-    \ (12 default, lower in tests)"
-  - "UserService.authenticate_user verifies credentials, router builds tokens —\
-    \ separation of concerns"
-  - "Login returns access_token in JSON body, sets refresh_token as httpOnly cookie\
-    \ — frontend never touches refresh token"
-  - "CORS middleware configured for React dev servers (localhost:3000, localhost:5173)\
-    \ with credentials=True"
-  - "Use PyJWT (not python-jose which is unmaintained) for JWT encode/decode"
-  - "require_admin dependency chains on get_current_user and checks system_role —\
-    \ composable auth layers"
+  - OAuth2PasswordBearer(tokenUrl='/login') — tokenUrl MUST match the actual login
+    route path
+  - get_current_user is a Depends() that decodes JWT, fetches user from DB, raises
+    401 if invalid — every protected endpoint uses this
+  - Access tokens are short-lived (30min default), refresh tokens are long-lived (7
+    days default) stored in httpOnly cookies
+  - 'Refresh token rotation: on /auth/refresh, old token JTI is revoked (stored in
+    DB), new token pair issued'
+  - Password hashing uses bcrypt via a Hasher utility class with configurable rounds
+    (12 default, lower in tests)
+  - UserService.authenticate_user verifies credentials, router builds tokens — separation
+    of concerns
+  - Login returns access_token in JSON body, sets refresh_token as httpOnly cookie
+    — frontend never touches refresh token
+  - CORS middleware configured for React dev servers (localhost:3000, localhost:5173)
+    with credentials=True
+  - Use PyJWT (not python-jose which is unmaintained) for JWT encode/decode
+  - require_admin dependency chains on get_current_user and checks system_role — composable
+    auth layers
   reference_code:
-    oauth2_module: |
-      """auth/oauth2.py — OAuth2 scheme, token creation, get_current_user dependency."""
-      from __future__ import annotations
-
-      import logging
-      import uuid
-      from datetime import datetime, timedelta, timezone
-      from typing import Optional
-
-      import jwt
-      from fastapi import Depends, HTTPException, status
-      from fastapi.security import OAuth2PasswordBearer
-      from sqlalchemy.orm import Session
-
-      from backend.auth.models import User
-      from backend.auth.repository import UserRepository
-      from backend.core.config import settings
-      from backend.database import get_db
-
-      logger = logging.getLogger(__name__)
-
-      # ---------- OAuth2 scheme ----------
-      # tokenUrl MUST match the actual login route path.
-      oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
-
-      ALGORITHM = "HS256"
-
-
-      # ---------- Token creation ----------
-      def create_access_token(
-          data: dict,
-          expires_delta: Optional[timedelta] = None,
-      ) -> str:
-          """Create a signed JWT access token.
-
-          Args:
-              data: Payload dict. Must include 'sub' (user email or id).
-                    Optionally include 'system_role' for role-based access.
-              expires_delta: Custom expiry. Defaults to settings.ACCESS_TOKEN_EXPIRE_MINUTES.
-
-          Returns:
-              Encoded JWT string.
-          """
-          to_encode = data.copy()
-          expire = datetime.now(timezone.utc) + (
-              expires_delta
-              or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-          )
-          to_encode["exp"] = expire
-          return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
-
-
-      def create_refresh_token(
-          data: dict,
-          expires_days: Optional[int] = None,
-      ) -> str:
-          """Create a signed JWT refresh token with a unique JTI for revocation.
-
-          Args:
-              data: Payload dict. Must include 'sub' (user email).
-              expires_days: Custom expiry in days. Defaults to settings.REFRESH_TOKEN_EXPIRE_DAYS.
-
-          Returns:
-              Encoded JWT string with type='refresh' and jti claims.
-          """
-          to_encode = data.copy()
-          days = expires_days if expires_days is not None else settings.REFRESH_TOKEN_EXPIRE_DAYS
-          expire = datetime.now(timezone.utc) + timedelta(days=days)
-          to_encode.update({
-              "exp": expire,
-              "type": "refresh",
-              "jti": str(uuid.uuid4()),
-          })
-          return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
-
-
-      def verify_refresh_token(token: str) -> Optional[dict]:
-          """Verify a refresh token and return its payload, or None on failure."""
-          try:
-              payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
-              if payload.get("type") != "refresh":
-                  logger.warning("Token is not a refresh token")
-                  return None
-              return payload
-          except jwt.PyJWTError as e:
-              logger.warning(f"Refresh token verification failed: {e}")
-              return None
-
-
-      # ---------- get_current_user dependency ----------
-      def _credentials_exception() -> HTTPException:
-          return HTTPException(
-              status_code=status.HTTP_401_UNAUTHORIZED,
-              detail="Could not validate credentials",
-              headers={"WWW-Authenticate": "Bearer"},
-          )
-
-
-      def _get_user_repo(db: Session = Depends(get_db)) -> UserRepository:
-          return UserRepository(db)
-
-
-      def get_current_user(
-          token: str = Depends(oauth2_scheme),
-          user_repo: UserRepository = Depends(_get_user_repo),
-      ) -> User:
-          """Decode JWT, extract sub (email), load user from DB.
-
-          Raises:
-              HTTPException 401: if token is invalid/expired or user not found.
-          """
-          try:
-              payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
-          except jwt.PyJWTError:
-              logger.warning("JWT decode failed", exc_info=True)
-              raise _credentials_exception()
-
-          subject = payload.get("sub")
-          if not isinstance(subject, str) or not subject.strip():
-              raise _credentials_exception()
-
-          user = user_repo.get_by_email(subject.strip().lower())
-          if user is None:
-              raise _credentials_exception()
-
-          return user
-
-
-      # ---------- Composable auth dependencies ----------
-      def require_admin(current_user: User = Depends(get_current_user)) -> User:
-          """Restrict access to system admins only. Chain after get_current_user."""
-          if current_user.system_role != "ADMIN":
-              raise HTTPException(
-                  status_code=status.HTTP_403_FORBIDDEN,
-                  detail="Admin role required",
-              )
-          return current_user
-
-    hashing_module: |
-      """core/hashing.py — Password hashing with bcrypt."""
-      import bcrypt
-
-      from backend.core.config import settings
-
-
-      class Hasher:
-          """Stateless password hashing utility using bcrypt.
-
-          Configuration:
-              settings.PASSWORD_HASH_ROUNDS controls bcrypt work factor.
-              Use 12 in production, 4 in tests for speed.
-          """
-
-          @staticmethod
-          def verify_password(plain_password: str, hashed_password: str) -> bool:
-              """Verify a plain password against a bcrypt hash."""
-              return bcrypt.checkpw(
-                  plain_password.encode("utf-8"),
-                  hashed_password.encode("utf-8"),
-              )
-
-          @staticmethod
-          def get_password_hash(password: str) -> str:
-              """Hash a password with bcrypt using configured rounds."""
-              salt = bcrypt.gensalt(rounds=settings.PASSWORD_HASH_ROUNDS)
-              hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
-              return hashed.decode("utf-8")
-
-    user_model: |
-      """auth/models.py — User model and RevokedRefreshToken."""
-      from __future__ import annotations
-
-      import datetime as dt
-      import enum
-      import uuid
-
-      from sqlalchemy import Boolean, DateTime, String
-      from sqlalchemy import Enum as SAEnum
-      from sqlalchemy.orm import Mapped, mapped_column
-
-      from backend.database import Base, TimestampMixin, GUID, uuid_pk
-
-
-      class SystemRole(str, enum.Enum):
-          ADMIN = "ADMIN"
-          STANDARD = "STANDARD"
-
-
-      class User(TimestampMixin, Base):
-          __tablename__ = "users"
-
-          id: Mapped[uuid.UUID] = uuid_pk()
-          email: Mapped[str] = mapped_column(
-              String, unique=True, index=True, nullable=False
-          )
-          hashed_password: Mapped[str] = mapped_column(String, nullable=False)
-          name: Mapped[str] = mapped_column(String, nullable=True)
-          is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-          system_role: Mapped[SystemRole] = mapped_column(
-              SAEnum(SystemRole, name="system_role"),
-              nullable=False,
-              default=SystemRole.STANDARD,
-              server_default=SystemRole.STANDARD.value,
-          )
-
-
-      class RevokedRefreshToken(Base):
-          """Stores JTIs of rotated refresh tokens to prevent reuse."""
-          __tablename__ = "revoked_refresh_tokens"
-
-          jti: Mapped[str] = mapped_column(String(36), primary_key=True)
-          revoked_at: Mapped[dt.datetime] = mapped_column(
-              DateTime(timezone=True),
-              default=lambda: dt.datetime.now(dt.timezone.utc),
-              nullable=False,
-          )
-
-    user_repository: |
-      """auth/repository.py — UserRepository extending BaseRepository[User]."""
-      from typing import Optional
-
-      from sqlalchemy import exists, select
-
-      from backend.auth.models import User
-      from backend.core.repository import BaseRepository
-
-
-      class UserRepository(BaseRepository[User]):
-          model = User
-
-          def get_by_email(self, email: str) -> Optional[User]:
-              """Fetch user by email. Normalizes to lowercase + trim."""
-              normalized = email.strip().lower()
-              stmt = select(User).where(User.email == normalized)
-              return self.db.scalar(stmt)
-
-          def exists_by_email(self, email: str) -> bool:
-              """Check if email is registered. Uses SQL EXISTS (no row fetch)."""
-              normalized = email.strip().lower()
-              stmt = select(exists().where(User.email == normalized))
-              return self.db.scalar(stmt) or False
-
-    user_schemas: |
-      """auth/schemas.py — Auth-related Pydantic schemas."""
-      import uuid
-      from typing import Optional
-
-      from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
-
-
-      def validate_password_strength(password: str) -> str:
-          """Enforce minimum password complexity."""
-          if len(password) < 12:
-              raise ValueError("Password must be at least 12 characters")
-          if not any(c.isupper() for c in password):
-              raise ValueError("Password must contain at least one uppercase letter")
-          if not any(c.isdigit() for c in password):
-              raise ValueError("Password must contain at least one digit")
-          if not any(c in r"!@#$%^&*()-_=+[]{}|;:',.<>?/" for c in password):
-              raise ValueError("Password must contain a special character")
-          return password
-
-
-      class UserCreate(BaseModel):
-          email: EmailStr
-          password: str = Field(..., min_length=12)
-          name: Optional[str] = None
-
-          @field_validator("password")
-          @classmethod
-          def check_password_strength(cls, v: str) -> str:
-              return validate_password_strength(v)
-
-
-      class UserRead(BaseModel):
-          id: uuid.UUID
-          email: str
-          name: Optional[str]
-          is_active: bool
-          system_role: str
-
-          model_config = ConfigDict(from_attributes=True)
-
-
-      class LoginResponse(BaseModel):
-          access_token: str
-          token_type: str = "bearer"
-          user_id: str
-          username: str
-
-
-      class TokenData(BaseModel):
-          """Decoded JWT payload for type-safe access in dependencies."""
-          sub: str
-          system_role: Optional[str] = None
-          exp: Optional[int] = None
-
-    user_service: |
-      """auth/services.py — UserService with authenticate and create."""
-      import uuid
-
-      from backend.auth.models import User
-      from backend.auth.repository import UserRepository
-      from backend.auth.schemas import UserCreate
-      from backend.core.exceptions import AuthenticationError, ConflictError, EntityNotFound
-      from backend.core.hashing import Hasher
-
-
-      class UserService:
-          """Service layer for user operations.
-
-          Handles authentication, user creation, and password management.
-          All DB access goes through UserRepository.
-          """
-
-          def __init__(self, repo: UserRepository) -> None:
-              self.repo = repo
-
-          def authenticate_user(self, email: str, password: str) -> User:
-              """Verify email + password. Returns User or raises.
-
-              Raises:
-                  EntityNotFound: if email not registered.
-                  AuthenticationError: if password is wrong.
-              """
-              user = self.repo.get_by_email(email)
-              if not user:
-                  raise EntityNotFound(
-                      f"User with email {email} not found",
-                      context={"email": email},
-                  )
-              if not Hasher.verify_password(password, user.hashed_password):
-                  raise AuthenticationError("Incorrect password")
-              return user
-
-          def create_user(self, user_create: UserCreate) -> User:
-              """Create a new user. Raises ConflictError if email taken."""
-              if self.repo.exists_by_email(user_create.email):
-                  raise ConflictError(
-                      f"User with email {user_create.email} already exists",
-                      context={"email": user_create.email},
-                  )
-
-              data = user_create.model_dump(exclude_unset=True)
-              plain_password = data.pop("password")
-              data["hashed_password"] = Hasher.get_password_hash(plain_password)
-              data.setdefault("name", data["email"].split("@")[0])
-
-              user = User(**data)
-              self.repo.add(user)
-              self.repo.commit()
-              self.repo.refresh(user)
-              return user
-
-          def get_user_by_id(self, user_id: uuid.UUID) -> User | None:
-              return self.repo.get(user_id)
-
-    auth_router: |
-      """auth/router.py — Login, signup, refresh, and /users/me endpoints."""
-      from __future__ import annotations
-
-      from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
-      from fastapi.responses import JSONResponse
-      from fastapi.security import OAuth2PasswordRequestForm
-
-      from backend.auth.models import RevokedRefreshToken, User
-      from backend.auth.oauth2 import (
-          create_access_token,
-          create_refresh_token,
-          get_current_user,
-          verify_refresh_token,
-      )
-      from backend.auth.repository import UserRepository
-      from backend.auth.schemas import LoginResponse, UserCreate, UserRead
-      from backend.auth.services import UserService
-      from backend.core.config import settings
-      from backend.database import get_db
-
-      router = APIRouter()
-
-
-      def _get_user_service(db=Depends(get_db)) -> UserService:
-          return UserService(UserRepository(db))
-
-
-      @router.post("/login")
-      def login(
-          form_data: OAuth2PasswordRequestForm = Depends(),
-          user_service: UserService = Depends(_get_user_service),
-      ):
-          """Authenticate and return JWT access token + refresh cookie.
-
-          Uses OAuth2PasswordRequestForm (username field = email).
-          Sets refresh_token as httpOnly cookie. Returns access_token in JSON body.
-          """
-          user = user_service.authenticate_user(
-              email=form_data.username,
-              password=form_data.password,
-          )
-
-          access_token = create_access_token(
-              data={"sub": user.email, "system_role": user.system_role.value}
-          )
-          refresh_token = create_refresh_token(data={"sub": user.email})
-
-          response = JSONResponse(content={
-              "access_token": access_token,
-              "token_type": "bearer",
-              "user_id": str(user.id),
-              "username": user.email,
-          })
-
-          response.set_cookie(
-              key="refresh_token",
-              value=refresh_token,
-              httponly=True,
-              secure=settings.ENVIRONMENT != "dev",
-              samesite="lax",
-              max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
-          )
-          return response
-
-
-      @router.post("/signup", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-      def signup(
-          payload: UserCreate,
-          user_service: UserService = Depends(_get_user_service),
-      ):
-          """Public signup endpoint. Creates user and returns UserRead."""
-          return user_service.create_user(payload)
-
-
-      @router.post("/auth/refresh")
-      def refresh(
-          refresh_token: str = Cookie(None, alias="refresh_token"),
-          db=Depends(get_db),
-      ):
-          """Rotate refresh token and issue new access token.
-
-          Flow:
-          1. Read refresh_token from httpOnly cookie
-          2. Verify token signature and expiry
-          3. Check JTI not revoked (prevents reuse of old tokens)
-          4. Revoke old JTI, issue new token pair
-          5. Return access_token in JSON, set new refresh cookie
-          """
-          if not refresh_token:
-              raise HTTPException(
-                  status_code=status.HTTP_401_UNAUTHORIZED,
-                  detail="No refresh token provided",
-              )
-
-          payload = verify_refresh_token(refresh_token)
-          if not payload:
-              raise HTTPException(
-                  status_code=status.HTTP_401_UNAUTHORIZED,
-                  detail="Invalid or expired refresh token",
-              )
-
-          # Check revocation
-          jti = payload.get("jti")
-          if jti:
-              revoked = db.get(RevokedRefreshToken, jti)
-              if revoked:
-                  raise HTTPException(
-                      status_code=status.HTTP_401_UNAUTHORIZED,
-                      detail="Refresh token has been revoked",
-                  )
-
-          email = payload.get("sub")
-          if not email:
-              raise HTTPException(
-                  status_code=status.HTTP_401_UNAUTHORIZED,
-                  detail="Invalid token payload",
-              )
-
-          user_repo = UserRepository(db)
-          user = user_repo.get_by_email(email)
-          if not user:
-              raise HTTPException(
-                  status_code=status.HTTP_401_UNAUTHORIZED,
-                  detail="User not found",
-              )
-
-          # Revoke old token
-          if jti:
-              db.add(RevokedRefreshToken(jti=jti))
-              db.commit()
-
-          # Issue new tokens
-          new_access = create_access_token(
-              data={"sub": user.email, "system_role": user.system_role.value}
-          )
-          new_refresh = create_refresh_token(data={"sub": user.email})
-
-          response = JSONResponse(content={
-              "access_token": new_access,
-              "token_type": "bearer",
-          })
-          response.set_cookie(
-              key="refresh_token",
-              value=new_refresh,
-              httponly=True,
-              secure=settings.ENVIRONMENT != "dev",
-              samesite="lax",
-              max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
-          )
-          return response
-
-
-      @router.get("/users/me", response_model=UserRead)
-      def get_me(current_user: User = Depends(get_current_user)):
-          """Return the authenticated user's profile."""
-          return current_user
-
-    cors_and_settings: |
-      """core/config.py additions — Auth and CORS settings."""
-      from pydantic_settings import BaseSettings
-
-
-      class Settings(BaseSettings):
-          # ... existing settings ...
-
-          # Auth
-          SECRET_KEY: str = "CHANGE-ME-IN-PRODUCTION"
-          ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-          REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-          PASSWORD_HASH_ROUNDS: int = 12
-
-          # CORS — React dev servers + production domain
-          CORS_ORIGINS: list[str] = [
-              "http://localhost:3000",   # Create React App / Next.js
-              "http://localhost:5173",   # Vite
-          ]
-
-          # Environment flag (controls secure cookie flag)
-          ENVIRONMENT: str = "dev"
-
-      # ---
-      # main.py CORS setup:
-      #
-      # from fastapi.middleware.cors import CORSMiddleware
-      #
-      # app.add_middleware(
-      #     CORSMiddleware,
-      #     allow_origins=settings.CORS_ORIGINS,
-      #     allow_credentials=True,  # REQUIRED for httpOnly cookie refresh flow
-      #     allow_methods=["*"],
-      #     allow_headers=["*"],
-      # )
-
-    app_wiring: |
-      """main.py — Wiring auth router and CORS middleware."""
-      from fastapi import FastAPI
-      from fastapi.middleware.cors import CORSMiddleware
-
-      from backend.auth.router import router as auth_router
-      from backend.core.config import settings
-
-      app = FastAPI()
-
-      # CORS — must be added BEFORE routes
-      app.add_middleware(
-          CORSMiddleware,
-          allow_origins=settings.CORS_ORIGINS,
-          allow_credentials=True,   # Required for httpOnly cookie refresh
-          allow_methods=["*"],
-          allow_headers=["*"],
-      )
-
-      # Auth routes (no prefix — login at /login, refresh at /auth/refresh)
-      app.include_router(auth_router)
+    oauth2_module: "\"\"\"auth/oauth2.py — OAuth2 scheme, token creation, get_current_user\
+      \ dependency.\"\"\"\nfrom __future__ import annotations\n\nimport logging\n\
+      import uuid\nfrom datetime import datetime, timedelta, timezone\nfrom typing\
+      \ import Optional\n\nimport jwt\nfrom fastapi import Depends, HTTPException,\
+      \ status\nfrom fastapi.security import OAuth2PasswordBearer\nfrom sqlalchemy.orm\
+      \ import Session\n\nfrom backend.auth.models import User\nfrom backend.auth.repository\
+      \ import UserRepository\nfrom backend.core.config import settings\nfrom backend.database\
+      \ import get_db\n\nlogger = logging.getLogger(__name__)\n\n# ---------- OAuth2\
+      \ scheme ----------\n# tokenUrl MUST match the actual login route path.\noauth2_scheme\
+      \ = OAuth2PasswordBearer(tokenUrl=\"/login\")\n\nALGORITHM = \"HS256\"\n\n\n\
+      # ---------- Token creation ----------\ndef create_access_token(\n    data:\
+      \ dict,\n    expires_delta: Optional[timedelta] = None,\n) -> str:\n    \"\"\
+      \"Create a signed JWT access token.\n\n    Args:\n        data: Payload dict.\
+      \ Must include 'sub' (user email or id).\n              Optionally include 'system_role'\
+      \ for role-based access.\n        expires_delta: Custom expiry. Defaults to\
+      \ settings.ACCESS_TOKEN_EXPIRE_MINUTES.\n\n    Returns:\n        Encoded JWT\
+      \ string.\n    \"\"\"\n    to_encode = data.copy()\n    expire = datetime.now(timezone.utc)\
+      \ + (\n        expires_delta\n        or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)\n\
+      \    )\n    to_encode[\"exp\"] = expire\n    return jwt.encode(to_encode, settings.SECRET_KEY,\
+      \ algorithm=ALGORITHM)\n\n\ndef create_refresh_token(\n    data: dict,\n   \
+      \ expires_days: Optional[int] = None,\n) -> str:\n    \"\"\"Create a signed\
+      \ JWT refresh token with a unique JTI for revocation.\n\n    Args:\n       \
+      \ data: Payload dict. Must include 'sub' (user email).\n        expires_days:\
+      \ Custom expiry in days. Defaults to settings.REFRESH_TOKEN_EXPIRE_DAYS.\n\n\
+      \    Returns:\n        Encoded JWT string with type='refresh' and jti claims.\n\
+      \    \"\"\"\n    to_encode = data.copy()\n    days = expires_days if expires_days\
+      \ is not None else settings.REFRESH_TOKEN_EXPIRE_DAYS\n    expire = datetime.now(timezone.utc)\
+      \ + timedelta(days=days)\n    to_encode.update({\n        \"exp\": expire,\n\
+      \        \"type\": \"refresh\",\n        \"jti\": str(uuid.uuid4()),\n    })\n\
+      \    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)\n\
+      \n\ndef verify_refresh_token(token: str) -> Optional[dict]:\n    \"\"\"Verify\
+      \ a refresh token and return its payload, or None on failure.\"\"\"\n    try:\n\
+      \        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])\n\
+      \        if payload.get(\"type\") != \"refresh\":\n            logger.warning(\"\
+      Token is not a refresh token\")\n            return None\n        return payload\n\
+      \    except jwt.PyJWTError as e:\n        logger.warning(f\"Refresh token verification\
+      \ failed: {e}\")\n        return None\n\n\n# ---------- get_current_user dependency\
+      \ ----------\ndef _credentials_exception() -> HTTPException:\n    return HTTPException(\n\
+      \        status_code=status.HTTP_401_UNAUTHORIZED,\n        detail=\"Could not\
+      \ validate credentials\",\n        headers={\"WWW-Authenticate\": \"Bearer\"\
+      },\n    )\n\n\ndef _get_user_repo(db: Session = Depends(get_db)) -> UserRepository:\n\
+      \    return UserRepository(db)\n\n\ndef get_current_user(\n    token: str =\
+      \ Depends(oauth2_scheme),\n    user_repo: UserRepository = Depends(_get_user_repo),\n\
+      ) -> User:\n    \"\"\"Decode JWT, extract sub (email), load user from DB.\n\n\
+      \    Raises:\n        HTTPException 401: if token is invalid/expired or user\
+      \ not found.\n    \"\"\"\n    try:\n        payload = jwt.decode(token, settings.SECRET_KEY,\
+      \ algorithms=[ALGORITHM])\n    except jwt.PyJWTError:\n        logger.warning(\"\
+      JWT decode failed\", exc_info=True)\n        raise _credentials_exception()\n\
+      \n    subject = payload.get(\"sub\")\n    if not isinstance(subject, str) or\
+      \ not subject.strip():\n        raise _credentials_exception()\n\n    user =\
+      \ user_repo.get_by_email(subject.strip().lower())\n    if user is None:\n  \
+      \      raise _credentials_exception()\n\n    return user\n\n\n# ---------- Composable\
+      \ auth dependencies ----------\ndef require_admin(current_user: User = Depends(get_current_user))\
+      \ -> User:\n    \"\"\"Restrict access to system admins only. Chain after get_current_user.\"\
+      \"\"\n    if current_user.system_role != \"ADMIN\":\n        raise HTTPException(\n\
+      \            status_code=status.HTTP_403_FORBIDDEN,\n            detail=\"Admin\
+      \ role required\",\n        )\n    return current_user\n"
+    hashing_module: "\"\"\"core/hashing.py — Password hashing with bcrypt.\"\"\"\n\
+      import bcrypt\n\nfrom backend.core.config import settings\n\n\nclass Hasher:\n\
+      \    \"\"\"Stateless password hashing utility using bcrypt.\n\n    Configuration:\n\
+      \        settings.PASSWORD_HASH_ROUNDS controls bcrypt work factor.\n      \
+      \  Use 12 in production, 4 in tests for speed.\n    \"\"\"\n\n    @staticmethod\n\
+      \    def verify_password(plain_password: str, hashed_password: str) -> bool:\n\
+      \        \"\"\"Verify a plain password against a bcrypt hash.\"\"\"\n      \
+      \  return bcrypt.checkpw(\n            plain_password.encode(\"utf-8\"),\n \
+      \           hashed_password.encode(\"utf-8\"),\n        )\n\n    @staticmethod\n\
+      \    def get_password_hash(password: str) -> str:\n        \"\"\"Hash a password\
+      \ with bcrypt using configured rounds.\"\"\"\n        salt = bcrypt.gensalt(rounds=settings.PASSWORD_HASH_ROUNDS)\n\
+      \        hashed = bcrypt.hashpw(password.encode(\"utf-8\"), salt)\n        return\
+      \ hashed.decode(\"utf-8\")\n"
+    user_model: "\"\"\"auth/models.py — User model and RevokedRefreshToken.\"\"\"\n\
+      from __future__ import annotations\n\nimport datetime as dt\nimport enum\nimport\
+      \ uuid\n\nfrom sqlalchemy import Boolean, DateTime, String\nfrom sqlalchemy\
+      \ import Enum as SAEnum\nfrom sqlalchemy.orm import Mapped, mapped_column\n\n\
+      from backend.database import Base, TimestampMixin, GUID, uuid_pk\n\n\nclass\
+      \ SystemRole(str, enum.Enum):\n    ADMIN = \"ADMIN\"\n    STANDARD = \"STANDARD\"\
+      \n\n\nclass User(TimestampMixin, Base):\n    __tablename__ = \"users\"\n\n \
+      \   id: Mapped[uuid.UUID] = uuid_pk()\n    email: Mapped[str] = mapped_column(\n\
+      \        String, unique=True, index=True, nullable=False\n    )\n    hashed_password:\
+      \ Mapped[str] = mapped_column(String, nullable=False)\n    name: Mapped[str]\
+      \ = mapped_column(String, nullable=True)\n    is_active: Mapped[bool] = mapped_column(Boolean,\
+      \ default=True)\n    system_role: Mapped[SystemRole] = mapped_column(\n    \
+      \    SAEnum(SystemRole, name=\"system_role\"),\n        nullable=False,\n  \
+      \      default=SystemRole.STANDARD,\n        server_default=SystemRole.STANDARD.value,\n\
+      \    )\n\n\nclass RevokedRefreshToken(Base):\n    \"\"\"Stores JTIs of rotated\
+      \ refresh tokens to prevent reuse.\"\"\"\n    __tablename__ = \"revoked_refresh_tokens\"\
+      \n\n    jti: Mapped[str] = mapped_column(String(36), primary_key=True)\n   \
+      \ revoked_at: Mapped[dt.datetime] = mapped_column(\n        DateTime(timezone=True),\n\
+      \        default=lambda: dt.datetime.now(dt.timezone.utc),\n        nullable=False,\n\
+      \    )\n"
+    user_repository: "\"\"\"auth/repository.py — UserRepository extending BaseRepository[User].\"\
+      \"\"\nfrom typing import Optional\n\nfrom sqlalchemy import exists, select\n\
+      \nfrom backend.auth.models import User\nfrom backend.core.repository import\
+      \ BaseRepository\n\n\nclass UserRepository(BaseRepository[User]):\n    model\
+      \ = User\n\n    def get_by_email(self, email: str) -> Optional[User]:\n    \
+      \    \"\"\"Fetch user by email. Normalizes to lowercase + trim.\"\"\"\n    \
+      \    normalized = email.strip().lower()\n        stmt = select(User).where(User.email\
+      \ == normalized)\n        return self.db.scalar(stmt)\n\n    def exists_by_email(self,\
+      \ email: str) -> bool:\n        \"\"\"Check if email is registered. Uses SQL\
+      \ EXISTS (no row fetch).\"\"\"\n        normalized = email.strip().lower()\n\
+      \        stmt = select(exists().where(User.email == normalized))\n        return\
+      \ self.db.scalar(stmt) or False\n"
+    user_schemas: "\"\"\"auth/schemas.py — Auth-related Pydantic schemas.\"\"\"\n\
+      import uuid\nfrom typing import Optional\n\nfrom pydantic import BaseModel,\
+      \ ConfigDict, EmailStr, Field, field_validator\n\n\ndef validate_password_strength(password:\
+      \ str) -> str:\n    \"\"\"Enforce minimum password complexity.\"\"\"\n    if\
+      \ len(password) < 12:\n        raise ValueError(\"Password must be at least\
+      \ 12 characters\")\n    if not any(c.isupper() for c in password):\n       \
+      \ raise ValueError(\"Password must contain at least one uppercase letter\")\n\
+      \    if not any(c.isdigit() for c in password):\n        raise ValueError(\"\
+      Password must contain at least one digit\")\n    if not any(c in r\"!@#$%^&*()-_=+[]{}|;:',.<>?/\"\
+      \ for c in password):\n        raise ValueError(\"Password must contain a special\
+      \ character\")\n    return password\n\n\nclass UserCreate(BaseModel):\n    email:\
+      \ EmailStr\n    password: str = Field(..., min_length=12)\n    name: Optional[str]\
+      \ = None\n\n    @field_validator(\"password\")\n    @classmethod\n    def check_password_strength(cls,\
+      \ v: str) -> str:\n        return validate_password_strength(v)\n\n\nclass UserRead(BaseModel):\n\
+      \    id: uuid.UUID\n    email: str\n    name: Optional[str]\n    is_active:\
+      \ bool\n    system_role: str\n\n    model_config = ConfigDict(from_attributes=True)\n\
+      \n\nclass LoginResponse(BaseModel):\n    access_token: str\n    token_type:\
+      \ str = \"bearer\"\n    user_id: str\n    username: str\n\n\nclass TokenData(BaseModel):\n\
+      \    \"\"\"Decoded JWT payload for type-safe access in dependencies.\"\"\"\n\
+      \    sub: str\n    system_role: Optional[str] = None\n    exp: Optional[int]\
+      \ = None\n"
+    user_service: "\"\"\"auth/services.py — UserService with authenticate and create.\"\
+      \"\"\nimport uuid\n\nfrom backend.auth.models import User\nfrom backend.auth.repository\
+      \ import UserRepository\nfrom backend.auth.schemas import UserCreate\nfrom backend.core.exceptions\
+      \ import AuthenticationError, ConflictError, EntityNotFound\nfrom backend.core.hashing\
+      \ import Hasher\n\n\nclass UserService:\n    \"\"\"Service layer for user operations.\n\
+      \n    Handles authentication, user creation, and password management.\n    All\
+      \ DB access goes through UserRepository.\n    \"\"\"\n\n    def __init__(self,\
+      \ repo: UserRepository) -> None:\n        self.repo = repo\n\n    def authenticate_user(self,\
+      \ email: str, password: str) -> User:\n        \"\"\"Verify email + password.\
+      \ Returns User or raises.\n\n        Raises:\n            EntityNotFound: if\
+      \ email not registered.\n            AuthenticationError: if password is wrong.\n\
+      \        \"\"\"\n        user = self.repo.get_by_email(email)\n        if not\
+      \ user:\n            raise EntityNotFound(\n                f\"User with email\
+      \ {email} not found\",\n                context={\"email\": email},\n      \
+      \      )\n        if not Hasher.verify_password(password, user.hashed_password):\n\
+      \            raise AuthenticationError(\"Incorrect password\")\n        return\
+      \ user\n\n    def create_user(self, user_create: UserCreate) -> User:\n    \
+      \    \"\"\"Create a new user. Raises ConflictError if email taken.\"\"\"\n \
+      \       if self.repo.exists_by_email(user_create.email):\n            raise\
+      \ ConflictError(\n                f\"User with email {user_create.email} already\
+      \ exists\",\n                context={\"email\": user_create.email},\n     \
+      \       )\n\n        data = user_create.model_dump(exclude_unset=True)\n   \
+      \     plain_password = data.pop(\"password\")\n        data[\"hashed_password\"\
+      ] = Hasher.get_password_hash(plain_password)\n        data.setdefault(\"name\"\
+      , data[\"email\"].split(\"@\")[0])\n\n        user = User(**data)\n        self.repo.add(user)\n\
+      \        self.repo.commit()\n        self.repo.refresh(user)\n        return\
+      \ user\n\n    def get_user_by_id(self, user_id: uuid.UUID) -> User | None:\n\
+      \        return self.repo.get(user_id)\n"
+    auth_router: "\"\"\"auth/router.py — Login, signup, refresh, and /users/me endpoints.\"\
+      \"\"\nfrom __future__ import annotations\n\nfrom fastapi import APIRouter, Cookie,\
+      \ Depends, HTTPException, Response, status\nfrom fastapi.responses import JSONResponse\n\
+      from fastapi.security import OAuth2PasswordRequestForm\n\nfrom backend.auth.models\
+      \ import RevokedRefreshToken, User\nfrom backend.auth.oauth2 import (\n    create_access_token,\n\
+      \    create_refresh_token,\n    get_current_user,\n    verify_refresh_token,\n\
+      )\nfrom backend.auth.repository import UserRepository\nfrom backend.auth.schemas\
+      \ import LoginResponse, UserCreate, UserRead\nfrom backend.auth.services import\
+      \ UserService\nfrom backend.core.config import settings\nfrom backend.database\
+      \ import get_db\n\nrouter = APIRouter()\n\n\ndef _get_user_service(db=Depends(get_db))\
+      \ -> UserService:\n    return UserService(UserRepository(db))\n\n\n@router.post(\"\
+      /login\")\ndef login(\n    form_data: OAuth2PasswordRequestForm = Depends(),\n\
+      \    user_service: UserService = Depends(_get_user_service),\n):\n    \"\"\"\
+      Authenticate and return JWT access token + refresh cookie.\n\n    Uses OAuth2PasswordRequestForm\
+      \ (username field = email).\n    Sets refresh_token as httpOnly cookie. Returns\
+      \ access_token in JSON body.\n    \"\"\"\n    user = user_service.authenticate_user(\n\
+      \        email=form_data.username,\n        password=form_data.password,\n \
+      \   )\n\n    access_token = create_access_token(\n        data={\"sub\": user.email,\
+      \ \"system_role\": user.system_role.value}\n    )\n    refresh_token = create_refresh_token(data={\"\
+      sub\": user.email})\n\n    response = JSONResponse(content={\n        \"access_token\"\
+      : access_token,\n        \"token_type\": \"bearer\",\n        \"user_id\": str(user.id),\n\
+      \        \"username\": user.email,\n    })\n\n    response.set_cookie(\n   \
+      \     key=\"refresh_token\",\n        value=refresh_token,\n        httponly=True,\n\
+      \        secure=settings.ENVIRONMENT != \"dev\",\n        samesite=\"lax\",\n\
+      \        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,\n    )\n\
+      \    return response\n\n\n@router.post(\"/signup\", response_model=UserRead,\
+      \ status_code=status.HTTP_201_CREATED)\ndef signup(\n    payload: UserCreate,\n\
+      \    user_service: UserService = Depends(_get_user_service),\n):\n    \"\"\"\
+      Public signup endpoint. Creates user and returns UserRead.\"\"\"\n    return\
+      \ user_service.create_user(payload)\n\n\n@router.post(\"/auth/refresh\")\ndef\
+      \ refresh(\n    refresh_token: str = Cookie(None, alias=\"refresh_token\"),\n\
+      \    db=Depends(get_db),\n):\n    \"\"\"Rotate refresh token and issue new access\
+      \ token.\n\n    Flow:\n    1. Read refresh_token from httpOnly cookie\n    2.\
+      \ Verify token signature and expiry\n    3. Check JTI not revoked (prevents\
+      \ reuse of old tokens)\n    4. Revoke old JTI, issue new token pair\n    5.\
+      \ Return access_token in JSON, set new refresh cookie\n    \"\"\"\n    if not\
+      \ refresh_token:\n        raise HTTPException(\n            status_code=status.HTTP_401_UNAUTHORIZED,\n\
+      \            detail=\"No refresh token provided\",\n        )\n\n    payload\
+      \ = verify_refresh_token(refresh_token)\n    if not payload:\n        raise\
+      \ HTTPException(\n            status_code=status.HTTP_401_UNAUTHORIZED,\n  \
+      \          detail=\"Invalid or expired refresh token\",\n        )\n\n    #\
+      \ Check revocation\n    jti = payload.get(\"jti\")\n    if jti:\n        revoked\
+      \ = db.get(RevokedRefreshToken, jti)\n        if revoked:\n            raise\
+      \ HTTPException(\n                status_code=status.HTTP_401_UNAUTHORIZED,\n\
+      \                detail=\"Refresh token has been revoked\",\n            )\n\
+      \n    email = payload.get(\"sub\")\n    if not email:\n        raise HTTPException(\n\
+      \            status_code=status.HTTP_401_UNAUTHORIZED,\n            detail=\"\
+      Invalid token payload\",\n        )\n\n    user_repo = UserRepository(db)\n\
+      \    user = user_repo.get_by_email(email)\n    if not user:\n        raise HTTPException(\n\
+      \            status_code=status.HTTP_401_UNAUTHORIZED,\n            detail=\"\
+      User not found\",\n        )\n\n    # Revoke old token\n    if jti:\n      \
+      \  db.add(RevokedRefreshToken(jti=jti))\n        db.commit()\n\n    # Issue\
+      \ new tokens\n    new_access = create_access_token(\n        data={\"sub\":\
+      \ user.email, \"system_role\": user.system_role.value}\n    )\n    new_refresh\
+      \ = create_refresh_token(data={\"sub\": user.email})\n\n    response = JSONResponse(content={\n\
+      \        \"access_token\": new_access,\n        \"token_type\": \"bearer\",\n\
+      \    })\n    response.set_cookie(\n        key=\"refresh_token\",\n        value=new_refresh,\n\
+      \        httponly=True,\n        secure=settings.ENVIRONMENT != \"dev\",\n \
+      \       samesite=\"lax\",\n        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS\
+      \ * 24 * 60 * 60,\n    )\n    return response\n\n\n@router.get(\"/users/me\"\
+      , response_model=UserRead)\ndef get_me(current_user: User = Depends(get_current_user)):\n\
+      \    \"\"\"Return the authenticated user's profile.\"\"\"\n    return current_user\n"
+    cors_and_settings: "\"\"\"core/config.py additions — Auth and CORS settings.\"\
+      \"\"\nfrom pydantic_settings import BaseSettings\n\n\nclass Settings(BaseSettings):\n\
+      \    # ... existing settings ...\n\n    # Auth\n    SECRET_KEY: str = \"CHANGE-ME-IN-PRODUCTION\"\
+      \n    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30\n    REFRESH_TOKEN_EXPIRE_DAYS:\
+      \ int = 7\n    PASSWORD_HASH_ROUNDS: int = 12\n\n    # CORS — React dev servers\
+      \ + production domain\n    CORS_ORIGINS: list[str] = [\n        \"http://localhost:3000\"\
+      ,   # Create React App / Next.js\n        \"http://localhost:5173\",   # Vite\n\
+      \    ]\n\n    # Environment flag (controls secure cookie flag)\n    ENVIRONMENT:\
+      \ str = \"dev\"\n\n# ---\n# main.py CORS setup:\n#\n# from fastapi.middleware.cors\
+      \ import CORSMiddleware\n#\n# app.add_middleware(\n#     CORSMiddleware,\n#\
+      \     allow_origins=settings.CORS_ORIGINS,\n#     allow_credentials=True,  #\
+      \ REQUIRED for httpOnly cookie refresh flow\n#     allow_methods=[\"*\"],\n\
+      #     allow_headers=[\"*\"],\n# )\n"
+    app_wiring: "\"\"\"main.py — Wiring auth router and CORS middleware.\"\"\"\nfrom\
+      \ fastapi import FastAPI\nfrom fastapi.middleware.cors import CORSMiddleware\n\
+      \nfrom backend.auth.router import router as auth_router\nfrom backend.core.config\
+      \ import settings\n\napp = FastAPI()\n\n# CORS — must be added BEFORE routes\n\
+      app.add_middleware(\n    CORSMiddleware,\n    allow_origins=settings.CORS_ORIGINS,\n\
+      \    allow_credentials=True,   # Required for httpOnly cookie refresh\n    allow_methods=[\"\
+      *\"],\n    allow_headers=[\"*\"],\n)\n\n# Auth routes (no prefix — login at\
+      \ /login, refresh at /auth/refresh)\napp.include_router(auth_router)\n"
   gotchas:
-  - "tokenUrl in OAuth2PasswordBearer MUST match the actual login route path —\
-    \ if login is under /api/v1/login, set tokenUrl='/api/v1/login' not '/login'"
-  - "OAuth2PasswordRequestForm uses 'username' field for email — this is the OAuth2\
-    \ spec, do not rename it"
-  - "allow_credentials=True in CORS is REQUIRED for httpOnly cookie refresh flow —\
-    \ without it the browser will not send the refresh_token cookie"
-  - "When allow_credentials=True, allow_origins cannot be ['*'] — must list\
-    \ specific origins"
-  - "Refresh token cookie must be httponly=True, secure=True in production,\
-    \ samesite='lax' — never expose refresh tokens to JavaScript"
-  - "PyJWT exception class is jwt.PyJWTError (not JWTError) — different from\
-    \ python-jose which used jose.JWTError"
-  - "PyJWT uses jwt.encode/jwt.decode — python-jose used jose.jwt.encode/jose.jwt.decode.\
-    \ Import is just 'import jwt' with PyJWT"
-  - "PASSWORD_HASH_ROUNDS should be 4 in test settings for fast test execution —\
-    \ 12 is production default"
-  - "Never log token contents in error handlers — log the failure event only"
-  - "UserService.authenticate_user should raise domain exceptions (EntityNotFound,\
-    \ AuthenticationError), not HTTP exceptions — the router maps these to HTTP status codes"
-  - "The refresh endpoint must check JTI revocation BEFORE issuing new tokens —\
-    \ prevents stolen token reuse after legitimate rotation"
-  - "RevokedRefreshToken table grows over time — schedule periodic cleanup of\
-    \ tokens older than REFRESH_TOKEN_EXPIRE_DAYS"
-  - "Reference code uses `backend.` package prefix — adapt if your project package\
-    \ has a different name"
-  - "Use GUID() from PAT-008 for UUID columns, not sqlalchemy.dialects.postgresql.UUID\
-    \ — ensures SQLite compatibility"
+  - tokenUrl in OAuth2PasswordBearer MUST match the actual login route path — if login
+    is under /api/v1/login, set tokenUrl='/api/v1/login' not '/login'
+  - OAuth2PasswordRequestForm uses 'username' field for email — this is the OAuth2
+    spec, do not rename it
+  - allow_credentials=True in CORS is REQUIRED for httpOnly cookie refresh flow —
+    without it the browser will not send the refresh_token cookie
+  - When allow_credentials=True, allow_origins cannot be ['*'] — must list specific
+    origins
+  - Refresh token cookie must be httponly=True, secure=True in production, samesite='lax'
+    — never expose refresh tokens to JavaScript
+  - PyJWT exception class is jwt.PyJWTError (not JWTError) — different from python-jose
+    which used jose.JWTError
+  - PyJWT uses jwt.encode/jwt.decode — python-jose used jose.jwt.encode/jose.jwt.decode.
+    Import is just 'import jwt' with PyJWT
+  - PASSWORD_HASH_ROUNDS should be 4 in test settings for fast test execution — 12
+    is production default
+  - Never log token contents in error handlers — log the failure event only
+  - UserService.authenticate_user should raise domain exceptions (EntityNotFound,
+    AuthenticationError), not HTTP exceptions — the router maps these to HTTP status
+    codes
+  - The refresh endpoint must check JTI revocation BEFORE issuing new tokens — prevents
+    stolen token reuse after legitimate rotation
+  - RevokedRefreshToken table grows over time — schedule periodic cleanup of tokens
+    older than REFRESH_TOKEN_EXPIRE_DAYS
+  - Reference code uses `backend.` package prefix — adapt if your project package
+    has a different name
+  - Use GUID() from PAT-008 for UUID columns, not sqlalchemy.dialects.postgresql.UUID
+    — ensures SQLite compatibility
 dependencies:
 - PyJWT
 - bcrypt
@@ -675,9 +341,9 @@ lifecycle:
   extracted_by: null
   draft_reviewed_at: null
   draft_reviewer: null
-  dry_run_passed_at: null
-  dry_run_project: null
-  pilot_started_at: null
+  dry_run_passed_at: '2026-04-06'
+  dry_run_project: pattern-sandbox
+  pilot_started_at: '2026-04-06'
   pilot_uses: []
   consecutive_successes: 0
   validated_at: null
