@@ -74,6 +74,36 @@ git pull
 ~/agents/install-all.sh
 ```
 
+## MCP Server Registration
+
+Claude Code reads MCP servers from `~/.claude.json` (NOT `~/.claude/settings.json`).
+The installer registers them automatically via `claude mcp add --scope user`.
+
+**What the installer registers:**
+
+| Server | Command | Platform |
+|--------|---------|----------|
+| `knowledge` | `<repo>/knowledge-mcp/node_modules/.bin/tsx <repo>/knowledge-mcp/index.ts` | All |
+| `vault-metrics` | `<repo>/mcp-server/.venv/bin/python <repo>/mcp-server/server.py` | All |
+| `context7` | `npx -y @upstash/context7-mcp@latest` | All |
+| `apple-mcp` | `npx -y apple-mcp@latest` | macOS only |
+
+**Paths are absolute and platform-specific.** On Linux/WSL `<repo>` is `/home/<user>/agents`, on macOS it's `/Users/<user>/agents`. The installer resolves paths at install time — no manual editing needed.
+
+**Manual registration** (if the installer can't run `claude mcp add`):
+
+```bash
+# Linux / WSL
+claude mcp add --scope user knowledge -- ~/agents/knowledge-mcp/node_modules/.bin/tsx ~/agents/knowledge-mcp/index.ts
+claude mcp add --scope user vault-metrics -- ~/agents/mcp-server/.venv/bin/python ~/agents/mcp-server/server.py
+claude mcp add --scope user context7 -- npx -y @upstash/context7-mcp@latest
+
+# macOS (same as above, plus apple-mcp)
+claude mcp add --scope user apple-mcp -- npx -y apple-mcp@latest
+```
+
+**Verify:** `claude mcp list` should show all servers as `✓ Connected`.
+
 ## What Is Shared vs Local
 
 Shared in git:
@@ -82,6 +112,7 @@ Shared in git:
 - `install-all.sh`
 
 Local only (not shared):
+- `~/.claude.json` (MCP servers, session stats — generated per-machine by installer)
 - `~/.claude/history.jsonl`, `~/.claude/projects/`, `~/.claude/debug/`
 - `~/.codex/auth.json`, `~/.codex/history.jsonl`, `~/.codex/sessions/`, `~/.codex/tmp/`
 - `~/.codex/rules/default.rules`

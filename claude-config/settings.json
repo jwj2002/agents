@@ -81,35 +81,5 @@
       }
     }
   },
-  "skipDangerousModePermissionPrompt": true,
-  "mcpServers": {
-    "vault-metrics": {
-      "command": "python3",
-      "args": [
-        "~/agents/mcp-server/server.py",
-        "--mcp"
-      ]
-    },
-    "apple-mcp": {
-      "command": "bunx",
-      "args": [
-        "--no-cache",
-        "apple-mcp@latest"
-      ]
-    },
-    "context7": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@upstash/context7-mcp@latest"
-      ]
-    },
-    "knowledge": {
-      "command": "bash",
-      "args": [
-        "-c",
-        "npx tsx \"$HOME/agents/knowledge-mcp/index.ts\""
-      ]
-    }
-  }
+  "skipDangerousModePermissionPrompt": true
 }

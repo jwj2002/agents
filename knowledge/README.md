@@ -210,10 +210,10 @@ Claude calls these automatically — you don't invoke them manually.
 # 1. Pull latest repo
 cd ~/agents && git pull
 
-# 2. Run installer (sets up hooks, plugins, symlinks)
+# 2. Run installer (sets up hooks, plugins, symlinks, AND registers MCP servers)
 cd ~/agents/claude-config && ./install.sh
 
-# 3. Install knowledge-mcp dependencies
+# 3. Install knowledge-mcp dependencies (installer does this, but just in case)
 cd ~/agents/knowledge-mcp && npm install
 
 # 4. Build database from YAML
@@ -222,9 +222,16 @@ cd ~/agents/knowledge && python3 sync.py build
 # 5. Verify counts
 sqlite3 knowledge/knowledge.db "SELECT COUNT(*) FROM patterns;"  # Should be 23+
 
-# 6. Launch Claude Code — MCP server starts automatically
+# 6. Verify MCP server is registered
+claude mcp list  # knowledge should show ✓ Connected
+
+# 7. Launch Claude Code — MCP server starts automatically
 claude
 ```
+
+**Note:** MCP servers are registered in `~/.claude.json` (not `~/.claude/settings.json`).
+The installer handles this via `claude mcp add --scope user`. If you need to register
+manually, see `docs/CONFIG-BOOTSTRAP.md` for platform-specific commands.
 
 ## Validation
 
