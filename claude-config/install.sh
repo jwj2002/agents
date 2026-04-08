@@ -419,19 +419,31 @@ POST_MERGE="$HOOKS_DIR/post-merge"
 if [ -d "$HOOKS_DIR" ]; then
     cat > "$POST_MERGE" << 'HOOK'
 #!/bin/bash
-# Post-merge hook: rebuild knowledge.db after git pull
-# Fires automatically when git pull brings new changes
+# Post-merge hook: runs after every git pull
+# 1. Rebuilds knowledge.db if knowledge/ files changed
+# 2. Re-runs install.sh if config files changed (idempotent, ~5-10s)
 
-KNOWLEDGE_DIR="$(git rev-parse --show-toplevel)/knowledge"
+REPO_DIR="$(git rev-parse --show-toplevel)"
+KNOWLEDGE_DIR="$REPO_DIR/knowledge"
 
-# Only run if knowledge/ files changed in this merge
-CHANGED=$(git diff-tree -r --name-only ORIG_HEAD HEAD -- knowledge/ 2>/dev/null)
+# --- Knowledge rebuild ---
+KNOWLEDGE_CHANGED=$(git diff-tree -r --name-only ORIG_HEAD HEAD -- knowledge/ 2>/dev/null)
 
-if [ -n "$CHANGED" ]; then
+if [ -n "$KNOWLEDGE_CHANGED" ]; then
     echo "[post-merge] Knowledge files changed — rebuilding knowledge.db..."
     cd "$KNOWLEDGE_DIR" && python3 sync.py build 2>&1 | sed 's/^/[post-merge] /'
 else
     echo "[post-merge] No knowledge changes — skipping rebuild"
+fi
+
+# --- Config re-install ---
+CONFIG_CHANGED=$(git diff-tree -r --name-only ORIG_HEAD HEAD -- claude-config/ codex-config/ install-all.sh 2>/dev/null)
+
+if [ -n "$CONFIG_CHANGED" ]; then
+    echo "[post-merge] Config files changed — re-running installer..."
+    "$REPO_DIR/claude-config/install.sh" 2>&1 | sed 's/^/[post-merge] /'
+else
+    echo "[post-merge] No config changes — skipping install"
 fi
 HOOK
     chmod +x "$POST_MERGE"
