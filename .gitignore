@@ -24,6 +24,11 @@ venv/
 .agents/
 .claude/
 
+# SQLite journal files
+*.db-shm
+*.db-wal
+*.db-journal
+
 # MkDocs build output
 site/
 
