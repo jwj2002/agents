@@ -105,14 +105,11 @@
       ]
     },
     "knowledge": {
-      "command": "npx",
+      "command": "bash",
       "args": [
-        "tsx",
-        "/Users/jasonjob/agents/knowledge-mcp/index.ts"
-      ],
-      "env": {
-        "KNOWLEDGE_DB_PATH": "/Users/jasonjob/agents/knowledge/knowledge.db"
-      }
+        "-c",
+        "npx tsx \"$HOME/agents/knowledge-mcp/index.ts\""
+      ]
     }
   }
 }
