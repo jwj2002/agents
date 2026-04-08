@@ -1,0 +1,65 @@
+id: PAT-026
+category: workflow
+name: git-workflow
+status: pilot
+tier: secondary
+description: >
+  Git branch naming, commit conventions, PR checklist, and pre-PR verification
+  commands. Main stays green at all times.
+when_to_use: >
+  Every git operation -- branching, committing, creating PRs, cleaning up after
+  merge. Applies to all agents working on any project.
+when_not_to_use: >
+  Never skip these rules. Even emergency hotfixes follow the workflow (branch
+  from last green commit as fix/hotfix-{description}).
+implementation:
+  steps:
+    - "Branch from latest origin/main: git fetch origin && git checkout -b {branch} origin/main"
+    - "Name branch as {type}/issue-{N}-{slug} (feature/, fix/, chore/, docs/, test/, perf/)"
+    - "Commit with conventional format: type(scope): description (imperative, lowercase, no period, max 72 chars)"
+    - "One issue per commit -- never bundle multiple issue refs"
+    - "Pre-PR: git fetch origin && git rebase origin/main"
+    - "Pre-PR: ruff check . && ruff format --check . (Python projects)"
+    - "Pre-PR: pytest tests/ -x --timeout=60"
+    - "Pre-PR: git diff --name-only origin/main (verify only relevant files changed)"
+    - "PR title in Conventional Commits format, body with Summary + Test Plan + Closes #N"
+    - "After merge: git fetch --prune origin && git branch -d {branch}"
+reference_code: |
+  # Branch naming
+  git fetch origin && git checkout -b feature/issue-42-add-auth origin/main
+
+  # Pre-PR checklist
+  git fetch origin && git rebase origin/main
+  ruff check . && ruff format --check .
+  pytest tests/ -x --timeout=60
+  git diff --name-only origin/main
+
+  # Branch cleanup after merge
+  git fetch --prune origin
+  git branch -d feature/issue-42-add-auth
+  git branch -vv | grep ': gone]' | awk '{print $1}' | xargs -r git branch -D
+
+  # Large features (500+ lines): split into phased PRs
+  # Phase 1: Schema/model -> merge
+  # Phase 2: Service/logic -> merge (branch from updated main)
+  # Phase 3: API/integration -> merge
+  # Phase 4: Tests -> merge
+gotchas:
+  - "Pre-PR checklist is mandatory -- no exceptions"
+  - "Branch naming must include issue number for traceability"
+  - "Squash merge only -- keeps main history clean"
+  - "Never reuse one branch for multiple PRs"
+  - "Never bundle multiple issues in one commit"
+  - "Never ship debug: commits to main"
+  - "Never force push to shared branches"
+  - "Never skip CI with --no-verify"
+  - "For parallel agent work, no two agents edit the same file -- serialize if overlap"
+tests:
+  - test_branch_name_follows_convention
+  - test_commit_message_follows_conventional_format
+  - test_pre_pr_checklist_runs_all_checks
+  - test_branch_cleanup_after_merge
+  - test_parallel_agents_no_file_overlap
+dependencies:
+  - ruff>=0.1.0
+  - pytest>=7.0.0

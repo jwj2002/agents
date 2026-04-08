@@ -1,0 +1,57 @@
+id: PAT-025
+category: workflow
+name: core-failure-patterns
+status: pilot
+tier: secondary
+description: >
+  3 core failure patterns causing >50% of agent failures: ENUM_VALUE (26%),
+  COMPONENT_API (17%), and VERIFICATION_GAP. Apply proactively on every task.
+when_to_use: >
+  Always -- these patterns are loaded on every task. ENUM_VALUE applies to any
+  fullstack issue with role/status/type fields. COMPONENT_API applies when reusing
+  existing frontend components or hooks. VERIFICATION_GAP applies whenever making
+  assumptions about code structure.
+when_not_to_use: >
+  Never skip these. For COMPLEX issues, also load the full patterns from
+  .claude/memory/patterns-full.md for additional coverage.
+implementation:
+  steps:
+    - "ENUM_VALUE: Read the backend StrEnum definition in models/base.py"
+    - "ENUM_VALUE: Use the VALUE string not the Python name (e.g., 'CO-OWNER' not 'CO_OWNER')"
+    - "ENUM_VALUE: Grep frontend for string literals matching status/role/type and cross-reference"
+    - "COMPONENT_API: Read the actual component source file before using it"
+    - "COMPONENT_API: Extract its prop interface/types"
+    - "COMPONENT_API: Pass all required props with correct types"
+    - "VERIFICATION_GAP: Read actual code before using any function/component/hook"
+    - "VERIFICATION_GAP: Check function signatures, return types, required fields"
+    - "VERIFICATION_GAP: Read imports to understand dependencies"
+reference_code: |
+  ## ENUM_VALUE (26% of failures)
+  # Problem: Frontend uses Python enum NAME instead of VALUE
+  # Bad:  "CO_OWNER"    (Python name)
+  # Good: "CO-OWNER"    (actual value)
+  # Bad:  "IN_PROGRESS"  (Python name)
+  # Good: "in-progress"  (actual value)
+
+  ## COMPONENT_API (17% of failures)
+  # Problem: Component silently ignores unknown props
+  # Prevention: Always read source and extract PropTypes before using
+
+  ## Quick Reference
+  # | Pattern           | Frequency | Trigger                    | Prevention                          |
+  # |-------------------|-----------|----------------------------|-------------------------------------|
+  # | ENUM_VALUE        | 26%       | Fullstack role/status/type | Read backend enum, use VALUE        |
+  # | COMPONENT_API     | 17%       | Reusing frontend component | Read source, extract PropTypes      |
+  # | VERIFICATION_GAP  | --        | Any assumption             | Read actual code -- never assume    |
+gotchas:
+  - "ENUM_VALUE is automatically added to evals for any FULLSTACK change"
+  - "COMPONENT_API applies whenever importing an existing component -- always read source first"
+  - "Components silently ignore unknown props, producing broken UI with no error"
+  - "Missing required props cause runtime errors or empty renders"
+  - "Agent assumptions about code structure lead to wrong function signatures and missing parameters"
+tests:
+  - test_enum_value_uses_value_not_name
+  - test_component_api_reads_source_before_usage
+  - test_verification_gap_reads_code_before_modification
+  - test_fullstack_change_checks_enum_values
+dependencies: []

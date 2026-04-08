@@ -22,13 +22,38 @@ implementation:
   - Include RequestValidationError handler for consistent Pydantic error format
   - Catch-all handler for unexpected exceptions (500) with logging
   - Module-specific exceptions MUST inherit from AppError
+  - 'ConflictError carries current_version and current_entity for optimistic concurrency
+    — frontend ConflictDialog relies on this structured data'
+  - 'WarningValidationError carries structured warnings list (type, overridable, severity,
+    message, details) for frontend WarningDialog'
+  - 'Layer rule: Repository raises nothing (returns None/empty), Service raises domain
+    exceptions, Router raises HTTPException only for simple cases'
   gotchas:
   - Never create exceptions that don't inherit AppError — they'll bypass handlers
     and return raw 500s
   - Always add logging in the 500 catch-all handler
   - BusinessValidationError (422) conflicts with FastAPI's default 422 — handle RequestValidationError
     separately
+  - ConflictError should always include current_version and current_entity when used
+    for optimistic concurrency — without these the frontend ConflictDialog cannot show
+    what changed
+  - BaseRepository.update() catches SQLAlchemy StaleDataError and raises ConflictError
+    as a safety net
   reference_code:
+    conflict_error_with_entity: "class ConflictError(AppError):\n    \"\"\"409 — carries\
+      \ current_version and current_entity for the ConflictDialog.\"\"\"\n    status_code\
+      \ = 409\n    code = \"CONFLICT\"\n\n    def __init__(\n        self,\n        message:\
+      \ str = \"Conflict: entity was modified by another user\",\n        context: dict\
+      \ | None = None,\n        *,\n        current_version: int | None = None,\n  \
+      \      current_entity: dict | None = None,\n    ) -> None:\n        super().__init__(message,\
+      \ context)\n        self.current_version = current_version\n        self.current_entity\
+      \ = current_entity\n"
+    warning_validation_error: "class WarningValidationError(AppError):\n    \"\"\"422\
+      \ — carries structured warnings for the frontend WarningDialog.\"\"\"\n    status_code\
+      \ = 422\n    code = \"WARNING_VALIDATION_ERROR\"\n\n    def __init__(\n        self,\n\
+      \        warnings: list[dict],\n        message: str = \"Validation warnings require\
+      \ override\",\n    ) -> None:\n        super().__init__(message)\n        self.warnings\
+      \ = warnings\n"
     exceptions_py: "\"\"\"Structured domain exceptions.\n\nAppError base with 6 subclasses.\
       \ Every exception carries a machine-readable\ncode, human message, and optional\
       \ context dict. Global handlers map these\nto a consistent JSON shape.\n\"\"\

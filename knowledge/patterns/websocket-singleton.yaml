@@ -1,0 +1,101 @@
+id: PAT-031
+category: frontend
+name: websocket-singleton
+status: pilot
+tier: secondary
+description: >
+  Plain TypeScript singleton for WebSocket connections with React integration
+  via useSyncExternalStore. Never use React hooks for WS lifecycle.
+when_to_use: >
+  When implementing WebSocket connections in a React application. The singleton
+  pattern prevents StrictMode double-mount issues and component lifecycle
+  interference. Connection is tied to auth state, not component mount/unmount.
+when_not_to_use: >
+  Do not use React useEffect hooks for WebSocket lifecycle. Do not close/reopen
+  WebSocket from component lifecycle. setTimeout workarounds for StrictMode
+  issues are hacks -- use this singleton pattern instead.
+implementation:
+  steps:
+    - "Create WebSocketManager class in lib/websocket.ts as a plain TS singleton (outside React)"
+    - "Implement connect(token), disconnect(), send(type, payload, requestId?) methods"
+    - "Add reconnect with exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (max 6 attempts)"
+    - "Add intentionalClose flag to skip reconnect on logout"
+    - "Implement offline queue that replays messages on reconnect"
+    - "Add ping/pong keepalive at 30s interval"
+    - "Expose subscribe() and getSnapshot() for useSyncExternalStore interface"
+    - "Create thin useWebSocket hook using useSyncExternalStore(manager.subscribe, manager.getSnapshot)"
+    - "Control connection ONLY from AuthContext: connect on login/refresh, disconnect on logout"
+    - "Export singleton instance: export const wsManager = new WebSocketManager()"
+reference_code: |
+  // Singleton class (lib/websocket.ts)
+  interface WsSnapshot {
+    isConnected: boolean;
+    lastMessage: WsMessage | null;
+  }
+
+  class WebSocketManager {
+    private ws: WebSocket | null = null;
+    private token: string | null = null;
+    private intentionalClose = false;
+    private listeners = new Set<() => void>();
+    private _snapshot: WsSnapshot = { isConnected: false, lastMessage: null };
+    private offlineQueue: QueuedMessage[] = [];
+
+    connect(token: string): void {
+      if (this.ws && this.token === token) return;
+      this.token = token;
+      this.intentionalClose = false;
+      this.doConnect();
+    }
+
+    disconnect(): void {
+      this.intentionalClose = true;
+      this.token = null;
+      if (this.ws) { this.ws.onclose = null; this.ws.close(); this.ws = null; }
+      this._snapshot = { isConnected: false, lastMessage: null };
+      this.notify();
+    }
+
+    send(type: string, payload: Record<string, unknown>, requestId?: string): void {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        this.offlineQueue.push({ type, payload, requestId });
+        return;
+      }
+      this.ws.send(JSON.stringify({ type, payload, ...(requestId && { request_id: requestId }) }));
+    }
+
+    subscribe = (listener: () => void) => {
+      this.listeners.add(listener);
+      return () => this.listeners.delete(listener);
+    };
+    getSnapshot = (): WsSnapshot => this._snapshot;
+  }
+
+  export const wsManager = new WebSocketManager();
+
+  // React hook (hooks/useWebSocket.ts)
+  export function useWebSocket() {
+    const snapshot = useSyncExternalStore(wsManager.subscribe, wsManager.getSnapshot);
+    const sendMessage = useCallback(
+      (type: string, payload: Record<string, unknown>, requestId?: string) => {
+        wsManager.send(type, payload, requestId);
+      }, [],
+    );
+    return { sendMessage, lastMessage: snapshot.lastMessage, isConnected: snapshot.isConnected };
+  }
+gotchas:
+  - "NEVER create WebSocket inside useEffect -- use singleton class"
+  - "NEVER close/reopen WS from component lifecycle"
+  - "Connection is tied to auth state, not component mount/unmount"
+  - "Initial useEffect approach caused StrictMode double-mount issues (discovered during DocketIQ Phase 4)"
+  - "setTimeout workarounds are hacks -- refactor to singleton instead"
+  - "Intentional close (logout) skips reconnect entirely"
+  - "On reconnect: replay last presence view + subscription, drain offline queue"
+tests:
+  - test_singleton_prevents_duplicate_connections
+  - test_disconnect_sets_intentional_close_flag
+  - test_offline_queue_replays_on_reconnect
+  - test_exponential_backoff_reconnect_strategy
+  - test_use_sync_external_store_integration
+dependencies:
+  - react>=18.0.0

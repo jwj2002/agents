@@ -1,0 +1,100 @@
+id: PAT-034
+category: architecture
+name: FastAPI layered module scaffold
+status: pilot
+tier: secondary
+description: Six-layer module structure (Model, Schema, Repository, Service, Deps,
+  Router) with strict responsibility boundaries. Every domain module follows this
+  pattern for consistency and testability.
+when_to_use: Any new domain module in a FastAPI project. Use this as the scaffold
+  template every time you add a new entity/resource.
+when_not_to_use: Utility modules that don't represent a domain entity (e.g., health
+  checks, middleware, config). Single-file scripts or CLI tools.
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+  - '{module}/models.py — SQLAlchemy ORM models'
+  - '{module}/schemas.py — Pydantic Create/Update/Read schemas'
+  - '{module}/enums.py — module-specific enums (if needed)'
+  - '{module}/repository.py — data access layer (extends BaseRepository)'
+  - '{module}/services.py — business logic layer (transaction owner)'
+  - '{module}/deps.py — FastAPI dependencies (repo/service factories + access control)'
+  - '{module}/router.py — HTTP endpoints (thin layer)'
+  key_decisions:
+  - 'Architecture flow: Request -> Router -> Service -> Repository -> Database'
+  - 'Transaction boundary: Service layer commits. Repositories never commit (flush
+    only).'
+  - 'Error boundary: Services raise domain exceptions. Routers never catch — global
+    error handlers convert to HTTP responses.'
+  - 'Registration checklist: import model in models/__init__.py, include router in
+    main_router.py, create Alembic migration'
+  gotchas:
+  - Repositories flush only, never commit — services control transaction boundaries
+  - Services raise domain exceptions (NotFoundError, ConflictError), never HTTPException
+  - Routers are thin — no if/else on business rules
+  - If you skip the deps.py layer, service wiring ends up duplicated across routers
+  - Forgetting to import the model in models/__init__.py means Alembic autogenerate
+    will miss the table
+  reference_code:
+    model: "class Item(TimestampMixin, Base):\n    __tablename__ = \"items\"\n\n  \
+      \  id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)\n\
+      \    name: Mapped[str] = mapped_column(String(255), nullable=False)\n    account_id:\
+      \ Mapped[uuid.UUID] = mapped_column(\n        ForeignKey(\"accounts.id\", ondelete=\"\
+      CASCADE\"), nullable=False, index=True,\n    )\n    version: Mapped[int] = mapped_column(default=1,\
+      \ nullable=False)\n    account: Mapped[\"Account\"] = relationship(\"Account\"\
+      , back_populates=\"items\")\n"
+    repository: "class ItemRepository(BaseRepository[Item]):\n    def __init__(self,\
+      \ session: AsyncSession) -> None:\n        super().__init__(session, Item)\n\n\
+      \    async def get_with_relations(self, id_: uuid.UUID) -> Item | None:\n   \
+      \     result = await self.session.execute(\n            select(Item).where(Item.id\
+      \ == id_).options(joinedload(Item.account))\n        )\n        return result.unique().scalar_one_or_none()\n"
+    service: "class ItemService:\n    def __init__(self, db: AsyncSession) -> None:\n\
+      \        self.db = db\n        self.repo = ItemRepository(db)\n\n    async def\
+      \ create_item(self, data: ItemCreate, user_id: uuid.UUID) -> Item:\n        return\
+      \ await self.repo.create({**data.model_dump(), \"created_by\": user_id})\n\n\
+      \    async def update_item(self, item_id: uuid.UUID, data: ItemUpdate) -> Item:\n\
+      \        item = await self.repo.get_or_raise(item_id)\n        await self.check_version(item,\
+      \ data.version)\n        return await self.repo.update(item, data.model_dump(exclude_unset=True,\
+      \ exclude={\"version\"}))\n"
+    router: "@router.post(\"\", response_model=ItemRead, status_code=status.HTTP_201_CREATED)\n\
+      async def create_item(\n    payload: ItemCreate,\n    user: CurrentUser,\n  \
+      \  service: ItemService = Depends(get_item_service),\n):\n    return await service.create_item(payload,\
+      \ user.id)\n"
+    layer_rules: "| Layer      | Does                              | Never Does  \
+      \            |\n|------------|-----------------------------------|-------------------------|\n\
+      | Model      | Define columns, relationships     | Business logic, queries |\n\
+      | Schema     | Validate input, shape output      | Side effects            |\n\
+      | Repository | Query DB, return ORM objects      | Commit, raise HTTP exc  |\n\
+      | Service    | Business logic, orchestrate       | HTTP concerns           |\n\
+      | Deps       | Wire repo/service, access control | Business logic          |\n\
+      | Router     | Parse HTTP, call service, respond | Business logic, DB      |\n"
+dependencies:
+- FastAPI
+- SQLAlchemy
+- Pydantic
+tests:
+- test_service_create_item
+- test_service_update_with_version_check
+- test_router_create_returns_201
+- test_router_requires_auth
+lifecycle:
+  extracted_from: mcp-server/patterns
+  extracted_at: '2026-04-06'
+  extracted_by: patch-agent
+  draft_reviewed_at: null
+  draft_reviewer: null
+  dry_run_passed_at: null
+  dry_run_project: null
+  pilot_started_at: '2026-04-06'
+  pilot_uses: []
+  consecutive_successes: 0
+  validated_at: null
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+related_decisions: []
+consecutive_successes: 0
+validated_count: 0
+created_at: '2026-04-06'
+updated_at: '2026-04-06'

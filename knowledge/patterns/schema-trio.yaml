@@ -1,0 +1,81 @@
+id: PAT-038
+category: schemas
+name: Create/Update/Read schema trio convention
+status: pilot
+tier: secondary
+description: Every entity gets three Pydantic schemas (Create, Update, Read) following
+  strict conventions. Create omits server-managed fields, Update uses PATCH semantics
+  with required version for optimistic concurrency, Read includes all fields with
+  from_attributes for ORM conversion.
+when_to_use: Every new domain entity that has CRUD operations. This is the schema
+  naming and structure convention for all FastAPI projects.
+when_not_to_use: Read-only entities (use only a Read schema). Internal DTOs that don't
+  map to API endpoints.
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+  - '{module}/schemas.py — EntityCreate, EntityUpdate, EntityRead'
+  key_decisions:
+  - 'Create: no id, no timestamps, no version (server manages these)'
+  - 'Update: all mutable fields Optional (PATCH semantics), version: int required'
+  - 'Read: model_config = {"from_attributes": True}, includes all fields + version'
+  - 'Use model_dump(exclude_unset=True) on Update to get only changed fields'
+  - 'Immutable fields (customer_id, created_by) in Create and Read, NOT in Update'
+  - 'Nested reads use slim Summary schemas (not full Read schemas)'
+  - 'WarningOverride schema for write paths with validation warnings'
+  gotchas:
+  - Update version field MUST be required (int), not Optional — skipping it bypasses
+    concurrency control
+  - Use model_dump(exclude_unset=True, exclude={"version"}) to avoid writing stale
+    version back
+  - Read schema needs from_attributes=True for ORM model -> Pydantic conversion
+  - Nested Summary schemas go in the consuming schema's file to avoid circular imports
+  - Create may include warning_overrides for the warning validation system
+  reference_code:
+    create_schema: "class JobCreate(BaseModel):\n    customer_id: uuid.UUID\n    service_address_id:\
+      \ uuid.UUID | None = None\n    status: str = \"NEW\"\n    amount: float | None\
+      \ = None\n    notes: str | None = None\n    priority: int = 0\n    display_id:\
+      \ int | None = None\n    warning_overrides: list[WarningOverride] | None = None\n"
+    update_schema: "class JobUpdate(BaseModel):\n    display_id: int | None = None\n\
+      \    service_address_id: uuid.UUID | None = None\n    amount: float | None =\
+      \ None\n    notes: str | None = None\n    priority: int | None = None\n    is_finalized:\
+      \ bool | None = None\n    version: int  # Required for optimistic concurrency\n\
+      \    warning_overrides: list[WarningOverride] | None = None\n"
+    read_schema: "class JobRead(BaseModel):\n    model_config = {\"from_attributes\"\
+      : True}\n    id: uuid.UUID\n    display_id: int | None = None\n    customer_id:\
+      \ uuid.UUID\n    service_address_id: uuid.UUID | None = None\n    status: str\n\
+      \    amount: float | None = None\n    notes: str | None = None\n    priority:\
+      \ int\n    is_finalized: bool\n    version: int\n    created_by: uuid.UUID\n\
+      \    customer: CustomerSummary | None = None\n    service_address: AddressSummary\
+      \ | None = None\n    creator: UserSummary | None = None\n    created_at: datetime\n\
+      \    updated_at: datetime\n"
+    warning_override: "class WarningOverride(BaseModel):\n    warning_type: str\n \
+      \   reason: str = Field(..., min_length=5)\n"
+dependencies:
+- Pydantic
+tests:
+- test_create_schema_rejects_extra_fields
+- test_update_requires_version
+- test_update_model_dump_exclude_unset
+- test_read_schema_from_orm_model
+lifecycle:
+  extracted_from: mcp-server/patterns
+  extracted_at: '2026-04-06'
+  extracted_by: patch-agent
+  draft_reviewed_at: null
+  draft_reviewer: null
+  dry_run_passed_at: null
+  dry_run_project: null
+  pilot_started_at: '2026-04-06'
+  pilot_uses: []
+  consecutive_successes: 0
+  validated_at: null
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+related_decisions: []
+consecutive_successes: 0
+validated_count: 0
+created_at: '2026-04-06'
+updated_at: '2026-04-06'

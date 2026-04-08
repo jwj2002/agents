@@ -16,12 +16,49 @@ implementation:
   - auth/jwt_handler.py — token creation, validation, refresh
   - auth/auth_middleware.py — request authentication dependency
   - auth/token_service.py — token storage, rotation, and revocation
+  - core/security.py — password hashing, token encode/decode
   key_decisions:
   - 'Access token TTL: 15 minutes (short for security)'
   - 'Refresh token TTL: 7 days (balance between security and UX)'
   - Token stored in httpOnly cookie, NOT localStorage (XSS protection)
   - Refresh token stored in DB, not just signed (enables revocation)
   - 'Refresh token rotation: issue new refresh on each use'
+  - 'bcrypt cost factor: 12 (higher than default 10 for stronger hashing)'
+  - 'Password policy: 8-128 chars, 1 upper, 1 lower, 1 digit'
+  - 'Token type discrimination: all tokens carry a "type" field (access, refresh,
+    password_reset) to prevent cross-use'
+  - 'Refresh token JTI: uuid4 stored in refresh_session table for revocation'
+  - 'Password reset token: 10 minute TTL with dedicated purpose field'
+  - 'Role enum (UserRole): StrEnum with values ADMIN, SCHEDULER, VIEWER — carried
+    in access token payload for fast RBAC checks'
+  gotchas:
+  - Always check payload["type"] to prevent using a refresh token as an access token
+  - Password reset tokens are short-lived (10 min) — do not reuse general token creation
+  - Settings come from get_settings() (Pydantic BaseSettings), not hardcoded values
+  - bcrypt cost factor is 12, not the passlib default of 10
+  reference_code:
+    password_hashing: "from passlib.context import CryptContext\n\npwd_context = CryptContext(schemes=[\"\
+      bcrypt\"], deprecated=\"auto\", bcrypt__rounds=12)\n\ndef hash_password(plain:\
+      \ str) -> str:\n    return pwd_context.hash(plain)\n\ndef verify_password(plain:\
+      \ str, hashed: str) -> bool:\n    return pwd_context.verify(plain, hashed)\n"
+    access_token: "def create_access_token(user_id: uuid.UUID, role: str) -> tuple[str,\
+      \ int]:\n    \"\"\"Returns (token, expires_in_seconds).\"\"\"\n    settings =\
+      \ get_settings()\n    expires_delta = timedelta(minutes=settings.access_token_expire_minutes)\n\
+      \    now = datetime.now(UTC)\n    payload = {\n        \"sub\": str(user_id),\n\
+      \        \"role\": role,\n        \"exp\": now + expires_delta,\n        \"iat\"\
+      : now,\n        \"type\": \"access\",\n    }\n    token = jwt.encode(payload,\
+      \ settings.jwt_secret_key, algorithm=settings.jwt_algorithm)\n    return token,\
+      \ int(expires_delta.total_seconds())\n"
+    refresh_token: "def create_refresh_token(user_id: uuid.UUID) -> tuple[str, str,\
+      \ datetime]:\n    \"\"\"Returns (token, jti, expires_at).\"\"\"\n    settings\
+      \ = get_settings()\n    jti = str(uuid.uuid4())\n    expires_at = datetime.now(UTC)\
+      \ + timedelta(days=settings.refresh_token_expire_days)\n    payload = {\n   \
+      \     \"sub\": str(user_id),\n        \"jti\": jti,\n        \"exp\": expires_at,\n\
+      \        \"iat\": datetime.now(UTC),\n        \"type\": \"refresh\",\n    }\n\
+      \    token = jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)\n\
+      \    return token, jti, expires_at\n"
+    role_enum: "class UserRole(enum.StrEnum):\n    ADMIN = \"ADMIN\"\n    SCHEDULER\
+      \ = \"SCHEDULER\"\n    VIEWER = \"VIEWER\"\n"
 dependencies:
 - python-jose[cryptography]
 - passlib[bcrypt]

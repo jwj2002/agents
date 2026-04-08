@@ -1,0 +1,77 @@
+id: PAT-035
+category: schemas
+name: Nested read schemas with Summary pattern
+status: pilot
+tier: secondary
+description: Slim Summary schemas (e.g., CustomerSummary, UserSummary) for nested
+  reads that include only display-relevant fields, avoiding N+1 queries through eager
+  loading.
+when_to_use: Any API response that includes related entities as nested objects. Use
+  Summary schemas instead of full Read schemas for belongs-to relationships.
+when_not_to_use: Simple entities with no relationships. Internal service-to-service
+  calls where full entity data is needed.
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+  - '{module}/schemas.py — Summary schemas alongside parent Read schema'
+  - '{module}/repository.py — eager loading with joinedload/selectinload'
+  key_decisions:
+  - 'Summary schemas contain only id + display fields (name, email, etc.)'
+  - 'Always model_config = {"from_attributes": True} on Summary schemas'
+  - Nested fields are Optional on the parent (not always eager-loaded)
+  - Summary schemas live in the consuming schema's file to avoid circular imports
+  - joinedload for 1:1/belongs-to, selectinload for 1:many/has-many
+  - Always call result.unique() after joinedload (SQLAlchemy deduplication)
+  gotchas:
+  - Never nest full Read schemas — they pull too much data and risk circular imports
+  - Mark nested fields as Optional on the parent since eager-loading may not always
+    be used
+  - Forgetting .unique() after joinedload causes duplicate rows in results
+  - Place Summary schemas in the consuming file, not the source entity's file
+  - selectinload for collections (has-many), joinedload for single objects (belongs-to)
+  reference_code:
+    summary_schemas: "class UserSummary(BaseModel):\n    model_config = {\"from_attributes\"\
+      : True}\n    id: uuid.UUID\n    first_name: str\n    last_name: str\n\nclass\
+      \ CustomerSummary(BaseModel):\n    model_config = {\"from_attributes\": True}\n\
+      \    id: uuid.UUID\n    display_name: str\n\nclass AddressSummary(BaseModel):\n\
+      \    model_config = {\"from_attributes\": True}\n    id: uuid.UUID\n    address_line1:\
+      \ str\n    city: str\n    state: str\n"
+    parent_read_schema: "class JobRead(BaseModel):\n    model_config = {\"from_attributes\"\
+      : True}\n    id: uuid.UUID\n    customer_id: uuid.UUID\n    status: str\n   \
+      \ version: int\n    customer: CustomerSummary | None = None\n    service_address:\
+      \ AddressSummary | None = None\n    creator: UserSummary | None = None\n    created_at:\
+      \ datetime\n    updated_at: datetime\n"
+    eager_loading: "class JobRepository(BaseRepository[Job]):\n    async def get_with_relations(self,\
+      \ id_: uuid.UUID) -> Job | None:\n        result = await self.session.execute(\n\
+      \            select(Job)\n            .where(Job.id == id_)\n            .options(\n\
+      \                joinedload(Job.customer),\n                joinedload(Job.service_address),\n\
+      \                joinedload(Job.creator),\n            )\n        )\n        return\
+      \ result.unique().scalar_one_or_none()\n"
+dependencies:
+- Pydantic
+- SQLAlchemy
+tests:
+- test_job_read_includes_customer_summary
+- test_job_read_without_eager_load_has_none_relations
+- test_summary_schema_excludes_sensitive_fields
+lifecycle:
+  extracted_from: mcp-server/patterns
+  extracted_at: '2026-04-06'
+  extracted_by: patch-agent
+  draft_reviewed_at: null
+  draft_reviewer: null
+  dry_run_passed_at: null
+  dry_run_project: null
+  pilot_started_at: '2026-04-06'
+  pilot_uses: []
+  consecutive_successes: 0
+  validated_at: null
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+related_decisions: []
+consecutive_successes: 0
+validated_count: 0
+created_at: '2026-04-06'
+updated_at: '2026-04-06'

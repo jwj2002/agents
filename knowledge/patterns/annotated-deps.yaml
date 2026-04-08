@@ -1,0 +1,92 @@
+id: PAT-032
+category: dependency-injection
+name: FastAPI Annotated dependency aliases
+status: pilot
+tier: secondary
+description: Uses Python's Annotated type to create reusable dependency aliases (DBSession,
+  CurrentUser, BearerToken, require_role) eliminating repeated Depends() boilerplate
+  in FastAPI routers.
+when_to_use: Any FastAPI project with authentication and database dependencies —
+  reduces boilerplate and standardizes injection patterns across all routers.
+when_not_to_use: Tiny single-file FastAPI apps where Depends() inline is simpler
+  than creating alias infrastructure.
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+  - core/dependencies.py — DBSession, BearerToken, CurrentUser, require_role
+  - core/security.py — decode_token (used by get_current_user)
+  - models/base.py — UserRole enum (used by require_role)
+  key_decisions:
+  - 'DBSession = Annotated[AsyncSession, Depends(get_db)] — one alias replaces verbose
+    db parameter everywhere'
+  - 'BearerToken = Annotated[str, Depends(oauth2_scheme)] — wraps OAuth2PasswordBearer'
+  - 'CurrentUser = Annotated[User, Depends(get_current_user)] — validates token type
+    is "access", rejects inactive users'
+  - 'require_role(*roles) returns a dependency — composable RBAC without middleware'
+  - 'Dependency chain: get_db -> DBSession, oauth2_scheme -> BearerToken, (BearerToken
+    + DBSession) -> CurrentUser, CurrentUser -> require_role'
+  - 'Service factories take DBSession as parameter: service = JobService(db)'
+  gotchas:
+  - get_current_user validates token type is "access" to prevent refresh token abuse
+  - Inactive users (is_active=False) are rejected even with a valid token
+  - require_role returns a Callable, use it with Depends() in router signatures
+  - tokenUrl in OAuth2PasswordBearer must match the actual login endpoint path
+  reference_code:
+    db_session: "from typing import Annotated\nfrom collections.abc import AsyncGenerator\n\
+      from fastapi import Depends, Request\nfrom sqlalchemy.ext.asyncio import AsyncSession\n\
+      \nasync def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:\n\
+      \    async_session = request.app.state.async_session\n    async with async_session()\
+      \ as session:\n        yield session\n\nDBSession = Annotated[AsyncSession, Depends(get_db)]\n"
+    current_user: "async def get_current_user(\n    token: BearerToken,\n    db: DBSession,\n\
+      ) -> User:\n    credentials_exception = HTTPException(\n        status_code=status.HTTP_401_UNAUTHORIZED,\n\
+      \        detail=\"Could not validate credentials\",\n        headers={\"WWW-Authenticate\"\
+      : \"Bearer\"},\n    )\n    try:\n        payload = decode_token(token)\n    except\
+      \ JWTError:\n        raise credentials_exception from None\n    if payload.get(\"\
+      type\") != \"access\":\n        raise credentials_exception\n    user_id_str\
+      \ = payload.get(\"sub\")\n    if user_id_str is None:\n        raise credentials_exception\n\
+      \    try:\n        user_id = uuid.UUID(user_id_str)\n    except ValueError:\n\
+      \        raise credentials_exception from None\n    user_repo = UserRepository(db)\n\
+      \    user = await user_repo.get_by_id(user_id)\n    if user is None or not user.is_active:\n\
+      \        raise credentials_exception\n    return user\n\nCurrentUser = Annotated[User,\
+      \ Depends(get_current_user)]\n"
+    require_role: "def require_role(*roles: UserRole) -> Callable:\n    async def _role_checker(current_user:\
+      \ CurrentUser) -> User:\n        if current_user.role not in roles:\n        \
+      \    raise HTTPException(\n                status_code=status.HTTP_403_FORBIDDEN,\n\
+      \                detail=\"Insufficient permissions\",\n            )\n        return\
+      \ current_user\n    return _role_checker\n"
+    router_usage: "@router.get(\"/jobs\")\nasync def list_jobs(\n    db: DBSession,\n\
+      \    user: CurrentUser,\n):\n    service = JobService(db)\n    return await service.list_jobs()\n\
+      \n@router.post(\"/admin/seed\")\nasync def seed_data(\n    user: User = Depends(require_role(UserRole.ADMIN)),\n\
+      ):\n    ...\n"
+dependencies:
+- FastAPI
+- python-jose[cryptography]
+- SQLAlchemy
+tests:
+- test_db_session_yields_async_session
+- test_current_user_rejects_expired_token
+- test_current_user_rejects_refresh_token_as_access
+- test_current_user_rejects_inactive_user
+- test_require_role_allows_matching_role
+- test_require_role_rejects_non_matching_role
+lifecycle:
+  extracted_from: mcp-server/patterns
+  extracted_at: '2026-04-06'
+  extracted_by: patch-agent
+  draft_reviewed_at: null
+  draft_reviewer: null
+  dry_run_passed_at: null
+  dry_run_project: null
+  pilot_started_at: '2026-04-06'
+  pilot_uses: []
+  consecutive_successes: 0
+  validated_at: null
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+related_decisions: []
+consecutive_successes: 0
+validated_count: 0
+created_at: '2026-04-06'
+updated_at: '2026-04-06'
