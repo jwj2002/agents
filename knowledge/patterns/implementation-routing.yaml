@@ -1,0 +1,65 @@
+id: PAT-027
+category: workflow
+name: implementation-routing
+status: pilot
+tier: secondary
+description: >
+  Task complexity assessment and routing to Quick, Plan Mode, or Orchestrate
+  workflows. Includes Codex review integration by risk level.
+when_to_use: >
+  At the start of every task before beginning implementation. Assess complexity
+  based on files to modify, subsystems touched, requirements clarity, and
+  confidence level. Route to the appropriate workflow automatically.
+when_not_to_use: >
+  Do not skip routing assessment. Even if the task seems obvious, confirm the
+  routing decision and announce it. User can override any routing decision.
+implementation:
+  steps:
+    - "Read the issue and check files involved"
+    - "Assess complexity: TRIVIAL (1 file, obvious), SIMPLE (1-3 files, clear), MODERATE (4-5 files), COMPLEX (6+ files, cross-cutting), FULLSTACK (backend + frontend), PRIOR FAIL (re-attempt)"
+    - "Route to appropriate workflow: /quick, Plan Mode, or /orchestrate"
+    - "For FULLSTACK, always use /orchestrate + CONTRACT"
+    - "For PRIOR FAIL, try /codex:rescue first (different model bias)"
+    - "Apply modifiers: --parallel for multiple independent issues, --resume for interrupted workflows"
+    - "Announce routing decision concisely without asking the user"
+    - "After implementation, apply Codex review based on risk level"
+reference_code: |
+  ## Routing Table
+  # | Complexity  | Files | Route To                  | Codex Role                     |
+  # |-------------|-------|---------------------------|--------------------------------|
+  # | TRIVIAL     | 1     | /quick                    | None                           |
+  # | SIMPLE      | 1-3   | Plan Mode                 | Offer review after             |
+  # | MODERATE    | 4-5   | /orchestrate (SIMPLE)     | Review (recommended)           |
+  # | COMPLEX     | 6+    | /orchestrate (COMPLEX)    | Review (auto) + delegate       |
+  # | FULLSTACK   | Any   | /orchestrate + CONTRACT   | Review (enum/API) + parallel   |
+  # | PRIOR FAIL  | Any   | /codex:rescue first       | Primary implementer            |
+
+  ## Workflow Pipelines
+  # Quick:     change -> verify -> done
+  # Plan:      plan -> implement -> [offer review]
+  # TRIVIAL:   MAP-PLAN -> PATCH -> PROVE-lite
+  # SIMPLE:    MAP-PLAN -> [CONTRACT*] -> PLAN-CHECK -> PATCH -> PROVE
+  # COMPLEX:   MAP -> PLAN -> [CONTRACT*] -> PLAN-CHECK -> PATCH -> PROVE
+
+  ## Review Integration
+  # PATCH -> PROVE passes -> /codex:adversarial-review --background
+  #                           -> findings? No -> /pr
+  #                           -> findings? Yes -> fix -> re-run PROVE -> /pr
+
+  ## Announce Format
+  # "Quick -- typo in README, 1 file. No Codex."
+  # "Plan mode -- 2 files, clear requirements. Will offer Codex review after."
+  # "Orchestrate (COMPLEX, fullstack) -- new module + frontend."
+gotchas:
+  - "Always assess BEFORE entering any mode -- read the issue, check files involved"
+  - "Make the routing call yourself -- do not ask the user"
+  - "User can override any routing decision"
+  - "For FULLSTACK, always add E01 (ENUM_VALUE) eval regardless of file mapping"
+  - "PRIOR FAIL should try Codex first before re-running Claude (different model bias)"
+tests:
+  - test_trivial_routes_to_quick
+  - test_simple_routes_to_plan_mode
+  - test_complex_routes_to_orchestrate
+  - test_fullstack_includes_contract
+  - test_prior_fail_tries_codex_first
+dependencies: []

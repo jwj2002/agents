@@ -1,0 +1,71 @@
+id: PAT-024
+category: workflow
+name: codex-delegation
+status: pilot
+tier: secondary
+description: >
+  5 Codex delegation patterns and model selection guide for parallel agent work.
+  Codex (GPT) runs in background while Claude continues primary work.
+when_to_use: >
+  When a task is independent and doesn't block Claude's primary work. Especially
+  useful for: parallel fullstack splits (Claude backend, Codex frontend), debugging
+  test failures for a different issue, prior failure escalation (different model bias),
+  mechanical refactoring (rename/extract/move), and test writing after feature implementation.
+when_not_to_use: >
+  When the task requires orchestrate pipeline state (MAP->PATCH), needs MCP server
+  access, involves project-specific rules/patterns, is the primary implementation
+  thread, or requires architectural decisions needing deep context.
+implementation:
+  steps:
+    - "Assess whether the task is independent from Claude's current work"
+    - "Select delegation pattern: parallel split, debug, prior failure, refactoring, or test writing"
+    - "Construct structured XML prompt with mandatory blocks: <task>, <completeness_contract>, <verification_loop>"
+    - "Add task-type-specific blocks (action_safety for writes, grounding_rules for reviews)"
+    - "Select model based on task type (gpt-5.4 for implementation, gpt-5.4-mini for review/debug)"
+    - "Launch via /codex:rescue with appropriate flags (--background, --write, --effort)"
+    - "Continue Claude's primary work while Codex runs in background"
+    - "Check /codex:status or /codex:result when Codex completes"
+reference_code: |
+  ## Pattern 1: Parallel Fullstack Split
+  Claude: PATCH backend (services, models, routes)
+    -> /codex:rescue --background --write
+         "Implement frontend component per CONTRACT..."
+
+  ## Pattern 2: Debug Delegation
+  Claude: working on issue A...
+    -> /codex:rescue --background
+         "Investigate why tests in backend/auth/tests/ are failing..."
+
+  ## Pattern 3: Prior Failure Escalation
+  PROVE: BLOCKED (root cause: MULTI_MODEL)
+    -> /codex:rescue --write --effort high
+         "Fix issue #N. Prior attempt failed with MULTI_MODEL error."
+
+  ## Prompt Construction (MANDATORY)
+  Minimum blocks for every prompt:
+    1. <task> -- concrete job with expected end state
+    2. <completeness_contract> -- don't stop at first plausible answer
+    3. <verification_loop> -- verify result before finalizing
+
+  ## Model Selection
+  | Task Type            | Model          | Effort |
+  |----------------------|----------------|--------|
+  | Quick review         | gpt-5.4-mini   | medium |
+  | Adversarial review   | gpt-5.4        | high   |
+  | Bug investigation    | gpt-5.4-mini   | medium |
+  | Feature impl         | gpt-5.4        | high   |
+  | Mechanical refactor  | gpt-5.4-mini   | low    |
+  | Test writing         | gpt-5.4        | medium |
+  | Prior failure rescue | gpt-5.4        | xhigh  |
+gotchas:
+  - "Always use structured XML prompt blocks -- never plain language delegation"
+  - "Read prompt-blocks.md and codex-prompt-recipes.md on first delegation per session"
+  - "For prior failures, always try Codex before re-running Claude (different model bias)"
+  - "Codex has no MCP access -- do not delegate tasks requiring vault or metrics tools"
+  - "Add task-type-specific blocks beyond the 3 mandatory ones (action_safety for writes)"
+tests:
+  - test_delegation_uses_structured_xml_prompt
+  - test_model_selection_matches_task_type
+  - test_background_delegation_does_not_block_claude
+  - test_prior_failure_escalates_to_codex_first
+dependencies: []

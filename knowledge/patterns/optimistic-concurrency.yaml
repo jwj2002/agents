@@ -1,0 +1,87 @@
+id: PAT-036
+category: concurrency
+name: Optimistic concurrency with version column
+status: pilot
+tier: secondary
+description: Version-based optimistic concurrency control that prevents lost updates
+  when multiple users edit the same entity. ConflictError carries current entity state
+  so the frontend can show what changed.
+when_to_use: Any mutable entity that multiple users might edit concurrently. Especially
+  important for forms where users may have stale data.
+when_not_to_use: Append-only entities (logs, events). Entities only edited by background
+  jobs with no concurrent access. Single-user applications.
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+  - '{module}/schemas.py — Update schema with required version: int'
+  - '{module}/services.py — check_version() before applying updates'
+  - '{module}/repository.py — catches StaleDataError in update()'
+  - core/exceptions.py — ConflictError with current_version and current_entity
+  key_decisions:
+  - 'Every mutable entity has a version: int column (starts at 1)'
+  - 'Update schemas require version: int (not optional) — forces client to send version'
+  - Service calls check_version() BEFORE applying the update
+  - 'ConflictError carries current_version + current_entity for the frontend ConflictDialog'
+  - BaseRepository.update() catches SQLAlchemy StaleDataError as a safety net
+  - Frontend must store and send back the version from the last read
+  gotchas:
+  - version field on Update schema MUST be required (not Optional) — otherwise clients
+    can skip concurrency control
+  - Service check_version() must run before repo.update(), not after
+  - ConflictError without current_entity is useless — the frontend needs the fresh
+    data to show the conflict
+  - StaleDataError catch in BaseRepository is a safety net, not the primary check
+  - model_dump(exclude_unset=True, exclude={"version"}) prevents writing the old version
+    back to the entity
+  reference_code:
+    update_schema: "class JobUpdate(BaseModel):\n    display_id: int | None = None\n\
+      \    amount: float | None = None\n    notes: str | None = None\n    version:\
+      \ int  # Required -- forces optimistic concurrency\n"
+    check_version: "async def check_version(self, job: Job, version: int) -> None:\n\
+      \    if job.version != version:\n        raise ConflictError(\n            \"\
+      Conflict: entity was modified by another user\",\n            current_version=job.version,\n\
+      \            current_entity=JobRead.model_validate(job).model_dump(mode=\"json\"\
+      ),\n        )\n"
+    repo_update: "async def update(self, obj: ModelT, data: dict[str, Any]) -> ModelT:\n\
+      \    for key, value in data.items():\n        setattr(obj, key, value)\n    try:\n\
+      \        await self.session.flush()\n    except orm_exc.StaleDataError as exc:\n\
+      \        raise ConflictError(\n            \"Conflict: entity was modified by\
+      \ another user\",\n        ) from exc\n    await self.session.refresh(obj)\n\
+      \    return obj\n"
+    full_flow: "# Client: GET /jobs/123 -> { version: 3, ... }\n# Client: PATCH /jobs/123\
+      \ { notes: \"updated\", version: 3 }\n#\n# Service:\n#   job = await repo.get_or_raise(job_id)\
+      \       # version is 3\n#   await self.check_version(job, data.version)  # 3\
+      \ == 3, OK\n#   await repo.update(job, data_dict)            # version -> 4\n\
+      #\n# If another user updated first (version is now 4):\n#   await self.check_version(job,\
+      \ data.version)  # 4 != 3, CONFLICT\n#   -> ConflictError(current_version=4,\
+      \ current_entity={...})\n#   -> 409 response with current entity state\n#   ->\
+      \ Frontend shows ConflictDialog\n"
+dependencies:
+- SQLAlchemy
+- FastAPI
+tests:
+- test_update_succeeds_with_matching_version
+- test_update_raises_conflict_with_stale_version
+- test_conflict_error_carries_current_entity
+- test_stale_data_error_caught_by_repository
+lifecycle:
+  extracted_from: mcp-server/patterns
+  extracted_at: '2026-04-06'
+  extracted_by: patch-agent
+  draft_reviewed_at: null
+  draft_reviewer: null
+  dry_run_passed_at: null
+  dry_run_project: null
+  pilot_started_at: '2026-04-06'
+  pilot_uses: []
+  consecutive_successes: 0
+  validated_at: null
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+related_decisions: []
+consecutive_successes: 0
+validated_count: 0
+created_at: '2026-04-06'
+updated_at: '2026-04-06'

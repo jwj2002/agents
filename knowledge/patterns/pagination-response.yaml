@@ -1,0 +1,73 @@
+id: PAT-037
+category: schemas
+name: PaginatedResponse generic schema
+status: pilot
+tier: secondary
+description: Generic PaginatedResponse[T] Pydantic schema with total, page, page_size,
+  and pages fields. Companion ErrorResponse and MessageResponse schemas included.
+when_to_use: Any list endpoint that returns paginated data. Use as the response_model
+  wrapper for all paginated endpoints.
+when_not_to_use: Endpoints that return all items without pagination (small fixed-size
+  lists). Streaming/cursor-based pagination patterns.
+implementation:
+  language: python
+  framework: FastAPI
+  key_files:
+  - schemas/common.py — PaginatedResponse[T], ErrorResponse, MessageResponse
+  - core/repository.py — BaseRepository.get_multi() returns tuple[list[ModelT], int]
+  key_decisions:
+  - 'PaginatedResponse[T] uses Python 3.12 generic syntax for clean type hints'
+  - 'Repository returns raw (items, total) tuple; router wraps in PaginatedResponse'
+  - 'pages field computed in the router: ceil(total / page_size)'
+  - 'Default page_size is 50, max is 100, page is 1-indexed'
+  - 'Default ordering is created_at DESC if model has created_at column'
+  gotchas:
+  - page is 1-indexed (not 0-indexed) — offset = (page - 1) * page_size
+  - pages field is computed in the router, not stored or computed in the schema
+  - Always validate page >= 1 and 1 <= page_size <= 100 via Query params
+  - When using joinedload with get_multi, call .unique() on results
+  reference_code:
+    paginated_response: "class PaginatedResponse[T](BaseModel):\n    items: list[T]\n\
+      \    total: int\n    page: int\n    page_size: int\n    pages: int\n\nclass ErrorResponse(BaseModel):\n\
+      \    detail: str\n    code: str | None = None\n\nclass MessageResponse(BaseModel):\n\
+      \    message: str\n"
+    router_usage: "@router.get(\"\", response_model=PaginatedResponse[JobRead])\n\
+      async def list_jobs(\n    page: int = Query(1, ge=1),\n    page_size: int = Query(50,\
+      \ ge=1, le=100),\n    db: DBSession,\n    user: CurrentUser,\n):\n    service\
+      \ = JobService(db)\n    offset = (page - 1) * page_size\n    items, total = await\
+      \ service.repo.get_multi(offset=offset, limit=page_size)\n    return PaginatedResponse(\n\
+      \        items=[JobRead.model_validate(j) for j in items],\n        total=total,\n\
+      \        page=page,\n        page_size=page_size,\n        pages=(total + page_size\
+      \ - 1) // page_size,\n    )\n"
+    get_multi_signature: "async def get_multi(\n    self,\n    *,\n    offset: int\
+      \ = 0,\n    limit: int = 50,\n    order_by: str | None = None,\n    descending:\
+      \ bool = False,\n    filters: dict[str, Any] | None = None,\n    options: list\
+      \ | None = None,\n) -> tuple[list[ModelT], int]:\n"
+dependencies:
+- Pydantic
+- FastAPI
+tests:
+- test_paginated_response_calculates_pages
+- test_page_1_returns_first_page
+- test_page_size_clamped_to_100
+- test_empty_results_return_zero_pages
+lifecycle:
+  extracted_from: mcp-server/patterns
+  extracted_at: '2026-04-06'
+  extracted_by: patch-agent
+  draft_reviewed_at: null
+  draft_reviewer: null
+  dry_run_passed_at: null
+  dry_run_project: null
+  pilot_started_at: '2026-04-06'
+  pilot_uses: []
+  consecutive_successes: 0
+  validated_at: null
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+related_decisions: []
+consecutive_successes: 0
+validated_count: 0
+created_at: '2026-04-06'
+updated_at: '2026-04-06'

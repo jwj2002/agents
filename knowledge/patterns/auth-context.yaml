@@ -1,0 +1,95 @@
+id: PAT-029
+category: frontend
+name: auth-context
+status: pilot
+tier: secondary
+description: >
+  AuthContext pattern with silent refresh on mount, login/logout with WebSocket
+  lifecycle management, and sessionStorage user caching.
+when_to_use: >
+  When implementing or modifying authentication flows in the frontend. The
+  AuthContext is the single source of truth for user state, JWT tokens, and
+  WebSocket connection lifecycle.
+when_not_to_use: >
+  Do not manage WebSocket connections from individual components -- only
+  AuthContext controls wsManager.connect/disconnect. Do not store auth tokens
+  in components or hooks outside of AuthContext.
+implementation:
+  steps:
+    - "Create AuthProvider component in frontend/src/contexts/AuthContext.tsx"
+    - "Initialize isLoading=true to prevent flash of login screen on mount"
+    - "On mount, attempt silent refresh via apiRefresh() using httpOnly cookie"
+    - "On successful refresh, restore user from sessionStorage and connect WebSocket"
+    - "Use cancelled flag pattern in useEffect for StrictMode safety"
+    - "Login: call apiLogin, setUser, cache to sessionStorage, connect wsManager"
+    - "Logout: best-effort apiLogout (swallow errors), disconnect wsManager, clear state"
+    - "Memoize context value with useMemo to prevent unnecessary re-renders"
+reference_code: |
+  // Provider structure
+  export function AuthProvider({ children }: { children: ReactNode }) {
+    const [user, setUser] = useState<User | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
+
+    // Silent refresh on mount
+    useEffect(() => {
+      let cancelled = false;
+      async function restoreSession() {
+        try {
+          await apiRefresh();
+          if (!cancelled) {
+            const cached = sessionStorage.getItem("diq_user");
+            if (cached) {
+              setUser(JSON.parse(cached) as User);
+              const token = getAccessToken();
+              if (token) wsManager.connect(token);
+            }
+          }
+        } catch {
+          if (!cancelled) { clearAccessToken(); setUser(null); }
+        } finally {
+          if (!cancelled) setIsLoading(false);
+        }
+      }
+      void restoreSession();
+      return () => { cancelled = true; };
+    }, []);
+
+    const login = useCallback(async (credentials: LoginRequest) => {
+      const data = await apiLogin(credentials);
+      setUser(data.user);
+      sessionStorage.setItem("diq_user", JSON.stringify(data.user));
+      const token = getAccessToken();
+      if (token) wsManager.connect(token);
+    }, []);
+
+    const logout = useCallback(async () => {
+      try { await apiLogout(); } catch { /* best-effort */ }
+      wsManager.disconnect();
+      setUser(null);
+      sessionStorage.removeItem("diq_user");
+    }, []);
+  }
+
+  // Context value shape
+  interface AuthContextValue {
+    user: User | null;
+    isAuthenticated: boolean;
+    isLoading: boolean;
+    login: (credentials: LoginRequest) => Promise<void>;
+    logout: () => Promise<void>;
+  }
+gotchas:
+  - "WebSocket lifecycle is ONLY controlled here -- never from components"
+  - "isLoading must start as true to prevent auth flash on mount"
+  - "Always use the cancelled flag pattern for async effects (StrictMode safe)"
+  - "Context object and Provider are in separate files (auth-context.ts + AuthContext.tsx)"
+  - "Logout swallows server errors -- client state is always cleared regardless"
+  - "Access token is in memory/localStorage; refresh token is httpOnly cookie"
+tests:
+  - test_silent_refresh_restores_session_on_mount
+  - test_login_caches_user_and_connects_websocket
+  - test_logout_disconnects_websocket_and_clears_state
+  - test_loading_state_prevents_flash_of_login
+  - test_strict_mode_cancelled_flag_prevents_stale_updates
+dependencies:
+  - react>=18.0.0

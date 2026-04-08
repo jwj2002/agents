@@ -1,0 +1,84 @@
+id: PAT-033
+category: infrastructure
+name: Dev start/stop scripts with configurable ports
+status: pilot
+tier: secondary
+description: Start/stop shell scripts for local development with configurable ports
+  via .env and CLI flags. Supports running multiple projects simultaneously with port
+  range conventions.
+when_to_use: Any fullstack project (FastAPI + React/Vite + Postgres) that needs reproducible
+  local development startup. Especially important when running multiple projects on
+  the same machine.
+when_not_to_use: Projects using docker-compose exclusively for all services (no bare-metal
+  dev). Single-service projects where a simple uvicorn command suffices.
+implementation:
+  language: bash
+  framework: null
+  key_files:
+  - scripts/start.sh — starts DB, backend, frontend with port discovery
+  - scripts/stop.sh — kills processes and stops DB container
+  - .env — PORT source of truth (PROJECT_API_PORT, PROJECT_UI_PORT, PROJECT_DB_PORT)
+  key_decisions:
+  - 'Ports configured in .env as source of truth: PROJECT_API_PORT, PROJECT_UI_PORT,
+    PROJECT_DB_PORT'
+  - Scripts accept --api-port, --ui-port, --db-port flags for one-off overrides
+  - 'Port convention for multiple projects: Project A (8000/5173/5432), Project B
+    (8001/5174/5433), etc.'
+  - Scripts kill existing processes on target ports before starting (idempotent)
+  - Health checks verify DB, API, and UI are ready before declaring success
+  - 'Logs go to /tmp/{PROJECT}-backend.log and /tmp/{PROJECT}-frontend.log'
+  gotchas:
+  - Replace PROJECT placeholder with actual project slug in both scripts
+  - Agents discover ports by reading .env, never hardcode port numbers
+  - lsof -ti may not work on all Linux distros — alternative is fuser
+  - sleep durations between service starts may need tuning for slower machines
+  - DB container must already be created (docker run) before start.sh works
+  reference_code:
+    start_sh: "#!/bin/bash\nset -e\nROOT=\"$(cd \"$(dirname \"$0\")/..\" && pwd)\"\
+      \ncd \"$ROOT\"\n\nPROJECT=\"myproject\"\nAPI_PORT=\"${PROJECT_API_PORT:-8000}\"\
+      \nUI_PORT=\"${PROJECT_UI_PORT:-5173}\"\nDB_CONTAINER=\"${PROJECT}-dev-db\"\n\
+      DB_USER=\"${PROJECT}\"\nDB_PORT=\"${PROJECT_DB_PORT:-5433}\"\n\nwhile [[ $# -gt\
+      \ 0 ]]; do\n    case \"$1\" in\n        --api-port) API_PORT=\"$2\"; shift 2\
+      \ ;;\n        --ui-port) UI_PORT=\"$2\"; shift 2 ;;\n        --db-port) DB_PORT=\"\
+      $2\"; shift 2 ;;\n        *) echo \"Unknown: $1\"; exit 1 ;;\n    esac\ndone\n\
+      \necho \"=== ${PROJECT} Start ===\"\necho \"  API: :${API_PORT}  UI: :${UI_PORT}\
+      \  DB: :${DB_PORT}\"\n\nkill $(lsof -ti:${API_PORT}) 2>/dev/null || true\nkill\
+      \ $(lsof -ti:${UI_PORT}) 2>/dev/null || true\nsleep 2\n\ndocker start ${DB_CONTAINER}\
+      \ 2>/dev/null || true\nsleep 2\ndocker exec ${DB_CONTAINER} pg_isready -U ${DB_USER}\
+      \ -q && echo \"  DB ready\" || exit 1\n\nnohup python3 -m uvicorn app.main:app\
+      \ --host 0.0.0.0 --port ${API_PORT} > /tmp/${PROJECT}-backend.log 2>&1 &\nsleep\
+      \ 4\ncurl -s http://localhost:${API_PORT}/api/v1/health > /dev/null && echo \"\
+      \  API ready\" || exit 1\n\ncd \"$ROOT/frontend\"\nnohup npx vite --host 0.0.0.0\
+      \ --port ${UI_PORT} > /tmp/${PROJECT}-frontend.log 2>&1 &\ncd \"$ROOT\"\nsleep\
+      \ 4\ncurl -s -o /dev/null http://localhost:${UI_PORT} && echo \"  UI ready\"\
+      \ || exit 1\n\necho \"All running: http://localhost:${UI_PORT}\"\n"
+    stop_sh: "#!/bin/bash\nPROJECT=\"myproject\"\nAPI_PORT=\"${PROJECT_API_PORT:-8000}\"\
+      \nUI_PORT=\"${PROJECT_UI_PORT:-5173}\"\nDB_CONTAINER=\"${PROJECT}-dev-db\"\n\n\
+      kill $(lsof -ti:${API_PORT}) 2>/dev/null || true\nkill $(lsof -ti:${UI_PORT})\
+      \ 2>/dev/null || true\ndocker stop ${DB_CONTAINER} 2>/dev/null || true\necho\
+      \ \"All stopped\"\n"
+dependencies: []
+tests:
+- test_start_script_exits_on_db_failure
+- test_stop_script_is_idempotent
+- test_port_override_flags_work
+lifecycle:
+  extracted_from: mcp-server/patterns
+  extracted_at: '2026-04-06'
+  extracted_by: patch-agent
+  draft_reviewed_at: null
+  draft_reviewer: null
+  dry_run_passed_at: null
+  dry_run_project: null
+  pilot_started_at: '2026-04-06'
+  pilot_uses: []
+  consecutive_successes: 0
+  validated_at: null
+  deprecated_at: null
+  deprecated_reason: null
+  replaced_by: null
+related_decisions: []
+consecutive_successes: 0
+validated_count: 0
+created_at: '2026-04-06'
+updated_at: '2026-04-06'

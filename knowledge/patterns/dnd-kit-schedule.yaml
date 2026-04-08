@@ -1,0 +1,101 @@
+id: PAT-030
+category: frontend
+name: dnd-kit-schedule
+status: pilot
+tier: secondary
+description: >
+  Multi-view drag-and-drop scheduling with @dnd-kit/core. Supports optimistic
+  updates, queue-to-schedule creation, and unschedule-to-queue removal.
+when_to_use: >
+  When implementing drag-and-drop scheduling interfaces with multiple views
+  (day, week, month, mobile). Use for moving events between time slots,
+  creating events from a job queue, and unscheduling events back to the queue.
+when_not_to_use: >
+  For simple reorderable lists, use @dnd-kit/sortable instead. For non-schedule
+  drag-and-drop (file upload, kanban boards), adapt the pattern but skip the
+  schedule-specific time slot and queue logic.
+implementation:
+  steps:
+    - "Install @dnd-kit/core and @dnd-kit/utilities (NOT @dnd-kit/sortable for grids)"
+    - "Create DndContext provider in ScheduleView component"
+    - "Configure PointerSensor (distance: 8) and TouchSensor (delay: 200ms)"
+    - "Disable sensors when offline: sensors={isOnline ? sensors : []}"
+    - "Define typed DragData and DropData interfaces for type-safe payloads"
+    - "Create useDragAndDrop hook with all DnD state and three mutation workflows (move, create, unschedule)"
+    - "Implement optimistic updates: snapshot -> cache update -> rollback on error -> refetch on settle"
+    - "Add DragOverlay with dropAnimation={null} and rotate-2 shadow-lg styling"
+    - "Protect past dates at TWO levels: droppable disabled AND handleDragEnd check"
+    - "Hide drag source with isDragging ? 'invisible' : '' (not display:none)"
+reference_code: |
+  // Typed drag/drop data
+  interface DragData {
+    type: "schedule-event" | "queue-job";
+    event?: ScheduleJobEvent;
+    jobId?: string;
+    jobLabel?: string;
+    jobInfo?: QueueJobInfo;
+  }
+
+  interface DropData {
+    type: "crew-column" | "queue";
+    crewId: string | null;
+    date?: string;   // "YYYY-MM-DD"
+    time?: string;   // "HH:00"
+  }
+
+  // DndContext setup
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+  );
+
+  <DndContext sensors={isOnline ? sensors : []}
+    onDragStart={handleDragStart}
+    onDragEnd={handleDragEnd}
+    onDragCancel={handleDragCancel}>
+    <DragOverlay dropAnimation={null}>
+      {activeEvent && <div className="w-[280px] rotate-2 opacity-90 shadow-lg">...</div>}
+    </DragOverlay>
+  </DndContext>
+
+  // Optimistic update pattern (move)
+  const moveMutation = useMutation({
+    onMutate: async ({ event, dropData }) => {
+      await queryClient.cancelQueries({ queryKey: scheduleQueryKey });
+      const previous = queryClient.getQueryData(scheduleQueryKey);
+      queryClient.setQueryData(scheduleQueryKey, (old) => ({
+        ...old,
+        job_events: old.job_events.map(e =>
+          e.id === event.id ? { ...e, start: newStart, end: newEnd, crew: newCrew } : e
+        ),
+      }));
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      queryClient.setQueryData(scheduleQueryKey, context?.previous);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: scheduleQueryKey });
+    },
+  });
+gotchas:
+  - "Use @dnd-kit/core only -- NOT sortable (for grids, not lists)"
+  - "Always type drag/drop data payloads (DragData/DropData interfaces)"
+  - "Hide source with isDragging ? 'invisible' : '' (not display:none)"
+  - "DragOverlay with dropAnimation={null} for instant feedback"
+  - "Disable sensors when offline -- sensors={isOnline ? sensors : []}"
+  - "Past date protection at TWO levels: droppable disabled AND handleDragEnd check"
+  - "Optimistic updates: snapshot -> update cache -> rollback on error -> refetch on settle"
+  - "Queue-to-schedule creates via API; schedule-to-queue deletes via API"
+  - "All DnD logic in ONE hook (useDragAndDrop) -- views only handle rendering"
+  - "rotate-2 shadow-lg on DragOverlay for 'picked up' visual feel"
+tests:
+  - test_drag_event_between_time_slots
+  - test_drag_queue_item_to_schedule
+  - test_unschedule_drag_to_queue
+  - test_past_date_drop_rejected
+  - test_optimistic_update_rollback_on_error
+dependencies:
+  - "@dnd-kit/core>=6.3.1"
+  - "@dnd-kit/utilities>=3.2.2"
+  - "@tanstack/react-query>=5.0.0"

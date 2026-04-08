@@ -25,7 +25,63 @@ implementation:
   - count() with optional filters, skips None values
   - get_with_filter(id, **filters) for tenant-scoped lookups, returns None if not
     found
+  - 'Async variant: BaseRepository[ModelT: Base] using Python 3.12 type parameter
+    syntax with AsyncSession'
+  - 'get_or_raise(id_) — returns entity or raises NotFoundError (eliminates repetitive
+    None checks in services)'
+  - 'update() catches StaleDataError and raises ConflictError for optimistic concurrency
+    safety net'
+  - 'get_multi() returns tuple[list[ModelT], int] (items + total_count) for pagination'
+  - 'Default ordering: created_at DESC if model has created_at column and no order_by
+    specified'
+  - 'Async repo uses flush() instead of add/commit — service layer owns transaction'
   reference_code:
+    async_base_repository: "import uuid\nfrom typing import Any\n\nfrom sqlalchemy\
+      \ import func, select\nfrom sqlalchemy.ext.asyncio import AsyncSession\nfrom\
+      \ sqlalchemy.orm import exc as orm_exc\n\nfrom app.core.exceptions import ConflictError,\
+      \ NotFoundError\nfrom app.models.base import Base\n\n\nclass BaseRepository[ModelT:\
+      \ Base]:\n    \"\"\"Async base repository with CRUD operations.\"\"\"\n\n   \
+      \ def __init__(self, session: AsyncSession, model: type[ModelT]) -> None:\n \
+      \       self.session = session\n        self.model = model\n\n    async def get(self,\
+      \ id_: uuid.UUID) -> ModelT | None:\n        result = await self.session.execute(\n\
+      \            select(self.model).where(self.model.id == id_)\n        )\n     \
+      \   return result.scalar_one_or_none()\n\n    async def get_or_raise(self, id_:\
+      \ uuid.UUID) -> ModelT:\n        obj = await self.get(id_)\n        if obj is\
+      \ None:\n            raise NotFoundError(f\"{self.model.__name__} not found\"\
+      )\n        return obj\n\n    async def get_multi(\n        self,\n        *,\n\
+      \        offset: int = 0,\n        limit: int = 50,\n        order_by: str |\
+      \ None = None,\n        descending: bool = False,\n        filters: dict[str,\
+      \ Any] | None = None,\n        options: list | None = None,\n    ) -> tuple[list[ModelT],\
+      \ int]:\n        stmt = select(self.model)\n        count_stmt = select(func.count()).select_from(self.model)\n\
+      \        if options:\n            for opt in options:\n                stmt =\
+      \ stmt.options(opt)\n        if filters:\n            for key, value in filters.items():\n\
+      \                if value is not None:\n                    col = getattr(self.model,\
+      \ key)\n                    stmt = stmt.where(col == value)\n               \
+      \     count_stmt = count_stmt.where(col == value)\n        total = (await self.session.execute(count_stmt)).scalar_one()\n\
+      \        if order_by and hasattr(self.model, order_by):\n            col = getattr(self.model,\
+      \ order_by)\n            stmt = stmt.order_by(col.desc() if descending else col)\n\
+      \        elif hasattr(self.model, \"created_at\"):\n            stmt = stmt.order_by(self.model.created_at.desc())\n\
+      \        stmt = stmt.offset(offset).limit(limit)\n        result = await self.session.execute(stmt)\n\
+      \        if options:\n            return list(result.unique().scalars().all()),\
+      \ total\n        return list(result.scalars().all()), total\n\n    async def\
+      \ create(self, data: dict[str, Any]) -> ModelT:\n        obj = self.model(**data)\n\
+      \        self.session.add(obj)\n        await self.session.flush()\n        await\
+      \ self.session.refresh(obj)\n        return obj\n\n    async def update(self,\
+      \ obj: ModelT, data: dict[str, Any]) -> ModelT:\n        for key, value in data.items():\n\
+      \            setattr(obj, key, value)\n        try:\n            await self.session.flush()\n\
+      \        except orm_exc.StaleDataError as exc:\n            raise ConflictError(\n\
+      \                \"Conflict: entity was modified by another user\",\n       \
+      \     ) from exc\n        await self.session.refresh(obj)\n        return obj\n\
+      \n    async def delete(self, obj: ModelT) -> None:\n        await self.session.delete(obj)\n\
+      \        await self.session.flush()\n\n    async def exists(self, **filters: Any)\
+      \ -> bool:\n        stmt = select(func.count()).select_from(self.model)\n   \
+      \     for key, value in filters.items():\n            stmt = stmt.where(getattr(self.model,\
+      \ key) == value)\n        result = (await self.session.execute(stmt)).scalar_one()\n\
+      \        return result > 0\n\n    async def count(self, **filters: Any) -> int:\n\
+      \        stmt = select(func.count()).select_from(self.model)\n        for key,\
+      \ value in filters.items():\n            if value is not None:\n            \
+      \    stmt = stmt.where(getattr(self.model, key) == value)\n        return (await\
+      \ self.session.execute(stmt)).scalar_one()\n"
     base_repository: "from typing import Generic, TypeVar, Sequence\nfrom sqlalchemy\
       \ import select, func, exists as sa_exists, delete as sa_delete\nfrom sqlalchemy.orm\
       \ import Session\nimport uuid\n\nT = TypeVar(\"T\")\n\nclass BaseRepository(Generic[T]):\n\
@@ -96,6 +152,14 @@ implementation:
     faster for large deletes
   - order_by parameter is a string column name (e.g., "created_at"), not an SQLAlchemy
     column object
+  - 'Async variant: use flush() + refresh() instead of add() — session.add + flush
+    + refresh is the async equivalent of sync add + commit'
+  - 'StaleDataError from SQLAlchemy is caught in update() and converted to ConflictError
+    — this is a safety net for optimistic concurrency'
+  - 'When using joinedload with get_multi, call .unique() on results to avoid duplicate
+    rows'
+  - 'Use joinedload() for 1:1 relationships, selectinload() for 1:many in concrete
+    repos'
 dependencies:
 - SQLAlchemy
 tests:

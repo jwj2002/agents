@@ -35,7 +35,7 @@ from tools.vault_search import vault_search
 from tools.vault_dashboard import vault_dashboard
 from tools.agent_metrics import agent_metrics
 from tools.failure_patterns import failure_patterns
-from tools.patterns import get_pattern, list_patterns, create_pattern
+# patterns tools retired — consolidated into knowledge-mcp (TypeScript MCP server)
 
 
 TOOLS = {
@@ -91,43 +91,8 @@ TOOLS = {
             },
         },
     },
-    "get_pattern": {
-        "fn": get_pattern,
-        "description": "Get a reusable code pattern by name. Returns code templates, conventions, and usage notes. Use list_patterns() first to discover available patterns.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Pattern name (e.g., 'fastapi-module', 'websocket-singleton')"},
-            },
-            "required": ["name"],
-        },
-    },
-    "list_patterns": {
-        "fn": list_patterns,
-        "description": "List available code patterns with names and descriptions. Optionally filter by category (backend, frontend, workflow, convention).",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "category": {"type": "string", "description": "Filter by category: 'backend', 'frontend', 'workflow', 'convention'"},
-            },
-        },
-    },
-    "create_pattern": {
-        "fn": create_pattern,
-        "description": "Create a new reusable code pattern. Stores as YAML in the patterns directory for future use by any agent.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Pattern name in kebab-case (e.g., 'my-custom-pattern')"},
-                "category": {"type": "string", "description": "Category: 'backend', 'frontend', 'workflow', 'convention'"},
-                "description": {"type": "string", "description": "One-line description of the pattern"},
-                "content": {"type": "string", "description": "The pattern content (code templates, conventions, rules)"},
-                "tags": {"type": "string", "description": "Comma-separated tags (e.g., 'fastapi,crud,async')"},
-                "usage_notes": {"type": "string", "description": "When and how to use this pattern"},
-            },
-            "required": ["name", "category", "description", "content"],
-        },
-    },
+    # Pattern tools retired — use knowledge-mcp (TypeScript) instead:
+    #   get_patterns, get_pattern_detail, search_decisions, get_learning_rules
 }
 
 

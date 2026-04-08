@@ -1,0 +1,73 @@
+id: PAT-023
+category: workflow
+name: behavioral-evals
+status: pilot
+tier: secondary
+description: >
+  Production-derived verification checks (E01-E15) with file-to-eval mapping
+  for the PROVE phase. Each eval traces back to a real production failure.
+when_to_use: >
+  During PROVE phase of any orchestrate workflow. PROVE automatically selects
+  applicable evals based on changed files via git diff --name-only origin/main.
+  E15 (SECRETS) always runs. E01 (ENUM_VALUE) is forced on all FULLSTACK changes.
+  Use --thorough flag to run all evals regardless of file mapping.
+when_not_to_use: >
+  TRIVIAL tasks that only touch config or documentation files. Tasks that have
+  no code changes (e.g., pure markdown edits).
+implementation:
+  steps:
+    - "Run git diff --name-only origin/main to get changed files"
+    - "Match each changed file against the file-to-eval pattern table"
+    - "Collect unique eval IDs from all matches"
+    - "Always include E15 (SECRETS) as catch-all"
+    - "For FULLSTACK changes (backend + frontend), force-add E01 (ENUM_VALUE)"
+    - "Load and run each selected eval's verification checks"
+    - "Continue with standard PROVE verification levels (Steps 1-4)"
+reference_code: |
+  ## Eval Catalog
+
+  | ID  | Name                    | Trigger Files                | What to Check                                      |
+  |-----|-------------------------|------------------------------|---------------------------------------------------|
+  | E01 | ENUM_VALUE_MISMATCH     | *.tsx, *.ts, schemas/*.py    | Frontend uses enum VALUE not NAME                 |
+  | E02 | COMPONENT_API_MISMATCH  | *.tsx, *.ts                  | All required props passed with correct types       |
+  | E03 | HOOK_DEPENDENCY_ARRAY   | *.tsx, *.ts                  | Every ref'd variable in useEffect/useMemo deps     |
+  | E04 | MODEL_WITHOUT_MIGRATION | models/*.py                  | Model column changed -> Alembic migration exists   |
+  | E05 | NULLABLE_MISMATCH       | models/*.py, schemas/*.py    | nullable=True <-> Optional[T]                      |
+  | E06 | SCHEMA_MODEL_DRIFT      | schemas/*.py, models/*.py    | Pydantic fields match SQLAlchemy model fields       |
+  | E07 | MIGRATION_NOT_ADDITIVE  | alembic/versions/*.py        | No drop_column/drop_table; downgrade() is inverse  |
+  | E08 | MIGRATION_MISSING_INDEX | alembic/versions/*.py        | FK columns have create_index                       |
+  | E09 | SERVICE_BYPASSES_REPO   | services/*.py                | No self.db.execute -- use self.repo.* instead       |
+  | E10 | STALE_DATA_UNHANDLED    | services/*.py, repos/*.py    | Flush wrapped in try/except StaleDataError          |
+  | E11 | AUTH_DEPENDENCY_MISSING  | routers/*.py                 | Every endpoint has CurrentUser/AdminUser dependency |
+  | E12 | AUDIT_LOG_MISSING       | routers/*.py, services/*.py  | CUD operations call AuditService                   |
+  | E13 | MISSING_FK_INDEX        | models/*.py                  | ForeignKey columns have index=True                  |
+  | E14 | DOCKER_ROOT_USER        | Dockerfile                   | USER directive set to non-root                      |
+  | E15 | SECRETS_IN_CODE         | *.py, *.ts, *.tsx, *.env*    | No hardcoded keys/passwords/tokens                  |
+
+  ## File-to-Eval Mapping
+
+  | File Pattern                  | Applicable Evals              |
+  |-------------------------------|-------------------------------|
+  | *.tsx, *.ts                   | E01, E02, E03, E15            |
+  | models/*.py                   | E04, E05, E06, E08, E13, E15  |
+  | schemas/*.py                  | E01, E05, E06                 |
+  | alembic/versions/*.py         | E07, E08                      |
+  | services/*.py                 | E09, E10, E12, E15            |
+  | routers/*.py                  | E11, E12, E15                 |
+  | repositories/*.py             | E10, E13                      |
+  | Dockerfile, docker-compose.yml| E14                           |
+  | *.py (catch-all)              | E15                           |
+  | *.env*                        | E15                           |
+gotchas:
+  - "E15 (SECRETS) is the catch-all and always runs regardless of file mapping"
+  - "E01 (ENUM_VALUE) is forced on all FULLSTACK changes even if no schema files changed"
+  - "Each eval traces to a real production failure -- none are theoretical"
+  - "No files matching any pattern should still run E15"
+  - "For COMPLEX tasks, consider --thorough to check all 15 evals"
+tests:
+  - test_file_pattern_matching_selects_correct_evals
+  - test_fullstack_change_forces_e01
+  - test_no_matching_files_defaults_to_e15
+  - test_thorough_flag_runs_all_evals
+  - test_enum_value_check_detects_name_vs_value_mismatch
+dependencies: []
