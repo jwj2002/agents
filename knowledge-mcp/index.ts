@@ -361,6 +361,65 @@ export function saveVelocity(
   return { status: "recorded" };
 }
 
+// --- Project Summaries ---
+
+export function updateProjectSummary(
+  db: Database.Database,
+  project: string,
+  summary: string,
+  updatedBy?: string
+) {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO project_summaries (project, summary, updated_at, updated_by)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(project) DO UPDATE SET
+       summary = excluded.summary,
+       updated_at = excluded.updated_at,
+       updated_by = excluded.updated_by`
+  ).run(project, summary, now, updatedBy ?? null);
+  return { project, status: "updated" };
+}
+
+export function getProjectSummary(db: Database.Database, project: string) {
+  return db.prepare("SELECT * FROM project_summaries WHERE project = ?").get(project) ?? null;
+}
+
+export function getAllProjectSummaries(db: Database.Database) {
+  return db.prepare("SELECT * FROM project_summaries ORDER BY project").all();
+}
+
+// --- Recent Activity ---
+
+export function getRecent(db: Database.Database, since: string, limit?: number) {
+  const effectiveLimit = limit ?? 50;
+
+  const decisions = db
+    .prepare("SELECT * FROM decisions WHERE created_at >= ? ORDER BY created_at DESC LIMIT ?")
+    .all(since, effectiveLimit) as Record<string, unknown>[];
+
+  const patterns = db
+    .prepare("SELECT id, category, name, status, description, created_at FROM patterns WHERE created_at >= ? ORDER BY created_at DESC LIMIT ?")
+    .all(since, effectiveLimit);
+
+  const rules = db
+    .prepare("SELECT * FROM learning_rules WHERE created_at >= ? ORDER BY created_at DESC LIMIT ?")
+    .all(since, effectiveLimit);
+
+  const summaries = db
+    .prepare("SELECT * FROM project_summaries WHERE updated_at >= ? ORDER BY updated_at DESC LIMIT ?")
+    .all(since, effectiveLimit);
+
+  return {
+    decisions: decisions.map((r) =>
+      parseJsonFields(r, ["alternatives", "linked_patterns", "linked_issues", "linked_prs", "related_decisions"])
+    ),
+    patterns,
+    rules,
+    summaries,
+  };
+}
+
 // --- MCP Server setup (only when run directly, not when imported for tests) ---
 
 export { openDb };
@@ -555,6 +614,62 @@ if (isMainModule) {
         description,
       });
       return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
+    }
+  );
+
+  // Tool 10: update_project_summary
+  server.tool(
+    "update_project_summary",
+    "Create or update a project's living summary. Overwrites previous summary.",
+    {
+      project: z.string().describe("Project name"),
+      summary: z.string().describe("Current project state, architecture, focus areas"),
+      updated_by: z.string().optional().describe("Who updated (agent name or 'human')"),
+    },
+    async ({ project, summary, updated_by }) => {
+      const result = updateProjectSummary(db, project, summary, updated_by);
+      return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
+    }
+  );
+
+  // Tool 11: get_project_summary
+  server.tool(
+    "get_project_summary",
+    "Get the current summary for a project.",
+    {
+      project: z.string().describe("Project name"),
+    },
+    async ({ project }) => {
+      const result = getProjectSummary(db, project);
+      if (!result) {
+        return { content: [{ type: "text" as const, text: `No summary for project "${project}"` }] };
+      }
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // Tool 12: get_all_project_summaries
+  server.tool(
+    "get_all_project_summaries",
+    "Get summaries for all projects.",
+    {},
+    async () => {
+      const results = getAllProjectSummaries(db);
+      return { content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }] };
+    }
+  );
+
+  // Tool 13: get_recent
+  server.tool(
+    "get_recent",
+    "Get all knowledge base activity since a date — decisions, patterns, rules, summaries across all projects.",
+    {
+      since: z.string().describe("ISO date or datetime (e.g., '2026-04-07' or '2026-04-07T00:00:00Z')"),
+      limit: z.number().optional().describe("Max results per category (default: 50)"),
+    },
+    async ({ since, limit }) => {
+      const results = getRecent(db, since, limit);
+      return { content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }] };
     }
   );
 

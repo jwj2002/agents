@@ -33,6 +33,7 @@ PATTERNS_DIR = BASE_DIR / "patterns"
 DECISIONS_DIR = BASE_DIR / "decisions"
 LEARNING_RULES_DIR = BASE_DIR / "learning-rules"
 VELOCITY_DIR = BASE_DIR / "velocity"
+PROJECT_SUMMARIES_DIR = BASE_DIR / "project-summaries"
 INDEX_PATH = DECISIONS_DIR / "index.yaml"
 
 # Validation constants
@@ -374,6 +375,37 @@ def _build_velocity(conn: sqlite3.Connection, velocity_dir: Path) -> int:
     return count
 
 
+def _build_project_summaries(conn: sqlite3.Connection, summaries_dir: Path) -> int:
+    count = 0
+    if not summaries_dir.is_dir():
+        return count
+
+    for path in sorted(summaries_dir.glob("*.yaml")):
+        data = _load_yaml(path)
+        if data is None:
+            continue
+
+        if not isinstance(data, dict) or "project" not in data:
+            logger.warning("Skipping malformed project summary: %s", path.name)
+            continue
+
+        conn.execute(
+            """INSERT OR REPLACE INTO project_summaries
+               (project, summary, updated_at, updated_by)
+               VALUES (?,?,?,?)""",
+            (
+                data["project"],
+                data.get("summary", ""),
+                data.get("updated_at"),
+                data.get("updated_by"),
+            ),
+        )
+        count += 1
+
+    conn.commit()
+    return count
+
+
 # ---------------------------------------------------------------------------
 # build command
 # ---------------------------------------------------------------------------
@@ -408,11 +440,13 @@ def cmd_build(
         _rebuild_fts(conn)
         n_rules = _build_learning_rules(conn, _rules)
         n_velocity = _build_velocity(conn, _velocity)
+        n_summaries = _build_project_summaries(conn, PROJECT_SUMMARIES_DIR)
 
         print(
             f"Built {_db.name}: "
             f"{n_patterns} patterns, {n_decisions} decisions, "
-            f"{n_rules} rules, {n_velocity} velocity entries"
+            f"{n_rules} rules, {n_velocity} velocity entries, "
+            f"{n_summaries} project summaries"
         )
         return {
             "patterns": n_patterns,
