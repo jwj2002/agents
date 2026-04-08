@@ -250,6 +250,82 @@ fi
 
 echo ""
 
+# ─── Phase 2.6: MCP Servers ────────────────────────────────────────────────
+#
+# Claude Code reads MCP servers from ~/.claude.json (NOT ~/.claude/settings.json).
+# The `claude mcp add --scope user` command registers them in the right place.
+# Each server is registered idempotently — existing entries are overwritten.
+
+echo "Phase 2.6: MCP Servers (user-level, ~/.claude.json)"
+
+MCP_SERVERS_REGISTERED=0
+MCP_SERVERS_TOTAL=0
+
+if command -v claude &>/dev/null; then
+    EXISTING_MCP=$(claude mcp list 2>/dev/null || true)
+
+    register_mcp() {
+        # register_mcp <name> <command> [args...]
+        local name="$1"
+        shift
+        MCP_SERVERS_TOTAL=$((MCP_SERVERS_TOTAL + 1))
+
+        if echo "$EXISTING_MCP" | grep -q "^${name}:.*Connected"; then
+            echo "  ✓ $name (already connected)"
+            MCP_SERVERS_REGISTERED=$((MCP_SERVERS_REGISTERED + 1))
+        else
+            if claude mcp add --scope user "$name" -- "$@" 2>/dev/null; then
+                echo "  ✓ $name registered"
+                MCP_SERVERS_REGISTERED=$((MCP_SERVERS_REGISTERED + 1))
+            else
+                echo "  ✗ Failed to register $name"
+            fi
+        fi
+    }
+
+    # --- knowledge-mcp (TypeScript, requires node_modules) ---
+    KNOWLEDGE_MCP_DIR="$REPO_DIR/knowledge-mcp"
+    if [ -f "$KNOWLEDGE_MCP_DIR/index.ts" ]; then
+        # Ensure dependencies are installed
+        if [ ! -d "$KNOWLEDGE_MCP_DIR/node_modules" ]; then
+            echo "  Installing knowledge-mcp dependencies..."
+            (cd "$KNOWLEDGE_MCP_DIR" && npm install --silent 2>/dev/null) || true
+        fi
+        TSX_BIN="$KNOWLEDGE_MCP_DIR/node_modules/.bin/tsx"
+        if [ -x "$TSX_BIN" ]; then
+            register_mcp knowledge "$TSX_BIN" "$KNOWLEDGE_MCP_DIR/index.ts"
+        else
+            echo "  ✗ knowledge: tsx not found (run: cd $KNOWLEDGE_MCP_DIR && npm install)"
+            MCP_SERVERS_TOTAL=$((MCP_SERVERS_TOTAL + 1))
+        fi
+    fi
+
+    # --- vault-metrics (Python, uses dedicated venv) ---
+    MCP_VENV_PYTHON="$REPO_DIR/mcp-server/.venv/bin/python"
+    MCP_SERVER_PY="$REPO_DIR/mcp-server/server.py"
+    if [ -x "$MCP_VENV_PYTHON" ] && [ -f "$MCP_SERVER_PY" ]; then
+        register_mcp vault-metrics "$MCP_VENV_PYTHON" "$MCP_SERVER_PY"
+    elif [ -f "$MCP_SERVER_PY" ]; then
+        echo "  ✗ vault-metrics: venv not found (created in Phase 2)"
+        MCP_SERVERS_TOTAL=$((MCP_SERVERS_TOTAL + 1))
+    fi
+
+    # --- context7 (npm package, no local install needed) ---
+    register_mcp context7 npx -y @upstash/context7-mcp@latest
+
+    # --- apple-mcp (macOS only — Apple Contacts, Notes, Calendar, etc.) ---
+    if [ "$PLATFORM" = "macos" ]; then
+        register_mcp apple-mcp npx -y apple-mcp@latest
+    else
+        echo "  - apple-mcp: skipped (macOS only, current platform: $PLATFORM_LABEL)"
+    fi
+else
+    echo "  ⚠ claude CLI not found — skipping MCP server registration"
+    echo "    Install Claude Code, then re-run this script."
+fi
+
+echo ""
+
 # ─── Phase 3: First-time Setup ──────────────────────────────────────────────
 
 echo "Phase 3: First-time setup"
@@ -415,10 +491,11 @@ echo ""
 # ─── Summary ─────────────────────────────────────────────────────────────────
 
 echo "=== Installation Summary ==="
-echo "  Platform:    $PLATFORM_LABEL"
-echo "  Symlinks:    ✓ $LINKS_TOTAL/$LINKS_TOTAL linked"
-echo "  MCP Server:  $MCP_STATUS"
-echo "  PyYAML:      $PYYAML_STATUS"
+echo "  Platform:     $PLATFORM_LABEL"
+echo "  Symlinks:     ✓ $LINKS_TOTAL/$LINKS_TOTAL linked"
+echo "  MCP Server:   $MCP_STATUS"
+echo "  MCP Servers:  $MCP_SERVERS_REGISTERED/$MCP_SERVERS_TOTAL registered in ~/.claude.json"
+echo "  PyYAML:       $PYYAML_STATUS"
 echo "  Codex Plugin: $CODEX_PLUGIN_STATUS"
 
 # Vault summary
