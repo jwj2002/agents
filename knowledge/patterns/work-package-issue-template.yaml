@@ -1,0 +1,68 @@
+id: PAT-019
+category: agent-infrastructure
+name: Work Package Issue Template
+status: draft
+tier: primary
+description: Standard GitHub issue template for work packages created by the Orchestrator
+  agent. Ensures project agents have complete context — API contracts, patterns,
+  orchestration level, acceptance criteria — to execute without guessing.
+when_to_use: Any time the Orchestrator creates a GitHub issue for a work package
+  that will be executed by a project agent.
+when_not_to_use: Quick/trivial fixes that don't need formal work packages.
+implementation:
+  language: markdown
+  framework: GitHub Issues
+  template: |
+    ## Context
+    {Why this work exists. Link to chain, product decision, architecture decision.}
+
+    ## API Contracts
+    {For every endpoint involved, list exact request/response shapes.}
+    ```json
+    GET /api/v1/devices → {devices: [{id, name, ssh_alias, ssh_host, ...}]}
+    GET /api/v1/devices/{id}/admin-session → {running: bool, session_name: str}
+    ```
+
+    ## Reference Files (read these first)
+    - `{path/to/similar/component.jsx}` — follow this pattern
+    - `{path/to/hook.js}` — reuse this hook
+
+    ## Patterns to Follow
+    - Use existing `{ComponentName}` as template
+    - Reuse `{hookName}` hook (do NOT create new fetch logic)
+
+    ## Orchestration Level
+    {TRIVIAL | SIMPLE | MODERATE | COMPLEX}
+    - {Justification for the level}
+
+    ## Acceptance Criteria
+    - [ ] {Testable criterion 1}
+    - [ ] {Testable criterion 2}
+    - [ ] Uses branch → PR → squash merge workflow
+
+    ## Files to Create/Modify
+    - `{path/to/new/file}` — {purpose}
+    - `{path/to/existing/file}` — {what to change}
+  completeness_checklist:
+  - API contracts for every endpoint referenced
+  - Reference files for existing patterns
+  - Hooks/components to reuse (not reinvent)
+  - Orchestration level with justification
+  - Testable acceptance criteria
+  - Git workflow reminder
+  validation_questions:
+  - Does a project agent reading ONLY this issue have enough to implement without guessing?
+  - Are all field names explicitly stated (not assumed)?
+  - Is there a similar component referenced to follow?
+dependencies: []
+tests:
+- test_issue_completeness — verify all template fields populated before dispatch
+- test_agent_execution — project agent implements using only issue content, no external context
+gotchas:
+- "CRITICAL: Include exact API field names — agents WILL guess wrong without them"
+- "Include response wrapper shape (e.g., {devices: [...]} not just [...])"
+- "Reference existing components by path — agents can't search effectively in one-shot mode"
+lifecycle:
+  extracted_from: flotilla
+  extracted_at: '2026-04-07'
+  validation_notes: "Draft. Extracted from AdminAgentCards failure where missing API contract caused wrong field names."

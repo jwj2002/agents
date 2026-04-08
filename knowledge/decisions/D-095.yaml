@@ -1,0 +1,28 @@
+id: D-095
+date: '2026-04-07'
+project: flotilla
+topic: orchestration
+title: Orchestration accountability — strategic creates complete issues, admin tracks, project executes
+context: >
+  Project agent was spawned with vague task prompt. Agent guessed API field names
+  (device_id vs id), ignored existing component patterns, committed directly to main.
+  Root cause: work package lost fidelity at each handoff (strategic → admin → project).
+decision: >
+  Strategic layer determines orchestration level and creates complete GitHub issues with
+  all context (API contracts, patterns, hooks, acceptance criteria). The issue IS the
+  work package. Admin agent assigns issue + orchestration level to project agent and is
+  accountable for documentation and tracking. Project agent reads issue and executes exactly.
+alternatives:
+  - option: Admin agent does MAP phase before spawning
+    rejected_because: Adds latency and duplicates work the strategic layer already did
+  - option: Project agent discovers context on its own
+    rejected_because: Current approach — failed. Agent guessed instead of reading code.
+reasoning: >
+  The GitHub issue must flow unchanged from Roadmap → GitHub → admin → project.
+  No interpretation, no information loss. Each layer has clear accountability:
+  strategic decides, admin assigns+tracks, project executes.
+outcome: null
+linked_patterns: []
+linked_issues: []
+linked_prs: []
+related_decisions: []

@@ -25,6 +25,10 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/sessionstart_restore_state.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/load_learning_rules.py"
           }
         ]
       }

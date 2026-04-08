@@ -1,0 +1,25 @@
+id: D-097
+date: '2026-04-07'
+project: flotilla
+topic: philosophy
+title: "Agents execute patterns, not invent solutions"
+context: >
+  AdminAgentCards failure showed that project agents guess when they lack context.
+  Predictable outcomes require following proven recipes, not inventing.
+decision: >
+  Agents follow validated patterns from the knowledge base. Novel work stays with
+  the developer in a Claude session. The pattern flywheel turns first-time manual
+  work into repeatable automated execution.
+alternatives:
+  - option: Let agents invent solutions
+    rejected_because: Unpredictable outcomes. Agent guessed field names, ignored workflow.
+reasoning: >
+  Reusable patterns make outcomes predictable. Session 1 builds manually,
+  session 5 uses the pattern, session 10 it's autonomous.
+outcome: null
+linked_patterns: []
+linked_issues: []
+linked_prs: []
+related_decisions:
+  - D-095
+  - D-096

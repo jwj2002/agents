@@ -1,0 +1,120 @@
+id: PAT-018
+category: agent-infrastructure
+name: Claude Channel Agent with MCP Controller
+status: draft
+tier: primary
+description: Pattern for launching a Claude Code agent with a Channel MCP controller
+  for inter-agent messaging. Covers directory structure, environment config, MCP
+  wiring, port management, WebSocket persistent connection, and auto-registration
+  with a central server.
+when_to_use: Any multi-agent system where Claude Code agents need to send/receive
+  messages via a central server using Channel MCP (stdio transport). Works for
+  strategic agents, admin agents, project agents, or any agent role.
+when_not_to_use: Single-agent setups with no inter-agent communication. One-shot
+  agents spawned inline with -p flag (they use the parent project's .env directly).
+implementation:
+  language: typescript + bash
+  framework: Claude Code + MCP (Channel pattern)
+  key_files:
+  - channel-mcp/index.ts — Channel MCP server (messaging tools + WebSocket client)
+  - channel-mcp/start.sh — Launcher script (sources .env, kills stale port, exec tsx)
+  - '{agent_dir}/CLAUDE.md — Agent instructions (role, rules, communication)'
+  - '{agent_dir}/.env — Identity config (AGENT_NAME, CHANNEL_PORT, CENTRAL_SERVER_URL)'
+  - '{agent_dir}/.mcp.json — MCP server declarations'
+  key_decisions:
+  - 'Directory layout: agent directory contains CLAUDE.md + .env + .mcp.json; channel-mcp code lives separately (shared via symlink)'
+  - '.mcp.json MUST use absolute path to start.sh — relative paths break because agent working dir differs from symlink location'
+  - 'start.sh sources .env from the agent working directory (cwd), NOT from the script location'
+  - 'Port cleanup on macOS: lsof -ti :PORT | xargs kill -9 (fuser is not available on macOS)'
+  - 'Sleep 1s after port kill to ensure OS releases the port before binding'
+  - 'Channel MCP auto-registers with central server, connects persistent WebSocket, drains queued messages on startup'
+  - 'Each agent gets a unique CHANNEL_PORT to avoid conflicts'
+  - 'WebSocket includes 30s ping for keep-alive through proxies (e.g., Cloudflare Tunnel)'
+  - 'Exponential backoff (1s-30s) with random jitter on WebSocket reconnect'
+  setup_steps:
+  - 'Create agent directory with CLAUDE.md, .env, .mcp.json'
+  - 'Symlink channel-mcp directory from the project that owns the Channel MCP code'
+  - 'Set .mcp.json args to absolute path: /full/path/to/channel-mcp/start.sh'
+  - 'Assign unique CHANNEL_PORT in .env'
+  - 'Set CENTRAL_SERVER_URL to the message server'
+  - 'Test: source .env && bash /path/to/start.sh — verify health endpoint responds'
+  env_template: |
+    AGENT_NAME=my-agent
+    AGENT_TYPE=admin
+    CHANNEL_PORT=8790
+    CHANNEL_HOST=0.0.0.0
+    CHANNEL_URL=http://127.0.0.1:8790
+    CENTRAL_SERVER_URL=http://127.0.0.1:9000
+    JBOX=my-device
+  mcp_json_template: |
+    {
+      "mcpServers": {
+        "flotilla-channel": {
+          "command": "bash",
+          "args": ["/absolute/path/to/channel-mcp/start.sh"]
+        }
+      }
+    }
+  start_sh_template: |
+    #!/bin/bash
+    if [ -f ".env" ]; then
+      set -a
+      source ".env"
+      set +a
+    fi
+    if [ -n "$CHANNEL_PORT" ]; then
+      lsof -ti :"$CHANNEL_PORT" 2>/dev/null | xargs kill -9 2>/dev/null || true
+      sleep 1
+    fi
+    SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)"
+    exec npx tsx "$SCRIPT_DIR/index.ts"
+  startup_sequence:
+  - Claude loads .mcp.json, spawns start.sh
+  - start.sh sources .env (gets AGENT_NAME, CHANNEL_PORT, CENTRAL_SERVER_URL)
+  - start.sh kills stale port listener, sleeps 1s
+  - Channel MCP starts HTTP listener on CHANNEL_PORT (fallback delivery)
+  - Channel MCP registers with central server (POST /api/v1/agents/register)
+  - Channel MCP connects persistent WebSocket to server (/ws/agent)
+  - Channel MCP authenticates WebSocket with AGENT_NAME + SESSION_ID
+  - Channel MCP drains queued messages (any sent while agent was offline)
+  - Channel MCP connects stdio transport to Claude Code
+  - Agent sees tools: send_message, check_messages, report_status
+  mcp_tools_provided:
+  - 'send_message(to, type, content, thread_id?, urgency?) — send message to another agent'
+  - 'check_messages(limit?) — poll for queued messages (marks as delivered)'
+  - 'report_status(status, detail?) — update agent status on central server'
+dependencies:
+- '@modelcontextprotocol/sdk'
+- ws (WebSocket client for persistent connection)
+- tsx (TypeScript execution without build step)
+- tmux (session management for persistent agents)
+- node (runtime for Channel MCP)
+tests:
+- test_channel_starts — source .env, run start.sh, curl health endpoint on CHANNEL_PORT
+- test_agent_registers — verify agent appears in central server registry after start
+- test_websocket_connects — verify persistent WebSocket connection to /ws/agent
+- test_message_delivery — send message to agent, verify received via WebSocket or HTTP
+- test_port_cleanup — kill stale process on port, restart, verify no conflict
+- test_queue_drain — send messages while agent offline, start agent, verify messages received
+gotchas:
+- 'CRITICAL: .mcp.json must use absolute path to start.sh — relative paths resolve from agent working directory, not the symlink parent'
+- 'macOS: use lsof -ti :PORT | xargs kill -9, not fuser -k PORT/tcp (fuser not available)'
+- 'start.sh uses readlink -f to resolve index.ts through symlinks — on macOS readlink -f may need greadlink; the script falls back to echo $0'
+- '.env must be in the agent working directory (where Claude starts), not in the channel-mcp directory'
+- 'Each agent needs a unique CHANNEL_PORT — port conflicts cause silent startup failures'
+- 'WebSocket reconnect has exponential backoff + jitter to prevent connection storms on server restart'
+- 'If central server restarts, all agents re-register automatically on WebSocket reconnect'
+lifecycle:
+  extracted_from: flotilla
+  extracted_at: '2026-04-07'
+  draft_reviewed_at: '2026-04-07'
+  pilot_started_at: '2026-04-07'
+  pilot_uses:
+  - project: flotilla
+    date: '2026-04-07'
+    corrections: 1
+    result: success
+    notes: 'Fixed: relative path in .mcp.json → absolute path. Fixed: fuser → lsof on macOS. Applied to 4 agents (admin + 3 strategic).'
+  consecutive_successes: 1
+  validated_at: null
+  validation_notes: 'Pilot: 1/3 successes. Needs 2 more consecutive successes across different projects to validate.'

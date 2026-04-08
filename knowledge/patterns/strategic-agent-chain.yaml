@@ -1,0 +1,58 @@
+id: PAT-020
+category: agent-infrastructure
+name: Strategic Agent Chain Coordination
+status: draft
+tier: primary
+description: Pattern for coordinating a chain of strategic agents (Product → Architecture
+  → Orchestrator) with durable chain state, dual messaging (transcript + handoff),
+  and human override capability.
+when_to_use: Multi-agent systems where strategic decisions flow through a pipeline
+  of specialized agents before reaching execution.
+when_not_to_use: Single-agent workflows or simple task routing without strategic decomposition.
+implementation:
+  language: python + typescript
+  framework: flotilla (Channel MCP + chain files)
+  key_components:
+  - "Chain file (.agents/chains/{id}.json): durable state tracking phase, owner, decisions, work packages"
+  - "Dual message pattern: transcript (to=human) for visibility + handoff (to=next_agent) for structured data"
+  - "Transcript rule: agents read all messages but only act if chain owner or @mentioned"
+  - "Shared chain directory: all agents read/write same location"
+  chain_file_format: |
+    {
+      "chain_id": "slug",
+      "intent": "human's original message",
+      "phase": "product|architecture|orchestrator|approved|executing|complete",
+      "owner": "product|architecture|orchestrator",
+      "status": "in_progress|complete|cancelled",
+      "product_decision": "D-xxx or null",
+      "architecture_decision": "D-xxx or null",
+      "work_packages": [],
+      "created_at": "ISO",
+      "updated_at": "ISO"
+    }
+  transcript_rule: |
+    You receive all human messages. You MUST NOT respond unless:
+    1. An active chain has owner={your_name}
+    2. You are explicitly @mentioned
+    If neither: DO NOTHING. Silently wait.
+  handoff_format: |
+    send_message(to="{next_agent}", type="triage_request",
+      content="[SUMMARY] Handoff: {project} — {one-line}\n[DETAIL]\n{structured JSON}")
+dependencies:
+- Channel MCP (messaging)
+- Shared filesystem (chain files)
+- Dashboard transcript panel (visibility)
+tests:
+- test_chain_creation — Product creates chain file on new intent
+- test_handoff — each agent updates owner/phase and sends to next
+- test_transcript_rule — non-owner agents don't respond
+- test_restart_recovery — agent scans chains on startup, resumes
+- test_human_override — human message mid-chain redirects current owner
+gotchas:
+- "Chain directory must be shared — not per-agent working directory"
+- "One active chain at a time (v1) — Product checks before creating new"
+- "Transcript rule must be CRITICAL priority in CLAUDE.md or agents will ignore it"
+lifecycle:
+  extracted_from: flotilla
+  extracted_at: '2026-04-07'
+  validation_notes: "Draft. Chain ran successfully twice (temper rate limits, flotilla reliability). Transcript rule required strengthening after first run."

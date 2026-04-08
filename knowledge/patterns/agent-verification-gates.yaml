@@ -1,0 +1,44 @@
+id: PAT-022
+category: agent-infrastructure
+name: Agent Verification Gates
+status: draft
+tier: primary
+description: Process pattern for quality gates in multi-agent execution — completeness
+  gate before dispatching work, and validation gate after completion. Prevents
+  incomplete work packages and unverified outcomes.
+when_to_use: Any multi-agent system where one agent dispatches work to another and
+  needs to verify the output meets a contract.
+when_not_to_use: Single-agent workflows with direct human review.
+implementation:
+  language: process (agent instructions)
+  framework: any multi-agent system
+  completeness_gate:
+    when: Before Orchestrator creates GitHub issue and dispatches to admin
+    checks:
+    - "API contracts included for every endpoint referenced?"
+    - "Reference files listed for existing patterns?"
+    - "Orchestration level specified with justification?"
+    - "Acceptance criteria testable (not vague)?"
+    - "Git workflow reminder included?"
+    action_on_fail: "Send back to Architecture to fill gaps — do NOT dispatch incomplete"
+  validation_gate:
+    when: After admin reports work complete, before Orchestrator marks chain done
+    checks:
+    - "Was a branch created (not committed to main)?"
+    - "Was a PR merged via squash merge?"
+    - "Do changed files match what the work package specified?"
+    - "Does the code build?"
+    action_on_fail: "Create follow-up issue or send work back — do NOT report complete"
+dependencies: []
+tests:
+- test_incomplete_blocked — Orchestrator rejects WP missing API contracts
+- test_direct_main_commit_detected — validation catches missing PR
+- test_file_mismatch_detected — validation catches wrong files changed
+gotchas:
+- "Gates are enforced by Orchestrator, not admin — admin reports raw outcomes"
+- "Completeness gate is the highest leverage — prevents failures downstream"
+- "Validation gate catches what completeness gate missed — defense in depth"
+lifecycle:
+  extracted_from: flotilla
+  extracted_at: '2026-04-07'
+  validation_notes: "Draft. Extracted from AdminAgentCards failure. Not yet implemented as automated checks — currently CLAUDE.md instructions."

@@ -1,0 +1,41 @@
+id: PAT-021
+category: agent-infrastructure
+name: Transcript Summary/Detail Message Format
+status: draft
+tier: secondary
+description: Convention for agent messages that separates a short summary (always visible)
+  from full detail (expandable). Enables quick scanning of agent chain conversations.
+when_to_use: Any agent posting to a human-visible transcript or feed where messages
+  can be long (assessments, plans, recommendations).
+when_not_to_use: Short status messages or simple acknowledgments under 200 characters.
+implementation:
+  language: any
+  framework: any (convention, not code-specific)
+  message_format: |
+    [SUMMARY] 2-3 sentence summary of the key finding or decision.
+    [DETAIL]
+    ## Full Assessment
+    
+    {markdown content with headers, lists, code blocks}
+  rendering_rules:
+  - "Dashboard shows [SUMMARY] text as the visible entry"
+  - "[DETAIL] content hidden behind 'Full detail' expand button"
+  - "Messages without [SUMMARY] prefix: show first 150 chars as summary"
+  - "Messages under 200 chars: show full text, no expand"
+  - "Handoff messages (agent→agent): compact with 🔗 indicator"
+  - "needs_approval messages: highlighted with action buttons (approve/reject/feedback)"
+dependencies:
+- react-markdown (for rendered detail content)
+tests:
+- test_summary_extraction — [SUMMARY] line parsed correctly
+- test_detail_expand — click expands hidden detail
+- test_no_prefix_fallback — long messages without prefix get auto-summary
+- test_short_message — under 200 chars shows full text
+gotchas:
+- "Agents must put [SUMMARY] on the FIRST line — parser expects it at start"
+- "[DETAIL] must be on its own line after the summary"
+- "Summary should end with clear next step or call to action"
+lifecycle:
+  extracted_from: flotilla
+  extracted_at: '2026-04-07'
+  validation_notes: "Draft. Implemented in flotilla dashboard. Significant improvement in readability over raw text."

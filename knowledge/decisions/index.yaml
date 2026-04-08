@@ -9,6 +9,19 @@ by_project:
     topic: database
     title: asyncpg direct, no ORM for flotilla
     date: '2026-04-03'
+  - id: D-095
+    topic: orchestration
+    title: Orchestration accountability — strategic creates complete issues, admin
+      tracks, project executes
+    date: '2026-04-07'
+  - id: D-096
+    topic: philosophy
+    title: 'Hybrid development: Claude session + agent system + knowledge base'
+    date: '2026-04-07'
+  - id: D-097
+    topic: philosophy
+    title: Agents execute patterns, not invent solutions
+    date: '2026-04-07'
   docketiq:
   - id: D-042
     topic: auth
@@ -31,6 +44,11 @@ by_topic:
   - D-034
   export:
   - D-087
+  orchestration:
+  - D-095
+  philosophy:
+  - D-096
+  - D-097
 by_pattern:
   PAT-001:
   - D-015

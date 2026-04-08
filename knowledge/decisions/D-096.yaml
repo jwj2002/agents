@@ -1,0 +1,27 @@
+id: D-096
+date: '2026-04-07'
+project: flotilla
+topic: philosophy
+title: "Hybrid development: Claude session + agent system + knowledge base"
+context: >
+  After building the strategic agent layer and testing it, observed that a single
+  Claude session with the developer is still faster for complex work. But agents
+  add value for parallel execution, overnight work, and pattern replication.
+decision: >
+  Use three components together: independent Claude session (thinking partner),
+  agent system (workforce for known work), knowledge base (institutional memory).
+  Developer handles novel problems. Agents replicate proven patterns.
+alternatives:
+  - option: Fully autonomous agent system
+    rejected_because: Agents make mistakes on novel work. Need human judgment for hard problems.
+  - option: Single Claude session only
+    rejected_because: Doesn't scale to multiple projects, can't run overnight, no persistent memory.
+reasoning: >
+  The system's job is to remember and replicate. The developer's job is to think.
+  Neither alone is sufficient. Together they compound — every session improves future sessions.
+outcome: null
+linked_patterns: []
+linked_issues: []
+linked_prs: []
+related_decisions:
+  - D-095

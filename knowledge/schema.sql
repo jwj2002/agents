@@ -73,6 +73,13 @@ CREATE TABLE IF NOT EXISTS velocity (
     description TEXT
 );
 
+CREATE TABLE IF NOT EXISTS project_summaries (
+    project TEXT PRIMARY KEY,
+    summary TEXT NOT NULL,
+    updated_at TEXT,
+    updated_by TEXT
+);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_patterns_category ON patterns(category);
 CREATE INDEX IF NOT EXISTS idx_patterns_tier ON patterns(tier);
