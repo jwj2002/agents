@@ -43,6 +43,31 @@ echo "  Source:   $SCRIPT_DIR"
 echo "  Target:   $CLAUDE_DIR"
 echo ""
 
+# ─── Prerequisite Check ────────────────────────────────────────────────────
+
+PREREQ_WARN=0
+
+if ! command -v python3 &>/dev/null; then
+    echo "⚠ python3 not found — hooks, statusline, and MCP server require it"
+    PREREQ_WARN=$((PREREQ_WARN + 1))
+fi
+
+if ! command -v node &>/dev/null; then
+    echo "⚠ node not found — knowledge-mcp requires it"
+    PREREQ_WARN=$((PREREQ_WARN + 1))
+fi
+
+if ! command -v npm &>/dev/null; then
+    echo "⚠ npm not found — knowledge-mcp and npx-based MCP servers require it"
+    PREREQ_WARN=$((PREREQ_WARN + 1))
+fi
+
+if [ $PREREQ_WARN -gt 0 ]; then
+    echo ""
+    echo "  Install missing prerequisites and re-run this script."
+    echo ""
+fi
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 backup_item() {
@@ -262,24 +287,19 @@ MCP_SERVERS_REGISTERED=0
 MCP_SERVERS_TOTAL=0
 
 if command -v claude &>/dev/null; then
-    EXISTING_MCP=$(claude mcp list 2>/dev/null || true)
-
     register_mcp() {
         # register_mcp <name> <command> [args...]
+        # Always re-registers — claude mcp add is idempotent and overwrites,
+        # which ensures paths stay correct if the repo moves.
         local name="$1"
         shift
         MCP_SERVERS_TOTAL=$((MCP_SERVERS_TOTAL + 1))
 
-        if echo "$EXISTING_MCP" | grep -q "^${name}:.*Connected"; then
-            echo "  ✓ $name (already connected)"
+        if claude mcp add --scope user "$name" -- "$@" 2>/dev/null; then
+            echo "  ✓ $name registered"
             MCP_SERVERS_REGISTERED=$((MCP_SERVERS_REGISTERED + 1))
         else
-            if claude mcp add --scope user "$name" -- "$@" 2>/dev/null; then
-                echo "  ✓ $name registered"
-                MCP_SERVERS_REGISTERED=$((MCP_SERVERS_REGISTERED + 1))
-            else
-                echo "  ✗ Failed to register $name"
-            fi
+            echo "  ✗ Failed to register $name"
         fi
     }
 
@@ -525,7 +545,8 @@ if [ "$BACKUP_CREATED" = true ]; then
 fi
 
 echo ""
-echo "  Note: settings.json is symlinked from the repo. settings.local.json stays local per machine."
+echo "  Note: settings.json is symlinked from the repo."
+echo "  Note: Gmail and Google Calendar MCPs need manual auth — run 'claude' and use the /mcp command."
 echo ""
 
 if [ $ERRORS -gt 0 ]; then
