@@ -333,6 +333,39 @@ fi
 
 echo ""
 
+# ─── Phase 3.5: Git Hooks ────────────────────────────────────────────────────
+
+echo "Phase 3.5: Git hooks"
+
+HOOKS_DIR="$REPO_DIR/.git/hooks"
+POST_MERGE="$HOOKS_DIR/post-merge"
+
+if [ -d "$HOOKS_DIR" ]; then
+    cat > "$POST_MERGE" << 'HOOK'
+#!/bin/bash
+# Post-merge hook: rebuild knowledge.db after git pull
+# Fires automatically when git pull brings new changes
+
+KNOWLEDGE_DIR="$(git rev-parse --show-toplevel)/knowledge"
+
+# Only run if knowledge/ files changed in this merge
+CHANGED=$(git diff-tree -r --name-only ORIG_HEAD HEAD -- knowledge/ 2>/dev/null)
+
+if [ -n "$CHANGED" ]; then
+    echo "[post-merge] Knowledge files changed — rebuilding knowledge.db..."
+    cd "$KNOWLEDGE_DIR" && python3 sync.py build 2>&1 | sed 's/^/[post-merge] /'
+else
+    echo "[post-merge] No knowledge changes — skipping rebuild"
+fi
+HOOK
+    chmod +x "$POST_MERGE"
+    echo "  ✓ post-merge hook (auto-rebuild knowledge.db on git pull)"
+else
+    echo "  ⚠ Not a git repo — skipping post-merge hook"
+fi
+
+echo ""
+
 # ─── Phase 4: Verify + Summary ──────────────────────────────────────────────
 
 echo "Phase 4: Verify"
