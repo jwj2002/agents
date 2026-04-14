@@ -39,21 +39,22 @@ Code lives on jbox06 (`172.16.20.58`). Claude Code on the laptop writes files vi
 - **Git operations:** `ssh jbox06 'cd ~/app-repos/<repo> && git add -A && git commit -m "msg" && git push origin <branch>'`
 - **Never** clone VitalAILabs app repos locally — laptop cannot reach GitLab directly
 
-**Issue tracking:** GitLab Issues on the app's GitLab project. Use the GitLab API via jbox06:
+**Issue tracking:** GitLab Issues via `glab` CLI on jbox06 (installed and authenticated):
 ```bash
-# Create an issue
-ssh jbox06 'TOKEN=$(grep "172.16.20.50" ~/.git-credentials | sed "s/.*:\(glpat-[^@]*\)@.*/\1/") && \
-  curl -s --request POST "http://172.16.20.50:8929/api/v4/projects/<project_id>/issues" \
-  --header "PRIVATE-TOKEN: $TOKEN" \
-  --header "Content-Type: application/json" \
-  --data "{\"title\": \"...\", \"description\": \"...\", \"labels\": \"...\"}"'
+# List issues (run from inside an app repo on jbox06)
+ssh jbox06 'cd ~/app-repos/<repo> && glab issue list'
 
-# List issues
-ssh jbox06 'TOKEN=$(grep "172.16.20.50" ~/.git-credentials | sed "s/.*:\(glpat-[^@]*\)@.*/\1/") && \
-  curl -s "http://172.16.20.50:8929/api/v4/projects/<project_id>/issues?state=opened&private_token=$TOKEN"'
+# Create an issue
+ssh jbox06 'cd ~/app-repos/<repo> && glab issue create --title "..." --description "..." --label "P0,backend"'
+
+# View an issue
+ssh jbox06 'cd ~/app-repos/<repo> && glab issue view 3'
+
+# Create a merge request
+ssh jbox06 'cd ~/app-repos/<repo> && glab mr create --title "..." --description "..."'
 ```
 
-**Do NOT use `gh` CLI for VitalAILabs projects** — `gh` is for GitHub only. Use the GitLab API via SSH to jbox06.
+**Do NOT use `gh` CLI for VitalAILabs projects** — `gh` is for GitHub only. Use `glab` on jbox06 for GitLab.
 
 ## How to Detect Mode
 
