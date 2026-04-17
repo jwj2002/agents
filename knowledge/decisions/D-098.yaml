@@ -1,0 +1,30 @@
+id: D-098
+date: '2026-04-08'
+project: flotilla
+topic: architecture
+title: "Federated flotilla instances with WebSocket bridge for multi-developer"
+context: >
+  Designing for team expansion (P4). Solo developer today, second developer (Paul)
+  planned. Rather than centralized shared server, each developer runs their own
+  flotilla. Instances link via WebSocket for collaboration.
+decision: >
+  Federated architecture: each developer owns their flotilla instance (server, DB,
+  agents, knowledge). Instances connect via WebSocket bridge for shared channels
+  and messaging. Phase 4 channel model (#21-27) is the internal foundation.
+  Knowledge bases sync selectively (validated patterns shared, drafts private).
+alternatives:
+  - option: Centralized single server
+    rejected_because: Creates bottleneck, forces shared infrastructure, reduces developer autonomy
+  - option: Just use Slack for messaging
+    rejected_because: Loses context-linking to projects/issues/decisions. Separate tool.
+reasoning: >
+  Federation preserves developer autonomy while enabling collaboration. Each flotilla
+  is a complete unit that CAN link but doesn't HAVE to. Adding a developer doesn't
+  change existing setup. WebSocket through Cloudflare tunnels works across networks.
+outcome: null
+linked_patterns: []
+linked_issues:
+  - "#21-27 (Phase 4 messaging — closed, design reusable)"
+linked_prs: []
+related_decisions:
+  - D-096

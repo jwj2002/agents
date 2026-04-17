@@ -22,6 +22,10 @@ by_project:
     topic: philosophy
     title: Agents execute patterns, not invent solutions
     date: '2026-04-07'
+  - id: D-098
+    topic: architecture
+    title: Federated flotilla instances with WebSocket bridge for multi-developer
+    date: '2026-04-08'
   docketiq:
   - id: D-042
     topic: auth
@@ -49,6 +53,8 @@ by_topic:
   philosophy:
   - D-096
   - D-097
+  architecture:
+  - D-098
 by_pattern:
   PAT-001:
   - D-015
