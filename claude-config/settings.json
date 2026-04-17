@@ -3,7 +3,31 @@
     "allow": [
       "Bash(clawdbot --help:*)",
       "Bash(clawdbot config:*)",
-      "Bash(clawdbot models --help:*)"
+      "Bash(clawdbot models --help:*)",
+      "Bash(ssh jbox06:*)",
+      "Bash(ssh spark:*)",
+      "Bash(ssh -t jbox06:*)",
+      "Bash(ssh -t spark:*)",
+      "Bash(ssh -o:*)",
+      "Bash(scp:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git fetch:*)",
+      "Bash(git pull gitlab:*)",
+      "Bash(git pull origin:*)",
+      "Bash(git push gitlab:*)",
+      "Bash(git push origin:*)",
+      "Bash(git push -u gitlab:*)",
+      "Bash(git push -u origin:*)",
+      "Bash(git checkout:*)",
+      "Bash(git branch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(glab:*)",
+      "Bash(curl -s -H PRIVATE-TOKEN:*)",
+      "Bash(curl -s -X POST -H PRIVATE-TOKEN:*)",
+      "Bash(curl -s -X PUT -H PRIVATE-TOKEN:*)"
     ]
   },
   "hooks": {
