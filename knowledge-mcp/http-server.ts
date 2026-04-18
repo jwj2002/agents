@@ -17,6 +17,7 @@ import {
   getAllProjectSummaries,
   getRecent,
   getDashboard,
+  getDashboardWithAutomation,
   getProjectContext,
   updateProjectContext,
   captureInbox,
@@ -169,9 +170,9 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // Dashboard
+    // Dashboard (runs automation)
     if (path === "/api/v1/knowledge/dashboard") {
-      json(res, getDashboard(db, query.status || undefined));
+      json(res, await getDashboardWithAutomation(db, query.status || undefined));
       return;
     }
 

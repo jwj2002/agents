@@ -429,7 +429,14 @@ const isMainModule =
   process.argv[1] &&
   (process.argv[1].endsWith("index.ts") || process.argv[1].endsWith("index.js"));
 
+import { runAutomation } from "./automation.js";
+
 // --- Project Tracker functions ---
+
+export async function getDashboardWithAutomation(db: Database.Database, status?: string) {
+  await runAutomation(db);
+  return getDashboard(db, status);
+}
 
 export function getDashboard(db: Database.Database, status?: string) {
   const conditions: string[] = [];
@@ -817,15 +824,15 @@ if (isMainModule) {
     }
   );
 
-  // Tool 14: get_dashboard
+  // Tool 14: get_dashboard (runs automation: auto-blockers, auto-status, auto-journal)
   server.tool(
     "get_dashboard",
-    "Get cross-project overview: all active/paused/blocked projects with focus, blockers, next steps. Plus open inbox count.",
+    "Get cross-project overview: all active/paused/blocked projects with focus, blockers, next steps. Plus open inbox count. Auto-syncs blockers from Flotilla escalations, recomputes status based on activity, journals new commits.",
     {
       status: z.string().optional().describe("Filter by status (active, paused, blocked, done)"),
     },
     async ({ status }) => {
-      const results = getDashboard(db, status);
+      const results = await getDashboardWithAutomation(db, status);
       return { content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }] };
     }
   );
