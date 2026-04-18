@@ -1,22 +1,23 @@
 project: flotilla
 status: active
-focus: "Cross-environment platform — Phase 1 project tracker"
+focus: Phase 4 automation complete — auto-blockers, auto-status, auto-journal,
+  stale prompts live
 next_steps:
-  - "Build MCP tools for dashboard, project context, capture, inbox"
-  - "Create CLI skills (/dashboard, /project, /capture, /inbox)"
-  - "Flotilla integration — Context section in ProjectView"
+  - Test automation end-to-end across all projects
+  - Plan Phase 3 (multi-env + client engagement setup) when needed
+  - Monitor dashboard for drift over a week of real use
 blockers: []
 open_questions:
-  - "Should /weekly digest auto-post to Slack or just render in terminal?"
+  - Should /weekly digest auto-post to Slack or just render in terminal?
 specs:
-  - path: "specs/cross-env-platform.md"
-    version: "v2.0"
-    status: "final"
-    summary: "Two-layer platform architecture"
-  - path: "specs/add-project.md"
-    version: "v1.0"
-    status: "draft"
-    summary: "Add Project modal — Create New and Add Existing"
+  - path: specs/cross-env-platform.md
+    version: v2.0
+    status: final
+    summary: Two-layer platform architecture
+  - path: specs/add-project.md
+    version: v1.0
+    status: draft
+    summary: Add Project modal — Create New and Add Existing
 dependencies: []
-updated_at: "2026-04-18"
-updated_by: "jason"
+updated_at: 2026-04-18
+updated_by: jason
