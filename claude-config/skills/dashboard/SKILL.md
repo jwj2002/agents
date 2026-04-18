@@ -118,22 +118,22 @@ To update: /project {name} --focus "..."
 Only active projects trigger this. Paused projects are expected to be stale.
 This is a passive notice — no blocking interaction.
 
-### Post-Session Commit Reminder (T2)
+### Post-Session Review Nudge (T2)
 
-Check `~/.claude/session_context_reminders.log` for entries written by the
-session_end_context_update hook. If any entries exist and haven't been shown yet,
-display:
+Check `~/.claude/pending_focus_reviews.json`. If it exists with non-empty entries,
+show a one-line notice at the TOP of the dashboard output (above Services):
 
 ```
-📝 Recent session activity:
-  flotilla: 5 commits (feat: project tracker schema, feat: MCP tools, ...)
-  temper: 2 commits (fix: ruff lint errors, ...)
+📝 2 projects have session activity to review — run /review-session
 
-Update focus with: /project {name} --focus "..."
+Services: Flotilla ✓  Knowledge MCP ✓
+...
 ```
 
-After showing, optionally archive the log entry (rename to `.shown` suffix) so
-it's not shown again. Keep the display brief — top 3 commit messages per project.
+Count = number of project keys in the pending file. Don't list them — that's
+/review-session's job. This is a gentle nudge, not a blocker.
+
+No notice shown if the file doesn't exist or has no entries.
 
 ## Rendering Rules
 
