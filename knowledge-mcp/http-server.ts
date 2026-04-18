@@ -16,6 +16,13 @@ import {
   getProjectSummary,
   getAllProjectSummaries,
   getRecent,
+  getDashboard,
+  getProjectContext,
+  updateProjectContext,
+  captureInbox,
+  triageInbox,
+  getInbox,
+  getJournal,
 } from "./index.js";
 
 const dbPath =
@@ -46,7 +53,7 @@ function parseQuery(url: string): Record<string, string> {
   return params;
 }
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     json(res, {});
     return;
@@ -162,6 +169,61 @@ const server = http.createServer((req, res) => {
       return;
     }
 
+    // Dashboard
+    if (path === "/api/v1/knowledge/dashboard") {
+      json(res, getDashboard(db, query.status || undefined));
+      return;
+    }
+
+    // Project context
+    const ctxMatch = path.match(/^\/api\/v1\/knowledge\/project\/([^/]+)$/);
+    if (ctxMatch) {
+      const name = decodeURIComponent(ctxMatch[1]);
+      if (req.method === "GET") {
+        const result = getProjectContext(db, name);
+        if (!result) { json(res, { error: "not found" }, 404); return; }
+        json(res, result);
+      }
+      return;
+    }
+
+    const ctxUpdateMatch = path.match(/^\/api\/v1\/knowledge\/project\/([^/]+)\/update$/);
+    if (ctxUpdateMatch && req.method === "POST") {
+      const name = decodeURIComponent(ctxUpdateMatch[1]);
+      const body = await readBody(req);
+      const result = updateProjectContext(db, name, body);
+      json(res, result);
+      return;
+    }
+
+    // Inbox
+    if (path === "/api/v1/knowledge/inbox") {
+      if (req.method === "GET") {
+        json(res, { items: getInbox(db, query.status || "open", query.project || undefined) });
+      } else if (req.method === "POST") {
+        const body = await readBody(req);
+        const result = captureInbox(db, body.content, body.project, body.type);
+        json(res, result, 201);
+      }
+      return;
+    }
+
+    const triageMatch = path.match(/^\/api\/v1\/knowledge\/inbox\/(\d+)\/triage$/);
+    if (triageMatch && req.method === "POST") {
+      const body = await readBody(req);
+      const result = triageInbox(db, parseInt(triageMatch[1]), body.action, body.project);
+      json(res, result);
+      return;
+    }
+
+    // Journal
+    const journalMatch = path.match(/^\/api\/v1\/knowledge\/journal\/(.+)$/);
+    if (journalMatch) {
+      const name = decodeURIComponent(journalMatch[1]);
+      json(res, { entries: getJournal(db, name, query.limit ? parseInt(query.limit) : undefined) });
+      return;
+    }
+
     json(res, { error: "not found" }, 404);
   } catch (err) {
     console.error("Knowledge HTTP error:", err);
@@ -169,6 +231,19 @@ const server = http.createServer((req, res) => {
   }
 });
 
-server.listen(port, "0.0.0.0", () => {
-  console.error(`[knowledge-http] Listening on http://0.0.0.0:${port}`);
+function readBody(req: http.IncomingMessage): Promise<any> {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.on("data", (chunk: string) => { data += chunk; });
+    req.on("end", () => {
+      try { resolve(JSON.parse(data)); }
+      catch { resolve({}); }
+    });
+    req.on("error", reject);
+  });
+}
+
+const bindHost = process.env.KNOWLEDGE_HTTP_HOST || "127.0.0.1";
+server.listen(port, bindHost, () => {
+  console.error(`[knowledge-http] Listening on http://${bindHost}:${port}`);
 });

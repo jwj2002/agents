@@ -1,0 +1,11 @@
+project: temper
+status: paused
+focus: "AI SDLC Orchestrator — spec-to-PR pipeline"
+next_steps:
+  - "Finalize orchestration workflow"
+blockers: []
+open_questions: []
+specs: []
+dependencies: []
+updated_at: "2026-04-05"
+updated_by: "jason"
