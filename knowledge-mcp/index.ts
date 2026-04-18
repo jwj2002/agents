@@ -430,6 +430,34 @@ const isMainModule =
   (process.argv[1].endsWith("index.ts") || process.argv[1].endsWith("index.js"));
 
 import { runAutomation } from "./automation.js";
+import YAML from "yaml";
+
+// Write project tracker YAML back to ~/agents/knowledge/projects/{project}.yaml
+// so SQLite updates persist through sync.py build rebuilds.
+function writeProjectYaml(db: Database.Database, project: string): void {
+  try {
+    const row = db.prepare("SELECT * FROM project_tracker WHERE project = @project").get({ project }) as any;
+    if (!row) return;
+
+    const data: Record<string, any> = {
+      project: row.project,
+      status: row.status,
+      focus: row.focus || null,
+      next_steps: row.next_steps ? JSON.parse(row.next_steps) : [],
+      blockers: row.blockers ? JSON.parse(row.blockers) : [],
+      open_questions: row.open_questions ? JSON.parse(row.open_questions) : [],
+      specs: row.specs ? JSON.parse(row.specs) : [],
+      dependencies: row.dependencies ? JSON.parse(row.dependencies) : [],
+      updated_at: (row.updated_at || "").split(" ")[0] || new Date().toISOString().slice(0, 10),
+      updated_by: row.updated_by || "jason",
+    };
+
+    const yamlPath = path.resolve(__dirname, "../knowledge/projects", `${project}.yaml`);
+    fs.writeFileSync(yamlPath, YAML.stringify(data), "utf8");
+  } catch (err) {
+    console.error(`writeProjectYaml(${project}):`, err);
+  }
+}
 
 // --- Project Tracker functions ---
 
@@ -520,6 +548,9 @@ export function updateProjectContext(
   }
 
   db.prepare(`UPDATE project_tracker SET ${sets.join(", ")} WHERE project = @project`).run(params);
+
+  // Persist to YAML so sync.py build doesn't overwrite this change
+  writeProjectYaml(db, project);
 
   return getProjectContext(db, project);
 }
