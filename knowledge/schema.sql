@@ -97,9 +97,10 @@ CREATE TABLE IF NOT EXISTS project_tracker (
     project TEXT PRIMARY KEY,
     status TEXT NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'paused', 'blocked', 'done')),
+    manual_status_override INTEGER DEFAULT 0,  -- 1 = don't auto-transition
     focus TEXT,
     next_steps TEXT,              -- JSON array, ordered
-    blockers TEXT,                -- JSON array
+    blockers TEXT,                -- JSON array (prefix [auto] for auto-managed)
     open_questions TEXT,          -- JSON array
     specs TEXT,                   -- JSON array of {path, version, status, summary}
     dependencies TEXT,            -- JSON array of {project, what, status}
@@ -131,12 +132,14 @@ CREATE TABLE IF NOT EXISTS journal (
     project TEXT NOT NULL,
     entry TEXT NOT NULL,
     entry_type TEXT NOT NULL DEFAULT 'update'
-        CHECK (entry_type IN ('update', 'decision', 'milestone', 'blocker_resolved', 'focus_change')),
+        CHECK (entry_type IN ('update', 'decision', 'milestone', 'blocker_resolved', 'focus_change', 'commit', 'status_change')),
+    commit_sha TEXT,              -- For dedup of auto-journaled commits
     created_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_journal_project ON journal(project);
 CREATE INDEX IF NOT EXISTS idx_journal_date ON journal(created_at);
+CREATE INDEX IF NOT EXISTS idx_journal_commit_sha ON journal(commit_sha);
 
 -- Full-text search for decisions (standalone — rebuilt from scratch during build)
 CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(

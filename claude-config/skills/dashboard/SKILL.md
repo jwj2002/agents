@@ -1,7 +1,7 @@
 ---
 name: dashboard
-version: 3.0
-description: Cross-project status overview (Knowledge MCP + Flotilla) with issue and capture listings
+version: 4.0
+description: Cross-project status overview with automation (auto-blockers, auto-status, auto-journal) and stale project prompt
 ---
 
 # /dashboard
@@ -102,6 +102,38 @@ BLOCKED
 ```
 INBOX (2 open — triage with /inbox)
 ```
+
+### Stale Project Prompt (T2)
+
+After rendering the dashboard, if any **active** project has `updated_at` >48h ago, append a prompt:
+
+```
+⚠ Stale context detected:
+  - flotilla (3d since last update)
+  - routeiq (5d since last update)
+
+To update: /project {name} --focus "..."
+```
+
+Only active projects trigger this. Paused projects are expected to be stale.
+This is a passive notice — no blocking interaction.
+
+### Post-Session Commit Reminder (T2)
+
+Check `~/.claude/session_context_reminders.log` for entries written by the
+session_end_context_update hook. If any entries exist and haven't been shown yet,
+display:
+
+```
+📝 Recent session activity:
+  flotilla: 5 commits (feat: project tracker schema, feat: MCP tools, ...)
+  temper: 2 commits (fix: ruff lint errors, ...)
+
+Update focus with: /project {name} --focus "..."
+```
+
+After showing, optionally archive the log entry (rename to `.shown` suffix) so
+it's not shown again. Keep the display brief — top 3 commit messages per project.
 
 ## Rendering Rules
 
