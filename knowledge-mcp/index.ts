@@ -24,6 +24,7 @@ function openDb(dbFilePath: string): Database.Database {
   }
   const db = new Database(dbFilePath);
   db.pragma("journal_mode = WAL");
+  db.pragma("busy_timeout = 5000");
   return db;
 }
 
@@ -428,6 +429,149 @@ const isMainModule =
   process.argv[1] &&
   (process.argv[1].endsWith("index.ts") || process.argv[1].endsWith("index.js"));
 
+// --- Project Tracker functions ---
+
+export function getDashboard(db: Database.Database, status?: string) {
+  const conditions: string[] = [];
+  const params: Record<string, string> = {};
+
+  if (status) {
+    conditions.push("status = @status");
+    params.status = status;
+  } else {
+    conditions.push("status IN ('active', 'paused', 'blocked')");
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const projects = db.prepare(`SELECT * FROM project_tracker ${where} ORDER BY status, project`).all(params);
+
+  const inboxCount = (db.prepare("SELECT count(*) as count FROM inbox WHERE status = 'open'").get() as any)?.count || 0;
+
+  return {
+    projects: projects.map((p: any) => parseJsonFields(p, ["next_steps", "blockers", "open_questions", "specs", "dependencies"])),
+    inbox_open: inboxCount,
+  };
+}
+
+export function getProjectContext(db: Database.Database, project: string) {
+  const tracker = db.prepare("SELECT * FROM project_tracker WHERE project = @project").get({ project }) as any;
+  if (!tracker) return null;
+
+  const parsed = parseJsonFields(tracker, ["next_steps", "blockers", "open_questions", "specs", "dependencies"]);
+
+  const journal = db.prepare(
+    "SELECT * FROM journal WHERE project = @project ORDER BY created_at DESC LIMIT 20"
+  ).all({ project });
+
+  const decisions = db.prepare(
+    "SELECT id, date, title, topic FROM decisions WHERE project = @project ORDER BY date DESC LIMIT 10"
+  ).all({ project });
+
+  return { ...parsed, recent_journal: journal, recent_decisions: decisions };
+}
+
+export function updateProjectContext(
+  db: Database.Database,
+  project: string,
+  updates: { focus?: string; status?: string; next_steps?: string[]; blockers?: string[]; open_questions?: string[] }
+) {
+  const now = new Date().toISOString().replace("T", " ").slice(0, 19) + "Z";
+
+  // Ensure row exists
+  const existing = db.prepare("SELECT 1 FROM project_tracker WHERE project = @project").get({ project });
+  if (!existing) {
+    db.prepare(
+      "INSERT INTO project_tracker (project, status, updated_at) VALUES (@project, 'active', @now)"
+    ).run({ project, now });
+  }
+
+  const sets: string[] = ["updated_at = @now"];
+  const params: Record<string, any> = { project, now };
+
+  if (updates.focus !== undefined) {
+    sets.push("focus = @focus");
+    params.focus = updates.focus;
+    // Auto-journal focus change
+    db.prepare("INSERT INTO journal (project, entry, entry_type, created_at) VALUES (@project, @entry, 'focus_change', @now)")
+      .run({ project, entry: `Focus changed: ${updates.focus}`, now });
+  }
+  if (updates.status !== undefined) {
+    sets.push("status = @status");
+    params.status = updates.status;
+  }
+  if (updates.next_steps !== undefined) {
+    sets.push("next_steps = @next_steps");
+    params.next_steps = JSON.stringify(updates.next_steps);
+  }
+  if (updates.blockers !== undefined) {
+    sets.push("blockers = @blockers");
+    params.blockers = JSON.stringify(updates.blockers);
+  }
+  if (updates.open_questions !== undefined) {
+    sets.push("open_questions = @open_questions");
+    params.open_questions = JSON.stringify(updates.open_questions);
+  }
+
+  db.prepare(`UPDATE project_tracker SET ${sets.join(", ")} WHERE project = @project`).run(params);
+
+  return getProjectContext(db, project);
+}
+
+export function captureInbox(
+  db: Database.Database,
+  content: string,
+  project?: string,
+  type?: string
+) {
+  const now = new Date().toISOString().replace("T", " ").slice(0, 19) + "Z";
+  const result = db.prepare(
+    "INSERT INTO inbox (content, project, type, status, created_at) VALUES (@content, @project, @type, 'open', @now)"
+  ).run({ content, project: project || null, type: type || "task", now });
+  return { id: result.lastInsertRowid, content, project, type: type || "task", status: "open" };
+}
+
+export function triageInbox(
+  db: Database.Database,
+  id: number,
+  action: string,
+  project?: string
+) {
+  const now = new Date().toISOString().replace("T", " ").slice(0, 19) + "Z";
+
+  if (action === "assign" && project) {
+    db.prepare("UPDATE inbox SET project = @project WHERE id = @id").run({ id, project });
+  } else if (action === "done") {
+    db.prepare("UPDATE inbox SET status = 'done', resolved_at = @now WHERE id = @id").run({ id, now });
+  } else if (action === "dismiss") {
+    db.prepare("UPDATE inbox SET status = 'dismissed', resolved_at = @now WHERE id = @id").run({ id, now });
+  }
+
+  return db.prepare("SELECT * FROM inbox WHERE id = @id").get({ id });
+}
+
+export function getInbox(db: Database.Database, status?: string, project?: string) {
+  const conditions: string[] = [];
+  const params: Record<string, string> = {};
+
+  if (status) {
+    conditions.push("status = @status");
+    params.status = status;
+  }
+  if (project) {
+    conditions.push("project = @project");
+    params.project = project;
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  return db.prepare(`SELECT * FROM inbox ${where} ORDER BY created_at DESC LIMIT 50`).all(params);
+}
+
+export function getJournal(db: Database.Database, project: string, limit?: number) {
+  return db.prepare(
+    "SELECT * FROM journal WHERE project = @project ORDER BY created_at DESC LIMIT @limit"
+  ).all({ project, limit: limit || 20 });
+}
+
 if (isMainModule) {
   const server = new McpServer(
     { name: "knowledge", version: "0.1.0" },
@@ -669,6 +813,111 @@ if (isMainModule) {
     },
     async ({ since, limit }) => {
       const results = getRecent(db, since, limit);
+      return { content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }] };
+    }
+  );
+
+  // Tool 14: get_dashboard
+  server.tool(
+    "get_dashboard",
+    "Get cross-project overview: all active/paused/blocked projects with focus, blockers, next steps. Plus open inbox count.",
+    {
+      status: z.string().optional().describe("Filter by status (active, paused, blocked, done)"),
+    },
+    async ({ status }) => {
+      const results = getDashboard(db, status);
+      return { content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }] };
+    }
+  );
+
+  // Tool 15: get_project_context
+  server.tool(
+    "get_project_context",
+    "Get full context for one project: focus, next steps, blockers, open questions, recent journal entries, related decisions.",
+    {
+      project: z.string().describe("Project name"),
+    },
+    async ({ project }) => {
+      const result = getProjectContext(db, project);
+      if (!result) {
+        return { content: [{ type: "text" as const, text: `Project "${project}" not found in tracker` }], isError: true };
+      }
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // Tool 16: update_project_context
+  server.tool(
+    "update_project_context",
+    "Update project context: focus, status, next steps, blockers, open questions. Auto-logs focus changes to journal.",
+    {
+      project: z.string().describe("Project name"),
+      focus: z.string().optional().describe("Current focus area"),
+      status: z.string().optional().describe("Project status (active, paused, blocked, done)"),
+      next_steps: z.array(z.string()).optional().describe("Ordered list of next steps"),
+      blockers: z.array(z.string()).optional().describe("Current blockers"),
+      open_questions: z.array(z.string()).optional().describe("Open questions"),
+    },
+    async ({ project, focus, status, next_steps, blockers, open_questions }) => {
+      const result = updateProjectContext(db, project, { focus, status, next_steps, blockers, open_questions });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // Tool 17: capture
+  server.tool(
+    "capture",
+    "Quick-add to inbox. Non-interrupting capture for tasks, questions, ideas, concerns.",
+    {
+      content: z.string().describe("What to capture"),
+      project: z.string().optional().describe("Project to associate with (optional — triage later)"),
+      type: z.string().optional().describe("Type: task, question, idea, concern (default: task)"),
+    },
+    async ({ content, project, type }) => {
+      const result = captureInbox(db, content, project, type);
+      return { content: [{ type: "text" as const, text: `✓ Captured #${result.id}: "${content.slice(0, 50)}${content.length > 50 ? '...' : ''}" (${result.type}${result.project ? ` → ${result.project}` : ''})` }] };
+    }
+  );
+
+  // Tool 18: triage_inbox
+  server.tool(
+    "triage_inbox",
+    "Triage an inbox item: assign to project, mark done, or dismiss.",
+    {
+      id: z.number().describe("Inbox item ID"),
+      action: z.string().describe("Action: assign, done, dismiss"),
+      project: z.string().optional().describe("Project to assign to (required for assign action)"),
+    },
+    async ({ id, action, project }) => {
+      const result = triageInbox(db, id, action, project);
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // Tool 19: get_inbox
+  server.tool(
+    "get_inbox",
+    "Get inbox items. Shows open items by default.",
+    {
+      status: z.string().optional().describe("Filter: open, done, dismissed (default: open)"),
+      project: z.string().optional().describe("Filter by project"),
+    },
+    async ({ status, project }) => {
+      const results = getInbox(db, status || "open", project);
+      return { content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }] };
+    }
+  );
+
+  // Tool 20: get_journal
+  server.tool(
+    "get_journal",
+    "Get chronological journal entries for a project.",
+    {
+      project: z.string().describe("Project name"),
+      limit: z.number().optional().describe("Max entries (default: 20)"),
+    },
+    async ({ project, limit }) => {
+      const results = getJournal(db, project, limit);
       return { content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }] };
     }
   );

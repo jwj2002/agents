@@ -34,6 +34,7 @@ DECISIONS_DIR = BASE_DIR / "decisions"
 LEARNING_RULES_DIR = BASE_DIR / "learning-rules"
 VELOCITY_DIR = BASE_DIR / "velocity"
 PROJECT_SUMMARIES_DIR = BASE_DIR / "project-summaries"
+PROJECTS_DIR = BASE_DIR / "projects"
 INDEX_PATH = DECISIONS_DIR / "index.yaml"
 
 # Validation constants
@@ -56,6 +57,7 @@ def _connect(db_path: Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
@@ -66,7 +68,7 @@ def _init_schema(conn: sqlite3.Connection, schema_path: Path | None = None) -> N
 
 def _clear_tables(conn: sqlite3.Connection) -> None:
     """Delete all rows from data tables (preserves schema)."""
-    for table in ("patterns", "decisions", "learning_rules", "velocity", "decisions_fts"):
+    for table in ("patterns", "decisions", "learning_rules", "velocity", "decisions_fts", "project_tracker"):
         conn.execute(f"DELETE FROM {table}")
     conn.commit()
 
@@ -406,6 +408,45 @@ def _build_project_summaries(conn: sqlite3.Connection, summaries_dir: Path) -> i
     return count
 
 
+def _build_project_tracker(conn: sqlite3.Connection, projects_dir: Path) -> int:
+    """Load project tracker YAML files into project_tracker table."""
+    count = 0
+    if not projects_dir.is_dir():
+        return count
+
+    for path in sorted(projects_dir.glob("*.yaml")):
+        data = _load_yaml(path)
+        if data is None:
+            continue
+
+        if not isinstance(data, dict) or "project" not in data:
+            logger.warning("Skipping malformed project tracker: %s", path.name)
+            continue
+
+        conn.execute(
+            """INSERT OR REPLACE INTO project_tracker
+               (project, status, focus, next_steps, blockers, open_questions,
+                specs, dependencies, updated_at, updated_by)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                data["project"],
+                data.get("status", "active"),
+                data.get("focus"),
+                _json_dump(data.get("next_steps")),
+                _json_dump(data.get("blockers")),
+                _json_dump(data.get("open_questions")),
+                _json_dump(data.get("specs")),
+                _json_dump(data.get("dependencies")),
+                data.get("updated_at"),
+                data.get("updated_by"),
+            ),
+        )
+        count += 1
+
+    conn.commit()
+    return count
+
+
 # ---------------------------------------------------------------------------
 # build command
 # ---------------------------------------------------------------------------
@@ -441,18 +482,20 @@ def cmd_build(
         n_rules = _build_learning_rules(conn, _rules)
         n_velocity = _build_velocity(conn, _velocity)
         n_summaries = _build_project_summaries(conn, PROJECT_SUMMARIES_DIR)
+        n_projects = _build_project_tracker(conn, PROJECTS_DIR)
 
         print(
             f"Built {_db.name}: "
             f"{n_patterns} patterns, {n_decisions} decisions, "
             f"{n_rules} rules, {n_velocity} velocity entries, "
-            f"{n_summaries} project summaries"
+            f"{n_summaries} project summaries, {n_projects} project tracker entries"
         )
         return {
             "patterns": n_patterns,
             "decisions": n_decisions,
             "rules": n_rules,
             "velocity": n_velocity,
+            "projects": n_projects,
         }
     finally:
         conn.close()

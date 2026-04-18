@@ -92,6 +92,52 @@ CREATE INDEX IF NOT EXISTS idx_velocity_task_type ON velocity(task_type);
 CREATE INDEX IF NOT EXISTS idx_velocity_complexity ON velocity(complexity);
 CREATE INDEX IF NOT EXISTS idx_velocity_date ON velocity(date);
 
+-- Project tracker — one row per tracked project
+CREATE TABLE IF NOT EXISTS project_tracker (
+    project TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'paused', 'blocked', 'done')),
+    focus TEXT,
+    next_steps TEXT,              -- JSON array, ordered
+    blockers TEXT,                -- JSON array
+    open_questions TEXT,          -- JSON array
+    specs TEXT,                   -- JSON array of {path, version, status, summary}
+    dependencies TEXT,            -- JSON array of {project, what, status}
+    updated_at TEXT,
+    updated_by TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_tracker_status ON project_tracker(status);
+
+-- Inbox — quick capture, triage later
+CREATE TABLE IF NOT EXISTS inbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    project TEXT,                 -- nullable (assign later)
+    type TEXT NOT NULL DEFAULT 'task'
+        CHECK (type IN ('task', 'question', 'idea', 'concern')),
+    status TEXT NOT NULL DEFAULT 'open'
+        CHECK (status IN ('open', 'done', 'dismissed')),
+    created_at TEXT,
+    resolved_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_inbox_status ON inbox(status);
+CREATE INDEX IF NOT EXISTS idx_inbox_project ON inbox(project);
+
+-- Journal — chronological log per project
+CREATE TABLE IF NOT EXISTS journal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project TEXT NOT NULL,
+    entry TEXT NOT NULL,
+    entry_type TEXT NOT NULL DEFAULT 'update'
+        CHECK (entry_type IN ('update', 'decision', 'milestone', 'blocker_resolved', 'focus_change')),
+    created_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_journal_project ON journal(project);
+CREATE INDEX IF NOT EXISTS idx_journal_date ON journal(created_at);
+
 -- Full-text search for decisions (standalone — rebuilt from scratch during build)
 CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(
     id, title, context, decision, reasoning

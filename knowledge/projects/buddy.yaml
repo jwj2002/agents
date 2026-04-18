@@ -1,0 +1,12 @@
+project: buddy
+status: paused
+focus: "Meeting transcription pipeline"
+next_steps:
+  - "Fix audio chunking for long meetings"
+  - "Add speaker label detection"
+blockers: []
+open_questions: []
+specs: []
+dependencies: []
+updated_at: "2026-04-08"
+updated_by: "jason"

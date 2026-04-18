@@ -1,0 +1,18 @@
+# Cross-Environment Development Platform — Personal Environment Config
+
+capture:
+  destination: flotilla          # "flotilla" (personal) or "local" (client)
+  endpoint: http://localhost:9000/api/v1/captures
+
+pattern_sharing:
+  mode: staged                   # github, staged, disabled
+  remote_branch: review/incoming
+  staged_dir: staged-patterns
+
+pattern_review:
+  flag_terms: []                 # add client names/terms to detect on import
+
+knowledge_mcp:
+  mode: http                     # http (personal) or stdio (client)
+  port: 9100
+  host: "127.0.0.1"
