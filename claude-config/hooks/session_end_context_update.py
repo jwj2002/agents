@@ -35,9 +35,8 @@ def log(msg: str) -> None:
         pass
 
 
-def get_session_commits(project_dir: Path, since_minutes: int = 240) -> list[dict]:
-    """Return list of commits made in project during session window."""
-    since = datetime.now() - timedelta(minutes=since_minutes)
+def get_session_commits(project_dir: Path, since: datetime) -> list[dict]:
+    """Return list of commits made in project after the given cutoff."""
     since_iso = since.strftime("%Y-%m-%d %H:%M:%S")
     try:
         proc = subprocess.run(
@@ -56,19 +55,33 @@ def get_session_commits(project_dir: Path, since_minutes: int = 240) -> list[dic
         return []
 
 
-def get_current_focus(project: str) -> str | None:
-    """Read current focus from knowledge.db."""
+def get_project_state(project: str) -> tuple[str | None, datetime | None]:
+    """Return (focus, updated_at) from project_tracker. updated_at is naive UTC."""
     if not KNOWLEDGE_DB.exists():
-        return None
+        return None, None
     try:
         conn = sqlite3.connect(str(KNOWLEDGE_DB))
         row = conn.execute(
-            "SELECT focus FROM project_tracker WHERE project = ?", (project,)
+            "SELECT focus, updated_at FROM project_tracker WHERE project = ?", (project,)
         ).fetchone()
         conn.close()
-        return row[0] if row else None
+        if not row:
+            return None, None
+        focus = row[0]
+        updated_at = None
+        if row[1]:
+            try:
+                # Format: "2026-04-18 20:48:52Z" or "2026-04-18"
+                stamp = row[1].replace("Z", "").strip()
+                if " " in stamp:
+                    updated_at = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S")
+                else:
+                    updated_at = datetime.strptime(stamp, "%Y-%m-%d")
+            except Exception:
+                updated_at = None
+        return focus, updated_at
     except Exception:
-        return None
+        return None, None
 
 
 def get_tracked_projects() -> set[str]:
@@ -105,13 +118,23 @@ def main() -> int:
                 pending = {}
 
         updated = False
+        session_window_cutoff = datetime.now() - timedelta(minutes=240)
+
         for proj_dir in PROJECTS_DIR.iterdir():
             if not proj_dir.is_dir() or not (proj_dir / ".git").is_dir():
                 continue
             if proj_dir.name not in tracked:
                 continue
 
-            commits = get_session_commits(proj_dir)
+            # Cutoff = max(session window, last focus update)
+            # Only surface commits newer than when focus was last set —
+            # otherwise we re-propose things the user already acknowledged.
+            focus, updated_at = get_project_state(proj_dir.name)
+            cutoff = session_window_cutoff
+            if updated_at and updated_at > cutoff:
+                cutoff = updated_at
+
+            commits = get_session_commits(proj_dir, since=cutoff)
             if not commits:
                 continue
 
@@ -126,7 +149,7 @@ def main() -> int:
 
             pending[proj_dir.name] = {
                 "commits": existing_commits + new_commits,
-                "current_focus": get_current_focus(proj_dir.name),
+                "current_focus": focus,
                 "session_end": datetime.now().isoformat(),
             }
             updated = True
