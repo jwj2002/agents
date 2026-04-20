@@ -15,6 +15,15 @@ Issue-driven workflow with pattern learning and outcome tracking.
 - **Slimmed agents**: 50% smaller, faster context loading
 - **Shared behaviors**: All agents inherit from _base.md
 
+## What's New in v5
+
+- **SIMPLE pipeline compressed**: PLAN-CHECK dropped from SIMPLE/MODERATE.
+  Default cost is now 3 phases (MAP-PLAN → PATCH → PROVE) instead of 5–6.
+  Codex adversarial review (post-PROVE, automatic for MODERATE+) picks up
+  what PATCH missed.
+- **COMPLEX pipeline unchanged**: full MAP → PLAN → CONTRACT → PLAN-CHECK
+  → PATCH → PROVE retained — the rigor pays off on high-risk work.
+
 ## Workflow
 
 ```
@@ -28,19 +37,23 @@ Issue → Classify → Branch → Agents → Verify → Record → PR
 2. PATCH → `.agents/outputs/patch-{issue}-{date}.md`
 3. PROVE-lite → `.agents/outputs/prove-{issue}-{date}.md`
 
-**SIMPLE**:
+**SIMPLE / MODERATE** (compressed in v5 — PLAN-CHECK dropped):
 1. MAP-PLAN → `.agents/outputs/map-plan-{issue}-{date}.md`
-2. TEST-PLANNER (if `--with-tests`) → `.agents/outputs/test-plan-{issue}-{date}.md`
-3. CONTRACT (MANDATORY if fullstack, or CONTRACT-lite if simple fullstack) → `.agents/outputs/contract-{issue}-{date}.md`
-4. PLAN-CHECK → `.agents/outputs/plan-check-{issue}-{date}.md`
-5. PATCH → `.agents/outputs/patch-{issue}-{date}.md`
-6. PROVE → `.agents/outputs/prove-{issue}-{date}.md`
+2. CONTRACT (only if fullstack) → `.agents/outputs/contract-{issue}-{date}.md`
+3. TEST-PLANNER (only if `--with-tests`) → `.agents/outputs/test-plan-{issue}-{date}.md`
+4. PATCH → `.agents/outputs/patch-{issue}-{date}.md`
+5. PROVE → `.agents/outputs/prove-{issue}-{date}.md`
 
-**COMPLEX**:
+→ Default cost: 3 phases (MAP-PLAN → PATCH → PROVE). Adds CONTRACT for
+fullstack, TEST-PLANNER for explicit test planning. PATCH catches plan
+defects fast enough that a separate PLAN-CHECK step rarely earns its cost
+on SIMPLE work — Codex review after PROVE picks up what PATCH missed.
+
+**COMPLEX / FULLSTACK** (full pipeline retained — high-risk changes):
 1. MAP → `.agents/outputs/map-{issue}-{date}.md`
 2. PLAN → `.agents/outputs/plan-{issue}-{date}.md`
 3. TEST-PLANNER (if `--with-tests`) → `.agents/outputs/test-plan-{issue}-{date}.md`
-4. CONTRACT (MANDATORY if fullstack)
+4. CONTRACT (MANDATORY if fullstack) → `.agents/outputs/contract-{issue}-{date}.md`
 5. PLAN-CHECK → `.agents/outputs/plan-check-{issue}-{date}.md`
 6. PATCH
 7. PROVE

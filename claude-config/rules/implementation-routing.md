@@ -246,9 +246,15 @@ For MODERATE, COMPLEX, and FULLSTACK tasks. Full agent pipeline.
 
 ```
 TRIVIAL pipeline:  MAP-PLAN → PATCH → PROVE-lite
-SIMPLE pipeline:   MAP-PLAN → [CONTRACT*] → PLAN-CHECK → PATCH → PROVE
+SIMPLE pipeline:   MAP-PLAN → [CONTRACT*] → PATCH → PROVE   (v5: PLAN-CHECK dropped)
 COMPLEX pipeline:  MAP → PLAN → [CONTRACT*] → PLAN-CHECK → PATCH → PROVE
 ```
+
+**v5 change rationale:** SIMPLE work doesn't earn the cost of a separate
+PLAN-CHECK phase — PATCH catches plan defects fast enough, and Codex
+adversarial review (post-PROVE, automatic for MODERATE+) picks up the rest.
+COMPLEX retains PLAN-CHECK because the failure cost is higher and the
+verification step is cheaper than a botched PATCH on a multi-file change.
 
 Use `/orchestrate <issue-number>` with optional flags: `--with-tests`, `--resume`, `--parallel`.
 

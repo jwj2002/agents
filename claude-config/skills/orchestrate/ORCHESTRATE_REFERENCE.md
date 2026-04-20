@@ -132,12 +132,15 @@ Routing:
 
 ## Step 2 — Run Agents
 
-### Path A: TRIVIAL/SIMPLE
+### Path A: TRIVIAL/SIMPLE (compressed in v5)
 1) Run **MAP-PLAN agent** (`.claude/agents/map-plan.md`) → `MAP_PLAN_FILE`
 2) If the task is **fullstack** (backend + frontend), run **CONTRACT agent** (`.claude/agents/contract.md`) → `CONTRACT_FILE`
-3) Run **PLAN-CHECK agent** (`.claude/agents/plan-checker.md`) → `PLAN_CHECK_FILE`
-4) Run **PATCH agent** (`.claude/agents/patch.md`) → `PATCH_FILE`
-5) Run **PROVE agent** (`.claude/agents/prove.md`) → `PROVE_FILE`
+3) Run **PATCH agent** (`.claude/agents/patch.md`) → `PATCH_FILE`
+4) Run **PROVE agent** (`.claude/agents/prove.md`) → `PROVE_FILE`
+
+PLAN-CHECK is **dropped** for SIMPLE — Codex adversarial review (post-PROVE)
+catches what PATCH missed. If a SIMPLE task surfaces real planning risk
+during PATCH, PATCH escalates by creating a PLAN-CHECK artifact on demand.
 
 ### Path B: COMPLEX
 1) Run **MAP agent** (`.claude/agents/map.md`) → `MAP_FILE`
