@@ -1,0 +1,100 @@
+# {{PROJECT_NAME}} — Phase Plan
+
+> Living document. One file per project, named `PLAN.md`, lives at the repo
+> root. Update it as you ship phases — don't create v2/v3/etc files. Use
+> `git log PLAN.md` for history.
+
+**Modeled on:** `~/projects/content-brain/PLAN.md`
+
+---
+
+## Why this project exists
+
+One paragraph. The problem you're solving and what success looks like.
+If you can't write this, the project isn't ready to plan yet.
+
+## Architecture
+
+```
+ASCII diagram or short prose. The shape of the system, not the code.
+```
+
+Reference: link to spec(s) under `specs/`, link to upstream/forks if any.
+
+---
+
+## Phase 1 — {{title}}
+
+**Goal:** one sentence.
+
+**Tasks:**
+- Specific, ordered, each shippable as its own PR
+- Refer to issue numbers when they exist (`Closes #N`)
+
+**Exit criteria:**
+- [ ] Acceptance condition 1 (concrete, verifiable)
+- [ ] Acceptance condition 2
+
+**Decisions needed before starting:**
+- Open question that must resolve before this phase ships
+
+**Status:** `not started` / `in progress` / `✅ DONE (YYYY-MM-DD)`
+
+**Learnings (fill in after the phase ships):**
+- What surprised you. What changed downstream phases.
+- Failed attempts and why.
+
+---
+
+## Phase 2 — {{title}}
+
+(Same shape as Phase 1.)
+
+---
+
+## Phase 3 — {{title}}
+
+(Same shape.)
+
+---
+
+## What we're NOT building
+
+The most important section. Explicit non-goals. Each line is a feature you've
+considered and rejected, with one-line rationale.
+
+- Feature X — reason it doesn't make this cut
+- Pattern Y — why a simpler thing wins for now
+- Tool Z — adopt later if a real problem demands it
+
+If this list is empty, you haven't thought hard enough about scope.
+
+## Open Decisions
+
+Track unresolved questions as they surface. Each one names the phase it
+blocks (or "Any phase" if cross-cutting).
+
+- [ ] Question 1 (Phase 3 blocker)
+- [ ] Question 2 (any phase)
+
+## Sequencing Discipline
+
+Ship each phase before starting the next. If Phase N alone turns out to be
+enough, that's a valid stopping point. Don't build Phase N+2 before Phase N
+is working daily.
+
+If you start a later phase before an earlier one ships, write down WHY here:
+
+> _(rationale — or remove this block if you're staying disciplined)_
+
+---
+
+## Rebase / Sync Strategy (only if forking upstream)
+
+```bash
+git fetch upstream
+git rebase upstream/main
+```
+
+Before each rebase, ensure customizations live in clearly-separated files
+to minimize conflicts.
