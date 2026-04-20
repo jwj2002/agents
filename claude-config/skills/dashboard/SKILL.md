@@ -1,33 +1,60 @@
 ---
 name: dashboard
-version: 5.0
-description: Cross-project status overview with automation (auto-blockers, auto-status, auto-journal) and stale project prompt
+version: 5.1
+description: Cross-project status overview (or single-project deep view via cwd detection / explicit name) with automation, stale prompt, and inbox roll-up
 ---
 
 # /dashboard
 
-Show cross-project status at a glance. Source of truth is **Knowledge MCP**.
-Operational signals (last commit, open issues) come from `git`/`gh` directly,
-not from a separate service.
+Show project status. Source of truth is **Knowledge MCP**. Operational
+signals (last commit, open issues) come from `git`/`gh` directly, not
+from a separate service.
 
-Active projects show full listings (next steps, issues, captures, blockers,
-questions). Paused projects show condensed view (focus + counts).
+Two modes:
+
+- **Single-project deep view** — full focus, all next steps, all issues,
+  recent journal, recent decisions. Triggered by cwd auto-detection or
+  explicit project name.
+- **Multi-project overview** — active cards with full listings, paused
+  cards condensed, blocked cards show only blockers. Triggered by
+  `--all` or running outside any tracked project.
 
 ## Usage
 
 ```
-/dashboard
-/dashboard --status active
+/dashboard                       # cwd-detect: single-project if in a tracked repo, else multi
+/dashboard flotilla              # explicit single-project deep view
+/dashboard --all                 # force multi-project view (override cwd)
+/dashboard --status active       # multi-project, filter by status
 ```
+
+## Mode Selection
+
+1. If `--all` is present → multi-project mode.
+2. If a positional argument is present (e.g. `flotilla`) → single-project mode for that name.
+3. Otherwise: read `pwd`. Strip `$HOME/projects/` prefix; if remaining path's first segment matches a tracked project, single-project mode for that name. Special case: `$HOME/agents` → `agents` project.
+4. If no match and no flag → multi-project mode (today's default).
+
+If single-project mode resolves to a project that isn't in the tracker,
+emit a one-line notice ("project `X` not tracked — use `/project X --focus
+\"...\"` to add it") and fall back to multi-project mode.
 
 ## Data Sources
 
-### Knowledge MCP (REQUIRED — always call)
+### Knowledge MCP (REQUIRED)
 
+**Multi-project mode:**
 1. `mcp__knowledge__get_dashboard` — returns projects with focus,
    next_steps, blockers, open_questions, updated_at + `inbox_open` count.
 2. `mcp__knowledge__get_inbox` with `status: "open"` — flat list. Group by
    `project` client-side.
+
+**Single-project mode:**
+1. `mcp__knowledge__get_project_context` with the resolved project name —
+   returns focus, status, next_steps, blockers, open_questions, plus
+   `recent_journal` (last 20) and `recent_decisions` (last 10).
+2. `mcp__knowledge__get_inbox` with `project: "<name>", status: "open"` —
+   only this project's captures.
 
 ### git/gh overlay (OPTIONAL — graceful degradation per project)
 
@@ -57,6 +84,54 @@ from Knowledge MCP only.
 just shows the Knowledge MCP fields without overlay.
 
 ## Output Format
+
+### Single-Project Deep View
+
+Wider card (~80 chars), uncapped lists, plus journal/decisions sections.
+
+```
+PROJECT: flotilla                                              ACTIVE
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Focus:  Phase 4 automation complete — auto-blockers, auto-status,        1d │
+│         auto-journal, stale prompts live                                     │
+│ Last:   feat: ProjectView Context section (#199)                        33h │
+│                                                                              │
+│ Next Steps:                                                                  │
+│ 1. Test automation end-to-end across all projects                            │
+│ 2. Plan Phase 3 (multi-env + client engagement setup) when needed            │
+│ 3. Monitor dashboard for drift over a week of real use                       │
+│                                                                              │
+│ Issues (1 open):                                                             │
+│   #16  feat: admin agent should escalate blocked messages to human via      │
+│        dashboard                                                             │
+│                                                                              │
+│ Captures (1 open):                                                           │
+│   #2 [idea]  Add dark/light theme toggle to flotilla dashboard              │
+│                                                                              │
+│ ? Open Questions:                                                            │
+│   Should /weekly digest auto-post to Slack or just render in terminal?      │
+│                                                                              │
+│ Recent Journal (5):                                                          │
+│   2026-04-18  focus_change  Phase 4 automation complete — auto-blockers     │
+│   2026-04-18  commit        feat: ProjectView Context section (#199)        │
+│   2026-04-18  focus_change  Phase 2 integration complete                    │
+│   ...                                                                        │
+│                                                                              │
+│ Recent Decisions (5):                                                        │
+│   D-098  2026-04-08  Federated flotilla instances with WebSocket bridge     │
+│   D-095  2026-04-07  Orchestration accountability — strategic creates...    │
+│   ...                                                                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+Single-project view rules:
+- All next_steps shown (not capped at 3)
+- All open issues shown (not capped at 3)
+- Recent journal: last 5 entries with date + entry_type + truncated text
+- Recent decisions: last 5 with id + date + truncated title
+- Status label appears top-right (`ACTIVE` / `PAUSED` / `BLOCKED` / `DONE`)
+- Inbox footer shows project-scoped count only (not the cross-project sum)
+- Stale prompt suppressed (single-project mode is implicitly focused)
 
 ### Active Projects — Full Listing
 
@@ -184,6 +259,25 @@ No notice shown if the file doesn't exist or has no entries.
    - Card renders with whatever else succeeded
 
 ## Execution Order
+
+### Step 0 — Mode resolution
+
+1. Parse args: `--all`, `--status <s>`, positional project name.
+2. If `--all` → multi-project mode.
+3. Else if positional name → single-project mode for that name.
+4. Else: read `pwd`. If `pwd == $HOME/agents` or starts with `$HOME/agents/`, mode = single-project (`agents`). If `pwd` starts with `$HOME/projects/`, take the first segment after; if it matches a tracked project, mode = single-project (that name).
+5. Else → multi-project mode.
+
+### Single-project mode
+
+1. `mcp__knowledge__get_project_context` with the resolved name.
+2. If null/error → emit `project "<name>" not tracked — use /project <name> --focus "..." to add it`, then fall through to multi-project mode.
+3. `mcp__knowledge__get_inbox` with `project: "<name>", status: "open"`.
+4. Resolve repo path (same convention). If it exists:
+   - parallel `git log -1 --format='%s|%ar'` + `gh issue list --state open --limit 10 --json number,title` + `gh issue list --state open --json number -q 'length'`
+5. Render the Single-Project Deep View card.
+
+### Multi-project mode
 
 1. `mcp__knowledge__get_dashboard` (with `status` if provided)
 2. `mcp__knowledge__get_inbox` with `status: "open"` — group by project client-side
