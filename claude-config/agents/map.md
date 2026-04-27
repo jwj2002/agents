@@ -1,6 +1,10 @@
 ---
+name: orchestrate-map
+description: Read-only investigator for COMPLEX orchestrate workflow phase 1. Maps current code state before planning. Use only when dispatched by /orchestrate; do not auto-invoke.
+tools: Read, Grep, Glob, Bash
+model: haiku
 agent: "MAP"
-version: 1.0
+version: 1.1
 phase: 1
 extends: _base.md
 purpose: "Read-only investigation - understand current state before planning"

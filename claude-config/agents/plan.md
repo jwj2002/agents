@@ -1,6 +1,10 @@
 ---
+name: orchestrate-plan
+description: Architect for COMPLEX orchestrate workflow phase 2. Converts MAP findings into a file-by-file implementation plan. Use only when dispatched by /orchestrate; do not auto-invoke.
+tools: Read, Grep, Glob, Bash
+model: sonnet
 agent: "PLAN"
-version: 1.0
+version: 1.1
 phase: 2
 extends: _base.md
 purpose: "Convert MAP findings into file-by-file implementation plan"

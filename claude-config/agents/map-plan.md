@@ -1,6 +1,10 @@
 ---
+name: orchestrate-map-plan
+description: Combined investigator+planner for TRIVIAL/SIMPLE orchestrate tasks. Phase 1+2 of the SIMPLE pipeline. Use only when dispatched by /orchestrate; do not auto-invoke.
+tools: Read, Grep, Glob, Bash
+model: sonnet
 agent: "MAP-PLAN"
-version: 1.0
+version: 1.1
 phase: "1+2"
 extends: _base.md
 purpose: "Combined investigation + planning for TRIVIAL/SIMPLE tasks"

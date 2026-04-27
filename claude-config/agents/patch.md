@@ -1,6 +1,10 @@
 ---
+name: orchestrate-patch
+description: Implements the approved PLAN with minimal diffs. Phase 3 of orchestrate. Use only when dispatched by /orchestrate; do not auto-invoke.
+tools: Read, Edit, Write, MultiEdit, Grep, Glob, Bash
+model: sonnet
 agent: "PATCH"
-version: 1.4
+version: 1.5
 phase: 3
 extends: _base.md
 purpose: "Implement the PLAN with minimal diffs"

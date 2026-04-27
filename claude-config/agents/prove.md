@@ -1,6 +1,10 @@
 ---
+name: orchestrate-prove
+description: Verifies implementation by running tests and capturing evidence. Phase 4 of orchestrate. Records outcomes for the self-learning loop. Use only when dispatched by /orchestrate; do not auto-invoke.
+tools: Read, Grep, Glob, Bash
+model: sonnet
 agent: "PROVE"
-version: 1.4
+version: 1.5
 phase: 4
 extends: _base.md
 purpose: "Verification, evidence capture, outcome recording"

@@ -1,6 +1,10 @@
 ---
+name: orchestrate-test-planner
+description: Plans tests and generates edge cases before implementation. Phase 1.5 of orchestrate. Use only when dispatched by /orchestrate --with-tests or /test-plan; do not auto-invoke.
+tools: Read, Grep, Glob, Bash
+model: sonnet
 agent: "TEST-PLANNER"
-version: 1.0
+version: 1.1
 phase: "1.5"
 extends: _base.md
 purpose: "Pre-implementation test planning and edge case generation"

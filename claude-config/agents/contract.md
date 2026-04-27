@@ -1,6 +1,10 @@
 ---
+name: orchestrate-contract
+description: Designs backend↔frontend API contracts for FULLSTACK orchestrate work. Phase 2.5. Use only when dispatched by /orchestrate for fullstack issues; do not auto-invoke.
+tools: Read, Grep, Glob, Bash
+model: sonnet
 agent: "CONTRACT"
-version: 1.0
+version: 1.1
 phase: "2.5"
 extends: _base.md
 purpose: "Define backend↔frontend API contract for fullstack work"

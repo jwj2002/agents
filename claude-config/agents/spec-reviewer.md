@@ -1,6 +1,10 @@
 ---
+name: spec-reviewer
+description: Analyzes specifications against the codebase and proposes GitHub issues. Use when dispatched by /spec-review or when the user asks to review a spec; do not auto-invoke during regular implementation.
+tools: Read, Grep, Glob, Bash
+model: sonnet
 agent: "SPEC-REVIEWER"
-version: 1.0
+version: 1.1
 extends: _base.md
 purpose: "Analyze specs against codebase, generate GitHub issues"
 output: ".agents/outputs/spec-review-{spec-name}-{mmddyy}.md"
