@@ -1,4 +1,5 @@
-id: PAT-006
+id: pat-error-handling
+legacy_id: PAT-006
 category: error-handling
 name: Custom exception classes per module
 status: validated

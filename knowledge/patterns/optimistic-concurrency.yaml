@@ -1,4 +1,5 @@
-id: PAT-036
+id: pat-optimistic-concurrency
+legacy_id: PAT-036
 category: concurrency
 name: Optimistic concurrency with version column
 status: pilot

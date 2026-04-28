@@ -56,12 +56,12 @@ by_topic:
   architecture:
   - D-098
 by_pattern:
-  PAT-001:
+  pat-auth-jwt:
   - D-015
-  PAT-004:
+  pat-database-asyncpg:
   - D-034
-  PAT-002:
+  pat-auth-redis-sessions:
   - D-042
   - D-091
-  PAT-005:
+  pat-export-streaming:
   - D-087

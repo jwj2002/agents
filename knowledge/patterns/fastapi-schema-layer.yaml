@@ -1,4 +1,5 @@
-id: PAT-009
+id: pat-fastapi-schema-layer
+legacy_id: PAT-009
 category: schema
 name: Pydantic schema layer with Create/Update/Read pattern
 status: pilot

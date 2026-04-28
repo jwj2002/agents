@@ -1,4 +1,5 @@
-id: PAT-033
+id: pat-dev-scripts
+legacy_id: PAT-033
 category: infrastructure
 name: Dev start/stop scripts with configurable ports
 status: pilot

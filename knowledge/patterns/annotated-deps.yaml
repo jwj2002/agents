@@ -1,4 +1,5 @@
-id: PAT-032
+id: pat-annotated-deps
+legacy_id: PAT-032
 category: dependency-injection
 name: FastAPI Annotated dependency aliases
 status: pilot

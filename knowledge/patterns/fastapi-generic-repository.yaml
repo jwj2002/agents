@@ -1,4 +1,5 @@
-id: PAT-010
+id: pat-fastapi-generic-repository
+legacy_id: PAT-010
 category: repository
 name: Generic repository pattern with BaseRepository[T]
 status: pilot

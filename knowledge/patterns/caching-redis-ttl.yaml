@@ -1,4 +1,5 @@
-id: PAT-003
+id: pat-caching-redis-ttl
+legacy_id: PAT-003
 category: caching
 name: Redis TTL caching
 status: pilot

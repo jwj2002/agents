@@ -1,4 +1,5 @@
-id: PAT-035
+id: pat-nested-read-schemas
+legacy_id: PAT-035
 category: schemas
 name: Nested read schemas with Summary pattern
 status: pilot

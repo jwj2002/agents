@@ -641,7 +641,7 @@ if (isMainModule) {
     "get_pattern_detail",
     "Get full detail for a specific pattern including implementation notes.",
     {
-      id: z.string().describe('Pattern ID (e.g., "PAT-001")'),
+      id: z.string().describe('Pattern ID (e.g., "pat-auth-jwt")'),
     },
     async ({ id }) => {
       const result = getPatternDetail(db, id);

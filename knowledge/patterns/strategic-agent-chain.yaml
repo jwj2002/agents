@@ -1,4 +1,5 @@
-id: PAT-020
+id: pat-strategic-agent-chain
+legacy_id: PAT-020
 category: agent-infrastructure
 name: Strategic Agent Chain Coordination
 status: draft

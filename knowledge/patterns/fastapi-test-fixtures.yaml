@@ -1,4 +1,5 @@
-id: PAT-014
+id: pat-fastapi-test-fixtures
+legacy_id: PAT-014
 category: testing
 name: FastAPI test fixtures with transaction rollback
 status: pilot

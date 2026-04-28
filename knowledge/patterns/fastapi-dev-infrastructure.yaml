@@ -1,4 +1,5 @@
-id: PAT-039
+id: pat-fastapi-dev-infrastructure
+legacy_id: PAT-039
 category: infrastructure
 name: FastAPI dev infrastructure (CORS, health, Docker)
 status: pilot

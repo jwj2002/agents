@@ -1,4 +1,5 @@
-id: PAT-022
+id: pat-agent-verification-gates
+legacy_id: PAT-022
 category: agent-infrastructure
 name: Agent Verification Gates
 status: draft

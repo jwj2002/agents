@@ -1,4 +1,5 @@
-id: PAT-021
+id: pat-transcript-summary-detail
+legacy_id: PAT-021
 category: agent-infrastructure
 name: Transcript Summary/Detail Message Format
 status: draft

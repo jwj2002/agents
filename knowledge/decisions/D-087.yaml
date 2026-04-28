@@ -18,7 +18,7 @@ reasoning: Plugin architecture allows adding new export formats by registering a
 outcome: CSV, JSON, and PDF formatters implemented. Adding new formats takes ~30 minutes.
 linked:
   patterns:
-  - PAT-005
+  - pat-export-streaming
   issues: []
   prs: []
   related_decisions: []

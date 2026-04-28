@@ -1,4 +1,5 @@
-id: PAT-001
+id: pat-auth-jwt
+legacy_id: PAT-001
 category: auth
 name: JWT with refresh tokens
 status: validated

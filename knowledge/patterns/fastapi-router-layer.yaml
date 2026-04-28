@@ -1,4 +1,5 @@
-id: PAT-012
+id: pat-fastapi-router-layer
+legacy_id: PAT-012
 category: router
 name: FastAPI thin router pattern
 status: pilot
@@ -56,7 +57,7 @@ implementation:
     main_py: '"""FastAPI application entry point.
 
 
-      Registers error handlers (PAT-013) and includes routers (PAT-012).
+      Registers error handlers (pat-fastapi-error-handling) and includes routers (pat-fastapi-router-layer).
 
       """
 
