@@ -1,3 +1,7 @@
+---
+paths: ["**"]
+---
+
 # Implementation Routing: Task Assessment → Workflow → Codex Delegation → Review
 
 When given any task, assess complexity and route to the right workflow. Maximize use of Codex (GPT) for tasks within its capability — reviews, parallel implementation, debugging, and background work. **Make the call yourself — do not ask the user which mode to use.**

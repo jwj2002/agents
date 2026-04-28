@@ -1,3 +1,7 @@
+---
+paths: ["**"]
+---
+
 # Development Environment Routing
 
 ## Development Modes
