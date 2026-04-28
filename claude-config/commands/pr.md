@@ -95,6 +95,60 @@ manually via `/codex:review` or `/codex:adversarial-review` for risky diffs.
 
 ---
 
+## Pre-merge Codex review for COMPLEX changes
+
+If the diff matches COMPLEX-tier signals (file count, migrations, auth code,
+data models, cross-cutting refactors), prompt the user to run
+`/codex:adversarial-review` BEFORE squash-merging. The review is advisory —
+user can override — but the prompt at PR-creation time is the moment they
+have full context to decide.
+
+```bash
+# Count files changed (linear diff: feature branch ahead of main)
+N_FILES=$(git diff --name-only origin/main..HEAD | wc -l | tr -d ' ')
+
+# Detect COMPLEX signals
+SIGNALS=()
+[ "$N_FILES" -gt 5 ] && SIGNALS+=("$N_FILES files changed")
+
+if git diff --name-only origin/main..HEAD | grep -qE "alembic|migration|migrate"; then
+  SIGNALS+=("migration files")
+fi
+
+if git diff --name-only origin/main..HEAD | grep -qE "auth|permissions|security|rbac"; then
+  SIGNALS+=("auth/permissions code")
+fi
+
+if git diff --name-only origin/main..HEAD | grep -qE "models/.*\.py$|schemas/.*\.py$"; then
+  SIGNALS+=("data model files")
+fi
+
+if git diff --name-only origin/main..HEAD | grep -qE "_base\.md|core-patterns\.md|behavioral-evals\.md"; then
+  SIGNALS+=("cross-cutting refactor")
+fi
+
+if [ ${#SIGNALS[@]} -gt 0 ]; then
+  echo ""
+  echo "⚠ This PR matches COMPLEX-tier signals:"
+  printf "  - %s\n" "${SIGNALS[@]}"
+  echo ""
+  echo "Per implementation-routing.md, a Codex adversarial review is recommended."
+  echo "Run before squash-merge:"
+  echo ""
+  echo "  /codex:adversarial-review --wait"
+  echo ""
+  echo "(or /codex:adversarial-review --background and check /codex:status)"
+  echo ""
+  echo "If you've already assessed the risk yourself, you can proceed."
+fi
+```
+
+**Why advisory not mandatory**: `/codex:*` plugin commands need user invocation
+from an interactive session; subagent context can't trigger them. The structural
+gate is the prompt; the user decides whether to honor it.
+
+---
+
 ## Create PR
 
 ### Step 1: Summarize Scope
