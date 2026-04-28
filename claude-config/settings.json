@@ -116,17 +116,6 @@
           }
         ]
       }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ~/.claude/hooks/secret_guard.py"
-          }
-        ]
-      }
     ]
   },
   "statusLine": {
@@ -136,7 +125,7 @@
   "enabledPlugins": {
     "frontend-design@claude-plugins-official": true,
     "codex@openai-codex": true,
-    "security-guidance@claude-plugins-official": true,
+    "security-guidance@claude-plugins-official": false,
     "typescript-lsp@claude-plugins-official": true,
     "pyright-lsp@claude-plugins-official": true,
     "pr-review-toolkit@claude-plugins-official": true,
