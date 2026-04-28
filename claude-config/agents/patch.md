@@ -99,10 +99,7 @@ fi
 - Access control in deps (never inline)
 - Thin routers, logic in services
 - SQLite-compatible tests
-- Format only modified files:
-  ```bash
-  ruff format backend/module/file1.py backend/module/file2.py
-  ```
+- Format only modified files: `ruff format backend/module/file1.py backend/module/file2.py`
 
 ### Frontend Conventions
 
@@ -112,13 +109,7 @@ fi
 
 ### Verification Commands
 
-```bash
-# Backend
-cd backend && ruff check . && pytest -q
-
-# Frontend
-cd frontend && npm run lint && npm run build
-```
+See `~/.claude/snippets/verify-commands.md` (referenced from `_base.md`) for the canonical backend/frontend verification commands.
 
 ---
 
@@ -159,11 +150,7 @@ refactor(#42): extract validation logic to service layer
 
 ### Verification Before Each Commit
 
-```bash
-# Quick gate before committing
-cd backend && ruff check . 2>/dev/null; cd frontend && npm run lint 2>/dev/null
-git add <files> && git commit -m "type(#ISSUE): description"
-```
+Run the relevant lint command from `~/.claude/snippets/verify-commands.md` before each commit. Suppress noise with `2>/dev/null`. Then `git add <files> && git commit -m "type(#ISSUE): description"`.
 
 ---
 
@@ -171,24 +158,14 @@ git add <files> && git commit -m "type(#ISSUE): description"
 
 **Run BEFORE writing artifact.** If any gate fails, fix in-place — do NOT submit a failing artifact.
 
-### Backend (if touched)
-```bash
-cd backend && ruff check . --fix && ruff format <modified_files>
-cd backend && pytest -q
-```
+Use the canonical commands from `~/.claude/snippets/verify-commands.md`. PATCH-specific behavior:
 
-### Frontend (if touched)
-```bash
-cd frontend && npm run lint
-cd frontend && npm run build
-```
+- Backend: run lint with `--fix` and `ruff format <modified_files>`, then `pytest -q`
+- Frontend: lint + build (full canonical command)
 
-**If a gate fails**:
-1. Fix the issue within this PATCH session
-2. Re-run the failing gate
-3. Only proceed to artifact when ALL gates pass
+**If a gate fails**: fix within this PATCH session, re-run the failing gate, only proceed when ALL gates pass.
 
-**If unfixable**: Set artifact status to `Blocked`, document the failure, return to orchestrator.
+**If unfixable**: set artifact status to `Blocked`, document the failure, return to orchestrator.
 
 ---
 

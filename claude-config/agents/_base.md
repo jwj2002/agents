@@ -1,6 +1,6 @@
 ---
 type: base-agent
-version: 4.0
+version: 4.1
 purpose: Shared behaviors inherited by all agents
 ---
 
@@ -12,44 +12,23 @@ All agents inherit these behaviors. Read this FIRST before your agent-specific i
 
 ## 1. Pre-Flight: Load Learned Patterns (TIERED)
 
-**BEFORE investigating or planning**, load accumulated knowledge:
+**BEFORE investigating or planning**, load accumulated knowledge.
 
-### Preferred: MCP Tools (if vault-metrics MCP available)
-
-Use MCP tools for structured, up-to-date pattern data:
+**Preferred — MCP tools** (vault-metrics MCP). Always use the `_v1` suffix (versioned alias); unversioned aliases are deprecated.
 
 ```
-# Get failure patterns (structured, with frequency and recent examples)
-failure_patterns_v1()
-
-# Get metrics overview (success rates by complexity/stack)
-agent_metrics_v1(period="30d")
+failure_patterns_v1()              # structured failure patterns w/ frequency
+agent_metrics_v1(period="30d")     # success rates by complexity/stack
 ```
 
-> **Versioned tool names.** The vault-metrics MCP exposes both
-> `<name>_v1` (current) and `<name>` (deprecated alias). Use the `_v1`
-> form so an internal rename in `mcp-server/server.py` won't silently
-> break agent pre-flight. When the schema changes, the server bumps to
-> `_v2` and keeps `_v1` working.
+**Fallback — files** (if MCP unavailable):
 
-**Why MCP**: Returns parsed JSON with counts, percentages, and recent examples — more actionable than raw markdown files.
-
-### Fallback: File-Based Loading
-
-If MCP tools are not available (tool call fails or returns error), fall back to files:
-
-#### Always Load (Critical Patterns ~50 lines)
 ```bash
-cat .claude/memory/patterns-critical.md
+cat .claude/memory/patterns-critical.md   # always (~50 lines, covers 89% of failures)
+cat .claude/memory/patterns-full.md       # COMPLEX issues / unfamiliar patterns only
 ```
 
-#### Load If Needed (Full Patterns ~660 lines)
-Only load `.claude/memory/patterns-full.md` when:
-- Issue is COMPLEX classification
-- Issue involves pattern not in critical file
-- You need detailed prevention checklists
-
-**Apply relevant patterns** to your current task. Critical patterns cover 89% of failures.
+Apply relevant patterns to your task.
 
 ---
 
@@ -66,24 +45,13 @@ If found, read the artifact to learn from past approaches. Note what worked and 
 
 ## 3. Efficiency Rules
 
-### Reference, Don't Re-Quote
-```markdown
-# ❌ BAD: Re-quoting 50 lines of code
-Here's the existing implementation:
-[50 lines of code]
-
-# ✅ GOOD: Reference with line numbers
-See `backend/accounts/services.py:45-67` for existing pattern.
-```
-
-### Single Source of Truth
-- Acceptance criteria: Define ONCE in MAP-PLAN or PLAN
-- Other agents reference: "See MAP-PLAN acceptance criteria"
-- Never duplicate lists across artifacts
+- **Reference, don't re-quote.** Use `See backend/accounts/services.py:45-67` instead of pasting code.
+- **Single source of truth.** Acceptance criteria defined ONCE (in MAP-PLAN or PLAN). Other agents reference, don't duplicate.
 
 ### Target Lengths
-| Agent | Target Lines | Max Lines |
-|-------|--------------|-----------|
+
+| Agent | Target | Max |
+|-------|--------|-----|
 | MAP | 150 | 200 |
 | MAP-PLAN | 400 | 500 |
 | PLAN | 400 | 500 |
@@ -93,80 +61,29 @@ See `backend/accounts/services.py:45-67` for existing pattern.
 | PATCH | 300 | 400 |
 | PROVE | 250 | 350 |
 
-### Size Compliance (MANDATORY)
+Before submitting, run `wc -l < .agents/outputs/$ARTIFACT_NAME`. If over max: **STOP and compress** before submitting. Between target and max: submit with a note.
 
-Before writing your final artifact, check line count:
-
-```bash
-# Self-check before submission
-wc -l < .agents/outputs/$ARTIFACT_NAME
-```
-
-| Outcome | Action |
-|---------|--------|
-| Under target | Submit |
-| Between target and max | Submit with note: "Artifact N lines (target: M)" |
-| Over max | **STOP**. Compress before submitting |
-
-**Compression checklist** (in priority order):
-1. Replace code quotes with line references (`See services.py:45-67`)
-2. Remove re-stated acceptance criteria (reference MAP-PLAN)
-3. Consolidate duplicate sections
-4. Remove appendices and "Future Enhancements"
-5. Use exceptions-only reporting (document failures, not successes)
+**Compression order**: (1) replace code quotes with line refs, (2) reference acceptance criteria instead of re-stating, (3) consolidate duplicate sections, (4) drop appendices / "Future Enhancements", (5) report exceptions only (failures, not successes).
 
 ---
 
 ## 4. Artifact Naming
 
-**Pattern**: `{agent}-{issue}-{mmddyy}.md`
-
-```bash
-# Set these variables at start of run
-ISSUE_NUMBER=184
-RUN_DATE=$(date +%m%d%y)
-ARTIFACT_NAME="{agent}-${ISSUE_NUMBER}-${RUN_DATE}.md"
-```
-
-**Output directory**: `.agents/outputs/`
+Pattern: `{agent}-{issue}-{mmddyy}.md` written to `.agents/outputs/`. Set `ISSUE_NUMBER`, `RUN_DATE=$(date +%m%d%y)` at start of run. Full spec: `~/.claude/rules/orchestrate-workflow.md`.
 
 ---
 
 ## 5. Common Verification Commands
 
-### Backend
-```bash
-cd backend && ruff check . && pytest -q
-```
-
-### Frontend  
-```bash
-cd frontend && npm run lint && npm run build
-```
-
-### Verify Scope (no unplanned changes)
-```bash
-git diff --name-only HEAD
-# Should only show files in PLAN
-```
+See `~/.claude/snippets/verify-commands.md` for the canonical backend/frontend/scope verification command catalog.
 
 ---
 
 ## 6. Constraint Enforcement
 
-**Before ANY file operation**, verify:
+Git / branch / PR constraints live in `~/.claude/rules/git-workflow.md` (auto-loaded). This section covers only artifact-layer constraints. Before any file operation, also check `.claude/rules.md` for project-specific rules.
 
-```bash
-# Check constraints file
-cat .claude/rules.md | head -50
-```
-
-**Forbidden actions** (always blocked):
-- Creating top-level directories
-- Moving `backend/`, `frontend/`, `.claude/`
-- Creating `backend/src/`
-- Modifying files on `main` branch
-- **Pushing to or committing on `production` branch** (unless user explicitly requests)
+**Forbidden actions** (always blocked): create top-level directories, move `backend/` / `frontend/` / `.claude/`, create `backend/src/`, modify files on `main`, push or commit on `production` (unless user explicitly requests).
 
 ---
 
@@ -189,39 +106,24 @@ This signals successful completion to the orchestrator.
 
 ## 8. High-Frequency Failure Prevention
 
-**Canonical definitions**: See `~/.claude/rules/core-patterns.md` (auto-loaded).
-
-Use these verification commands when patterns apply:
-
-```bash
-# ENUM_VALUE: verify VALUES not names
-grep -A 10 "class.*Enum" backend/backend/*/enums.py
-
-# COMPONENT_API: extract PropTypes/return type
-grep -A 20 "PropTypes" frontend/src/components/path/Component.jsx
-
-# MULTI_MODEL: map fields to owning models
-grep -rn "class.*Model" backend/backend/*/models.py
-```
+Canonical definitions: `~/.claude/rules/core-patterns.md` (auto-loaded).
+Verification grep snippets for ENUM_VALUE, COMPONENT_API, MULTI_MODEL: see `~/.claude/snippets/verify-commands.md` ("Pattern Spot-Checks").
 
 ---
 
 ## 9. Artifact Validation (MANDATORY)
 
-Before starting work, verify predecessor artifacts exist. **STOP and report** if required artifacts are missing.
+Before starting work, verify predecessor artifacts exist via `ls .agents/outputs/<pattern>-{issue}-*.md`. **STOP and report** `"BLOCKED: Required artifact {name} not found for issue #{issue}"` if missing.
 
-| Agent | Required Predecessor | Validation |
-|-------|---------------------|------------|
-| MAP | None (first agent) | — |
-| MAP-PLAN | None (first agent) | — |
-| PLAN | MAP artifact | `ls .agents/outputs/map-{issue}-*.md` |
-| TEST-PLANNER | MAP or MAP-PLAN artifact | `ls .agents/outputs/map*-{issue}-*.md` |
-| CONTRACT | PLAN or MAP-PLAN artifact | `ls .agents/outputs/{plan,map-plan}-{issue}-*.md` |
-| PLAN-CHECK | PLAN or MAP-PLAN artifact. CONTRACT if fullstack | `ls .agents/outputs/{plan,map-plan}-{issue}-*.md` |
-| PATCH | PLAN or MAP-PLAN artifact. CONTRACT if fullstack. PLAN-CHECK | `ls .agents/outputs/{plan,map-plan}-{issue}-*.md` |
-| PROVE | PATCH artifact | `ls .agents/outputs/patch-{issue}-*.md` |
-
-**If missing**: `STOP. Report: "BLOCKED: Required artifact {name} not found for issue #{issue}"`
+| Agent | Required Predecessor(s) |
+|-------|-------------------------|
+| MAP, MAP-PLAN | none (first agent) |
+| PLAN | MAP |
+| TEST-PLANNER | MAP or MAP-PLAN |
+| CONTRACT | PLAN or MAP-PLAN |
+| PLAN-CHECK | PLAN or MAP-PLAN; + CONTRACT if fullstack |
+| PATCH | PLAN or MAP-PLAN; + CONTRACT if fullstack; + PLAN-CHECK |
+| PROVE | PATCH |
 
 ---
 
@@ -229,55 +131,51 @@ Before starting work, verify predecessor artifacts exist. **STOP and report** if
 
 When recording failures, use ONLY these root cause codes:
 
-| Code | Description | Typical Agent |
-|------|-------------|---------------|
-| `ENUM_VALUE` | Used enum NAME instead of VALUE | PATCH, PROVE |
-| `COMPONENT_API` | Wrong props/hook usage | PATCH |
-| `MULTI_MODEL` | Forgot model relationship | PATCH |
-| `API_MISMATCH` | Frontend/backend contract violation | PATCH, PROVE |
-| `ACCESS_CONTROL` | Missing/wrong permission check | PATCH |
-| `MISSING_TEST` | Untested code path | PROVE |
-| `SQLITE_COMPAT` | PostgreSQL-only feature used | PATCH |
-| `STRUCTURE_VIOLATION` | Violated rules.md constraints | PATCH |
-| `SCOPE_CREEP` | Beyond issue scope | MAP-PLAN, PATCH |
-| `VERIFICATION_GAP` | Assumptions not verified by reading code | MAP-PLAN |
-| `OTHER` | Document specifics in `details` field | Any |
+| Code | Description |
+|------|-------------|
+| `ENUM_VALUE` | Used enum NAME instead of VALUE |
+| `COMPONENT_API` | Wrong props/hook usage |
+| `MULTI_MODEL` | Forgot model relationship |
+| `API_MISMATCH` | Frontend/backend contract violation |
+| `ACCESS_CONTROL` | Missing/wrong permission check |
+| `MISSING_TEST` | Untested code path |
+| `SQLITE_COMPAT` | PostgreSQL-only feature used |
+| `STRUCTURE_VIOLATION` | Violated rules.md constraints |
+| `SCOPE_CREEP` | Beyond issue scope |
+| `VERIFICATION_GAP` | Assumptions not verified by reading code |
+| `OTHER` | Document specifics in `details` field |
 
 ---
 
 ## 11. Canonical metrics.jsonl Schema
 
-Every metrics record MUST include these required fields:
+Required fields per record:
 
 ```json
 {
-  "issue": 184,
-  "date": "2026-02-06",
+  "issue": 184, "date": "2026-02-06",
   "status": "PASS | BLOCKED",
   "complexity": "TRIVIAL | SIMPLE | COMPLEX",
   "stack": "backend | frontend | fullstack",
   "agents_run": ["MAP-PLAN", "PATCH", "PROVE"],
   "agent_versions": {"map-plan": "1.0", "patch": "1.0", "prove": "1.0"},
-  "root_cause": null,
-  "blocking_agent": null,
+  "root_cause": null, "blocking_agent": null,
   "duration_minutes": 15
 }
 ```
 
-**Optional fields**: `recovery_attempts`, `notes`
+Optional: `recovery_attempts`, `notes`.
 
 ---
 
 ## 12. Canonical failures.jsonl Schema
 
-Every failure record MUST include:
+Required fields per record:
 
 ```json
 {
-  "issue": 184,
-  "date": "2026-02-06",
-  "agent": "PATCH",
-  "root_cause": "ENUM_VALUE",
+  "issue": 184, "date": "2026-02-06",
+  "agent": "PATCH", "root_cause": "ENUM_VALUE",
   "details": "Frontend used CO_OWNER instead of CO-OWNER",
   "fix": "Changed string literal to match backend enum VALUE",
   "prevention": "MAP should document enum VALUES explicitly",
@@ -285,115 +183,83 @@ Every failure record MUST include:
 }
 ```
 
-**Optional fields**: `severity`, `recovery_minutes`
+Optional: `severity`, `recovery_minutes`.
 
 ---
 
 ## 13. Outcome Recording (PROVE Agent Only)
 
-After verification, record outcome using the canonical schemas above:
+After verification, append a JSON record matching the schemas in §11 and §12.
 
-### If PASS
-```bash
-echo '{"issue":'$ISSUE_NUMBER',"date":"'$(date +%Y-%m-%d)'","status":"PASS","complexity":"'$COMPLEXITY'","stack":"'$STACK'","agents_run":['$AGENTS'],"agent_versions":{'$VERSIONS'},"root_cause":null,"blocking_agent":null}' >> .claude/memory/metrics.jsonl
-```
+- **PASS**: append metrics record (status:`PASS`, root_cause:`null`) to `.claude/memory/metrics.jsonl`
+- **BLOCKED**: append failure record to `.claude/memory/failures.jsonl` AND metrics record (status:`BLOCKED`, root_cause:`<code>`, blocking_agent:`PROVE`) to `.claude/memory/metrics.jsonl`
 
-### If BLOCKED
-```bash
-# Record failure (canonical schema)
-echo '{"issue":'$ISSUE_NUMBER',"date":"'$(date +%Y-%m-%d)'","agent":"PATCH","root_cause":"'$CAUSE'","details":"'$DETAILS'","fix":"'$FIX'","prevention":"'$PREVENTION'","files":['$FILES']}' >> .claude/memory/failures.jsonl
-
-# Record metric (canonical schema)
-echo '{"issue":'$ISSUE_NUMBER',"date":"'$(date +%Y-%m-%d)'","status":"BLOCKED","complexity":"'$COMPLEXITY'","stack":"'$STACK'","agents_run":['$AGENTS'],"agent_versions":{'$VERSIONS'},"root_cause":"'$CAUSE'","blocking_agent":"PROVE"}' >> .claude/memory/metrics.jsonl
-```
+Use shell `echo '<json>' >> <file>` with substituted variables. See PROVE agent for full append commands.
 
 ---
 
 ## 14. Agent Versioning
 
-All agents include `version: X.Y` in their YAML frontmatter.
-
-**Convention**:
-- **Minor** (1.0 → 1.1): Pattern additions, wording changes
-- **Major** (1.0 → 2.0): Restructure, new sections, workflow changes
-
-When recording outcomes, include agent versions in `agent_versions` field:
-
-```json
-"agent_versions": {"map-plan": "1.0", "patch": "1.0", "prove": "1.0"}
-```
-
-This enables `/metrics` to correlate success rates with specific agent versions.
+All agents include `version: X.Y` in YAML frontmatter. Minor (1.0→1.1) for pattern additions / wording; major (1.0→2.0) for restructure / new sections / workflow changes. Include current versions in the `agent_versions` field of each metrics record (see §11) so `/metrics` can correlate success rates with versions.
 
 ---
 
 ## 15. Escalation Policy
 
-**Tiered response when BLOCKED** (waiting on user, ambiguous requirement, missing access):
+When BLOCKED (waiting on user, ambiguous requirement, missing access):
 
 | Duration | Action |
 |----------|--------|
 | < 2 min | Wait for user input |
 | 2-5 min | Proceed with safest assumption, tag with `[ASSUMED]` in code/artifact |
-| > 5 min | STOP, report what you assumed and what needs human verification |
+| > 5 min | STOP, report assumption + what needs human verification |
 
-**Hard escalation triggers** (STOP immediately, no assumptions):
-- Complexity seems wrong (SIMPLE issue is actually COMPLEX)
-- Constraint violation required to proceed
-- Security-sensitive change with ambiguous scope
-- Same approach has failed twice with the same root cause
+**Hard escalation (STOP immediately, no assumptions)**: complexity misclassified (SIMPLE actually COMPLEX), constraint violation required, security-sensitive ambiguous scope, same approach failed twice with same root cause.
 
-**`[ASSUMED]` handling**: Any `[ASSUMED]` tags are flagged by PROVE for human review. Document each assumption with: what was assumed, why, and the safest alternative.
+PROVE flags any `[ASSUMED]` tags for human review — document each assumption (what / why / safest alternative).
 
-**Two-failure rule**: If the same approach fails twice on the same issue with the same root cause, STOP. Do not attempt a third time — escalate to user or delegate to Codex (`/codex:rescue`).
+**Two-failure rule**: same approach fails twice on the same issue with the same root cause → STOP, escalate to user or delegate to Codex (`/codex:rescue`).
 
 ---
 
 ## 16. Anti-Pattern Self-Check
 
-Before each phase, check if you are exhibiting any of these patterns. If you recognize one, **name it and course-correct** before continuing.
+Before each phase, name any of these you're exhibiting and course-correct.
 
-| Anti-Pattern | Signal | Correction |
-|-------------|--------|------------|
-| **Kitchen Sink Session** | Fixing unrelated issues alongside the main task | Revert scope to the issue. Document extras for a separate issue. |
-| **Correcting Over and Over** | Same fix applied 3+ times without resolving | The approach is wrong. Step back, re-read the error, try a different strategy. |
-| **Infinite Exploration** | Read 15+ files without forming a plan | Stop reading. Write a hypothesis with what you know. Verify targeted files only. |
-| **Trust Then Verify Gap** | Assuming code works because it looks right | Run it. Every time. `ruff check`, `pytest`, `npm run build`. |
-| **Architectural Astronautics** | Building abstractions for hypothetical future needs | Delete the abstraction. Build for today's requirement only. |
-| **Flip-Flop Implementation** | Implementing A, reverting, implementing B, reverting | Stop. Validate with data BEFORE implementing. Run the test first. |
+| Anti-Pattern | Signal → Correction |
+|-------------|----------------------|
+| **Kitchen Sink** | Fixing unrelated issues → revert scope; file extras separately |
+| **Correcting Over and Over** | Same fix applied 3+ times → approach is wrong, try a different strategy |
+| **Infinite Exploration** | Read 15+ files, no plan → stop, write a hypothesis, verify targeted files only |
+| **Trust Then Verify Gap** | Assuming code works because it looks right → run it (`ruff`, `pytest`, `npm run build`) |
+| **Architectural Astronautics** | Abstractions for hypothetical future needs → delete; build for today's requirement |
+| **Flip-Flop** | Implement A → revert → implement B → revert → … → stop, validate with data first |
 
 ---
 
 ## 17. Runbook Check
 
-When encountering an error during any phase, check runbooks BEFORE investigating from scratch:
-
-```bash
-cat .claude/memory/runbooks.md 2>/dev/null
-```
-
-If the error matches a runbook entry, apply the documented fix directly. Do not re-diagnose known problems.
+On any error, check `cat .claude/memory/runbooks.md 2>/dev/null` BEFORE investigating from scratch. If the error matches a runbook entry, apply the documented fix directly — don't re-diagnose known problems.
 
 ---
 
 ## 18. Failure Context Awareness
 
-When spawned with a `## Prior Failure` block in your prompt:
-1. Read the root cause and prevention fields carefully
+When spawned with a `## Prior Failure` block in your prompt — **highest priority context** (a prior PATCH already failed on this exact issue):
+
+1. Read root cause and prevention fields carefully
 2. Apply the prevention recommendation BEFORE starting work
 3. Explicitly verify the prior failure point is addressed
-4. Note in artifact: "Prior failure (ROOT_CAUSE) addressed by: [action taken]"
-
-This is the **highest priority** context — a prior PATCH already failed on this exact issue.
+4. Note in artifact: `Prior failure (ROOT_CAUSE) addressed by: [action taken]`
 
 ---
 
 ## 19. Swarm-Aware Behavior
 
-When spawned as a **scoped sub-task** (e.g., PATCH-backend, PATCH-frontend, PROVE-backend):
+When spawned as a scoped sub-task (e.g., PATCH-backend, PATCH-frontend, PROVE-backend):
 
-1. **Respect SCOPE**: Only touch files within your designated scope (backend/ or frontend/)
-2. **Use CONTRACT as boundary**: For parallel fullstack PATCH, CONTRACT is the authoritative API spec — both sides implement against it
-3. **Write scoped artifacts**: Use `{agent}-{scope}-{issue}-{mmddyy}.md` naming (e.g., `patch-backend-184-020826.md`)
-4. **No cross-scope changes**: If you discover a needed change outside your scope, document it in your artifact under "Cross-Scope Dependencies" — do NOT make the change
-5. **Report conflicts**: If a file appears in both scopes, flag it immediately in artifact
+- **Respect SCOPE**: only touch files in your designated scope (backend/ or frontend/)
+- **CONTRACT is the boundary**: parallel fullstack PATCH implements both sides against CONTRACT
+- **Scoped artifacts**: name as `{agent}-{scope}-{issue}-{mmddyy}.md` (e.g., `patch-backend-184-020826.md`)
+- **No cross-scope changes**: discovered need outside scope → document under "Cross-Scope Dependencies", do NOT make the change
+- **Report conflicts**: file appearing in both scopes → flag immediately in artifact

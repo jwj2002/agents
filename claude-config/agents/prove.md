@@ -59,74 +59,37 @@ ls .agents/outputs/patch-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOCKED: PATC
 
 ## Verification Commands (MANDATORY)
 
-### If Backend Touched
+Use the canonical commands from `~/.claude/snippets/verify-commands.md` (referenced from `_base.md`):
 
-```bash
-cd backend && ruff check .
-cd backend && pytest -q
-```
-
-### If Frontend Touched
-
-```bash
-cd frontend && npm run lint
-cd frontend && npm run build
-```
+- **Backend touched**: run backend lint + tests
+- **Frontend touched**: run frontend lint + build
 
 **Capture output verbatim** in artifact.
 
 ### Parallel Verification (Fullstack)
 
-When both backend and frontend were touched, fan out verification using parallel Task calls for faster wall-clock time:
+When both backend and frontend changed, fan out via parallel Task calls (single message, multiple `Task` calls). Use the Parallel Fullstack Verification block from `~/.claude/snippets/verify-commands.md`. Collect results, then proceed to Verification Levels.
 
-```
-# Spawn in parallel (single message, multiple Task calls):
-Task(description='PROVE-backend: lint+test for issue N',
-  prompt='Run: cd backend && ruff check . && pytest -q
-  Return results as plain text with exit codes.')
-
-Task(description='PROVE-frontend: lint+build for issue N',
-  prompt='Run: cd frontend && npm run lint && npm run build
-  Return results as plain text with exit codes.')
-```
-
-**Collect results** from both tasks, then proceed to Verification Levels.
-
-**Skip parallel mode** when:
-- Backend-only or frontend-only change (no fan-out needed)
-- Total verification time is under 30s (overhead exceeds benefit)
+**Skip parallel mode** when: backend-only or frontend-only change, or total verification time is under 30s (overhead exceeds benefit).
 
 ### Focused Test Strategy
 
-**Step 1**: Identify changed modules from PATCH artifact:
+**Step 1** — Identify changed modules from PATCH artifact:
 ```bash
-# Get changed files from PATCH
 CHANGED=$(git diff --name-only HEAD~1 -- backend/)
 MODULES=$(echo "$CHANGED" | grep -oP 'backend/backend/\K[^/]+' | sort -u)
 ```
 
-**Step 2**: Run focused tests first (fast feedback):
+**Step 2** — Run focused tests first (fast feedback):
 ```bash
-# Run only affected module tests
-for mod in $MODULES; do
-  cd backend && pytest "backend/${mod}/tests/" -q 2>/dev/null
-done
+for mod in $MODULES; do cd backend && pytest "backend/${mod}/tests/" -q 2>/dev/null; done
 ```
 
-**Step 3**: Run full suite (safety net):
-```bash
-cd backend && pytest -q
-cd frontend && npm run lint && npm run build
-```
+**Step 3** — Run full suite (safety net) using the canonical commands from `~/.claude/snippets/verify-commands.md`.
 
-**Report both**:
-- Focused: X/X passing (Nms)
-- Full suite: Y/Y passing (Nms)
+**Report both**: Focused X/X passing (Nms) + Full Y/Y passing (Nms).
 
-**Skip focused mode** when:
-- Fullstack change (run full suite directly)
-- Refactoring or cross-module changes
-- Less than 50 total tests (full suite is fast enough)
+**Skip focused mode** when: fullstack change, refactoring or cross-module change, or fewer than 50 total tests.
 
 ---
 
