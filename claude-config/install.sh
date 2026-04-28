@@ -545,6 +545,23 @@ if [ $ERRORS -eq 0 ]; then
     echo "  ✓ All symlinks resolve"
 fi
 
+# ─── Phase 4.5: Hook script path validation ─────────────────────────────────
+# Walks settings.json and verifies every interpreted hook command points at
+# an existing script. Catches the PR #75→#76 class of bug (hook references
+# a script that didn't ship). Standalone validator; install.sh just delegates.
+
+HOOK_VALIDATOR="$SCRIPT_DIR/scripts/validate-hooks.py"
+if [ -f "$HOOK_VALIDATOR" ]; then
+    if SETTINGS_PATH="$SCRIPT_DIR/settings.json" python3 "$HOOK_VALIDATOR"; then
+        : # OK
+    else
+        echo "  ✗ Hook validation failed — fix the missing script paths above"
+        ERRORS=$((ERRORS + 1))
+    fi
+else
+    echo "  ⚠ Hook validator not found at $HOOK_VALIDATOR — skipping"
+fi
+
 # Verify MCP server (runs as script, not importable as package)
 MCP_PYTHON="$REPO_DIR/mcp-server/.venv/bin/python"
 if [ -f "$MCP_PYTHON" ] && \
