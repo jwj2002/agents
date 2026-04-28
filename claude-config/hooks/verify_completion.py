@@ -10,6 +10,7 @@ as context for whether to continue the conversation.
 """
 
 import os
+import shlex
 import subprocess
 import sys
 from datetime import datetime
@@ -52,6 +53,37 @@ def check_uncommitted_changes() -> str | None:
     return f"Uncommitted changes ({n} files): {preview}{suffix}"
 
 
+def check_unpushed_commits() -> str | None:
+    """Check for commits not pushed to upstream."""
+    code, output = run("git log @{u}..HEAD --oneline 2>/dev/null")
+    if code != 0:
+        return None  # no upstream set; not applicable
+    if not output.strip():
+        return None
+    n = len(output.strip().split("\n"))
+    return f"{n} commit(s) not pushed to upstream"
+
+
+def check_branch_ahead_no_pr() -> str | None:
+    """Check for feature branch ahead of origin/main with no open PR."""
+    code, branch = run("git branch --show-current 2>/dev/null")
+    if code != 0 or not branch or branch in ("main", "master"):
+        return None
+    code, ahead = run("git log origin/main..HEAD --oneline 2>/dev/null")
+    if code != 0 or not ahead.strip():
+        return None
+    n = len(ahead.strip().split("\n"))
+    code, pr_state = run(
+        f"gh pr list --head {shlex.quote(branch)} --state open --json number 2>/dev/null",
+        timeout=3,
+    )
+    if code != 0:
+        return None  # gh unavailable / unauthed / timeout — skip silently
+    if pr_state.strip() not in ("", "[]"):
+        return None  # PR is open; not incomplete
+    return f"branch '{branch}' is {n} commit(s) ahead of origin/main with no open PR"
+
+
 def check_todos_in_changes() -> str | None:
     """Check for TODO/FIXME in recently changed files."""
     code, output = run("git diff HEAD 2>/dev/null")
@@ -80,6 +112,14 @@ def main() -> None:
     uncommitted = check_uncommitted_changes()
     if uncommitted:
         issues.append(uncommitted)
+
+    unpushed = check_unpushed_commits()
+    if unpushed:
+        issues.append(unpushed)
+
+    branch_no_pr = check_branch_ahead_no_pr()
+    if branch_no_pr:
+        issues.append(branch_no_pr)
 
     todos = check_todos_in_changes()
     if todos:
