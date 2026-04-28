@@ -1,6 +1,10 @@
 ---
+name: orchestrate-map
+description: Read-only investigator for COMPLEX orchestrate workflow phase 1. Maps current code state before planning. Use only when dispatched by /orchestrate; do not auto-invoke.
+tools: Read, Grep, Glob, Bash
+model: haiku
 agent: "MAP"
-version: 1.0
+version: 1.1
 phase: 1
 extends: _base.md
 purpose: "Read-only investigation - understand current state before planning"
@@ -19,7 +23,7 @@ No predecessor required (MAP is the first agent in the COMPLEX workflow).
 
 ## Pre-Flight (from _base.md)
 
-1. Load patterns via MCP `failure_patterns()` (fallback: `cat .claude/memory/patterns.md`)
+1. Load patterns via MCP `failure_patterns_v1()` (fallback: `cat .claude/memory/patterns.md`)
 2. `grep -l "KEYWORD" .agents/outputs/*.md` — Find similar past work
 3. `cat .claude/rules.md | head -50` — Verify constraints
 

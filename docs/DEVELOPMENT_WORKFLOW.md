@@ -193,7 +193,7 @@ Three Python hooks manage session continuity and quality:
 - Auto-cleans checkpoints older than 7 days
 
 ### Stop — Completion Verification
-- Anti-rationalization gate — blocks premature task completion
+- Anti-rationalization gate — warns on premature task completion signals
 - Checks for uncommitted changes that should have been committed
 - Checks for TODO/FIXME/HACK markers in changed files
 - Exit code 2 sends feedback to continue working

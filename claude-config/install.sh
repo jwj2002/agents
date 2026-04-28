@@ -109,6 +109,7 @@ echo "Phase 1: Symlinks"
 mkdir -p "$CLAUDE_DIR"
 
 link_item "$SCRIPT_DIR/settings.json"       "$CLAUDE_DIR/settings.json"       "settings.json"
+link_item "$SCRIPT_DIR/CLAUDE.md"           "$CLAUDE_DIR/CLAUDE.md"           "CLAUDE.md"
 link_item "$SCRIPT_DIR/hooks"               "$CLAUDE_DIR/hooks"               "hooks/"
 link_item "$SCRIPT_DIR/commands"            "$CLAUDE_DIR/commands"            "commands/"
 link_item "$SCRIPT_DIR/agents"              "$CLAUDE_DIR/agents"              "agents/"

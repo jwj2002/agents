@@ -1,6 +1,10 @@
 ---
+name: orchestrate-plan-check
+description: Validates plan completeness and contract presence before PATCH. Phase 2.8 of the COMPLEX orchestrate pipeline. Use only when dispatched by /orchestrate; do not auto-invoke.
+tools: Read, Grep, Glob, Bash
+model: haiku
 agent: "PLAN-CHECK"
-version: 1.0
+version: 1.1
 phase: 2.8
 extends: _base.md
 purpose: "Validate plan completeness before PATCH"

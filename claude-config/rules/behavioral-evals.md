@@ -1,3 +1,7 @@
+---
+paths: ["**/backend/**", "**/frontend/**", "**/.agents/**", "**/Dockerfile", "**/*.env*"]
+---
+
 # Behavioral Evals — Production-Derived Verification Checks
 
 Each eval traces back to a real failure. PROVE runs applicable evals based on changed files

@@ -1,5 +1,7 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
+    "defaultMode": "auto",
     "allow": [
       "Bash(clawdbot --help:*)",
       "Bash(clawdbot config:*)",
@@ -28,6 +30,34 @@
       "Bash(curl -s -H PRIVATE-TOKEN:*)",
       "Bash(curl -s -X POST -H PRIVATE-TOKEN:*)",
       "Bash(curl -s -X PUT -H PRIVATE-TOKEN:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/.env)",
+      "Read(./**/.env.*)",
+      "Read(./secrets/**)",
+      "Read(./**/secrets/**)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)",
+      "Read(./**/id_rsa)",
+      "Read(./**/id_ed25519)",
+      "Edit(./.env)",
+      "Edit(./.env.*)",
+      "Edit(./**/.env)",
+      "Edit(./**/.env.*)",
+      "Edit(./secrets/**)",
+      "Edit(./**/secrets/**)",
+      "Edit(./**/*.pem)",
+      "Edit(./**/*.key)",
+      "Write(./.env)",
+      "Write(./.env.*)",
+      "Write(./**/.env)",
+      "Write(./**/.env.*)",
+      "Write(./secrets/**)",
+      "Write(./**/secrets/**)",
+      "Write(./**/*.pem)",
+      "Write(./**/*.key)"
     ]
   },
   "hooks": {
@@ -83,6 +113,17 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/context_monitor.py"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/secret_guard.py"
           }
         ]
       }

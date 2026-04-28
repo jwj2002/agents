@@ -1,3 +1,7 @@
+---
+paths: ["**"]
+---
+
 # GitHub Multi-Account Setup
 
 This machine has two GitHub accounts configured via `gh auth`. Always ensure the correct account is active before any git/gh operations.

@@ -1,6 +1,10 @@
 ---
+name: orchestrate-prove
+description: Verifies implementation by running tests and capturing evidence. Phase 4 of orchestrate. Records outcomes for the self-learning loop. Use only when dispatched by /orchestrate; do not auto-invoke.
+tools: Read, Grep, Glob, Bash
+model: sonnet
 agent: "PROVE"
-version: 1.4
+version: 1.5
 phase: 4
 extends: _base.md
 purpose: "Verification, evidence capture, outcome recording"
@@ -23,7 +27,7 @@ ls .agents/outputs/patch-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOCKED: PATC
 
 ## Pre-Flight (from _base.md)
 
-1. Load patterns via MCP `failure_patterns()` (fallback: `cat .claude/memory/patterns.md`)
+1. Load patterns via MCP `failure_patterns_v1()` (fallback: `cat .claude/memory/patterns.md`)
 2. Read PATCH artifact — Understand what changed
 
 ---

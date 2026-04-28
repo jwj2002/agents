@@ -1,6 +1,7 @@
 ---
 description: "Git workflow rules for all agents — branching, commits, PRs, parallel work"
 alwaysApply: true
+paths: ["**"]
 ---
 
 # Git Workflow Rules

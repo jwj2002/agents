@@ -1,6 +1,7 @@
 ---
 description: Create a new feature request issue in GitHub
 argument-hint: <feature title> [--from-spec specs/name.md]
+disable-model-invocation: true
 ---
 
 # Feature Request Command

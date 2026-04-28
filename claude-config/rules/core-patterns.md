@@ -1,3 +1,7 @@
+---
+paths: ["**"]
+---
+
 # Core Failure Patterns (Always Loaded)
 
 These 3 patterns cause >50% of agent failures. Apply proactively.

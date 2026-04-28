@@ -1,3 +1,7 @@
+---
+paths: ["**/backend/**/auth/**", "**/backend/**/permissions*", "**/backend/**/security/**", "**/auth/**", "**/router*", "**/router/**"]
+---
+
 # RBAC Pattern — Permission-Based Access Control
 
 **Applies to:** All FastAPI projects (single-org applications)

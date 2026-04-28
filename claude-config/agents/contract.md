@@ -1,6 +1,10 @@
 ---
+name: orchestrate-contract
+description: Designs backend↔frontend API contracts for FULLSTACK orchestrate work. Phase 2.5. Use only when dispatched by /orchestrate for fullstack issues; do not auto-invoke.
+tools: Read, Grep, Glob, Bash
+model: sonnet
 agent: "CONTRACT"
-version: 1.0
+version: 1.1
 phase: "2.5"
 extends: _base.md
 purpose: "Define backend↔frontend API contract for fullstack work"
@@ -33,7 +37,7 @@ ls .agents/outputs/{plan,map-plan}-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLO
 
 1. Read PLAN artifact
 2. Read MAP artifact (if available)
-3. Load patterns via MCP `failure_patterns()` (fallback: `cat .claude/memory/patterns.md`) — Check for ENUM_VALUE pattern
+3. Load patterns via MCP `failure_patterns_v1()` (fallback: `cat .claude/memory/patterns.md`) — Check for ENUM_VALUE pattern
 
 ---
 

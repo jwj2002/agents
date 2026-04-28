@@ -1,3 +1,7 @@
+---
+paths: ["**/app-repos/**", "**/vitalailabs/**", "**/.gitlab/**"]
+---
+
 # GitLab Access (Internal VitalAILabs)
 
 ## Server

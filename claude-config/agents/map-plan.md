@@ -1,6 +1,10 @@
 ---
+name: orchestrate-map-plan
+description: Combined investigator+planner for TRIVIAL/SIMPLE orchestrate tasks. Phase 1+2 of the SIMPLE pipeline. Use only when dispatched by /orchestrate; do not auto-invoke.
+tools: Read, Grep, Glob, Bash
+model: sonnet
 agent: "MAP-PLAN"
-version: 1.0
+version: 1.1
 phase: "1+2"
 extends: _base.md
 purpose: "Combined investigation + planning for TRIVIAL/SIMPLE tasks"
@@ -19,7 +23,7 @@ No predecessor required (MAP-PLAN is the first agent in the TRIVIAL/SIMPLE workf
 
 ## Pre-Flight (from _base.md)
 
-1. Load patterns via MCP `failure_patterns()` (fallback: `cat .claude/memory/patterns.md`)
+1. Load patterns via MCP `failure_patterns_v1()` (fallback: `cat .claude/memory/patterns.md`)
 2. `grep -l "KEYWORD" .agents/outputs/*.md` — Find similar past work
 3. `cat .claude/rules.md | head -50` — Verify constraints
 

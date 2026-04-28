@@ -1,6 +1,7 @@
 ---
 description: Draft a feature specification with guided questions and codebase discovery
 argument-hint: "<feature title>"
+disable-model-invocation: true
 ---
 
 # Spec Draft Command

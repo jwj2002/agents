@@ -1,6 +1,10 @@
 ---
+name: spec-reviewer
+description: Analyzes specifications against the codebase and proposes GitHub issues. Use when dispatched by /spec-review or when the user asks to review a spec; do not auto-invoke during regular implementation.
+tools: Read, Grep, Glob, Bash
+model: sonnet
 agent: "SPEC-REVIEWER"
-version: 1.0
+version: 1.1
 extends: _base.md
 purpose: "Analyze specs against codebase, generate GitHub issues"
 output: ".agents/outputs/spec-review-{spec-name}-{mmddyy}.md"
@@ -24,7 +28,7 @@ max_lines: 400
 
 ## Pre-Flight (from _base.md)
 
-1. Load patterns via MCP `failure_patterns()` (fallback: `cat .claude/memory/patterns.md`)
+1. Load patterns via MCP `failure_patterns_v1()` (fallback: `cat .claude/memory/patterns.md`)
 2. Read the spec file completely
 3. Check for existing issues: `gh issue list --label "from-spec" --search "SPEC_NAME"`
 

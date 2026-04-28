@@ -1,3 +1,7 @@
+---
+paths: ["**/.github/**", "**/CHANGELOG*", "**/.agents/**"]
+---
+
 # Post-Merge Verification
 
 Run automatically after squash merge in the `/pr` workflow. Ensures main is healthy.

@@ -1,6 +1,7 @@
 ---
 description: Scaffold a new FastAPI module (model, schema, repo, service, router, deps)
 argument-hint: <module_name> [--fields "name:str, amount:Decimal, is_active:bool"] [--account-scoped] [--parent-dir backend/backend]
+disable-model-invocation: true
 ---
 
 # Scaffold Module Command
@@ -24,7 +25,7 @@ argument-hint: <module_name> [--fields "name:str, amount:Decimal, is_active:bool
 **MANDATORY** — Read the pattern reference before generating anything:
 
 ```bash
-cat ~/.claude/rules/fastapi-layered-pattern.md
+cat ~/.claude/templates/fastapi-layered-pattern.md
 ```
 
 Apply ALL conventions from this document.
@@ -236,7 +237,7 @@ python3 -c "import ast; ast.parse(open('$PARENT/$MODULE_NAME/router.py').read())
 ## Rules
 
 **MUST**:
-- Follow ALL conventions from `~/.claude/rules/fastapi-layered-pattern.md`
+- Follow ALL conventions from `~/.claude/templates/fastapi-layered-pattern.md`
 - Use UUID primary keys
 - Use TimestampMixin
 - Include `from_attributes=True` on Read schemas

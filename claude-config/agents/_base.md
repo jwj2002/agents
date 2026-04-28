@@ -20,11 +20,17 @@ Use MCP tools for structured, up-to-date pattern data:
 
 ```
 # Get failure patterns (structured, with frequency and recent examples)
-failure_patterns()
+failure_patterns_v1()
 
 # Get metrics overview (success rates by complexity/stack)
-agent_metrics(period="30d")
+agent_metrics_v1(period="30d")
 ```
+
+> **Versioned tool names.** The vault-metrics MCP exposes both
+> `<name>_v1` (current) and `<name>` (deprecated alias). Use the `_v1`
+> form so an internal rename in `mcp-server/server.py` won't silently
+> break agent pre-flight. When the schema changes, the server bumps to
+> `_v2` and keeps `_v1` working.
 
 **Why MCP**: Returns parsed JSON with counts, percentages, and recent examples — more actionable than raw markdown files.
 

@@ -1,6 +1,10 @@
 ---
+name: orchestrate-plan
+description: Architect for COMPLEX orchestrate workflow phase 2. Converts MAP findings into a file-by-file implementation plan. Use only when dispatched by /orchestrate; do not auto-invoke.
+tools: Read, Grep, Glob, Bash
+model: sonnet
 agent: "PLAN"
-version: 1.0
+version: 1.1
 phase: 2
 extends: _base.md
 purpose: "Convert MAP findings into file-by-file implementation plan"
@@ -23,7 +27,7 @@ ls .agents/outputs/map-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOCKED: MAP ar
 
 ## Pre-Flight (from _base.md)
 
-1. Load patterns via MCP `failure_patterns()` (fallback: `cat .claude/memory/patterns.md`)
+1. Load patterns via MCP `failure_patterns_v1()` (fallback: `cat .claude/memory/patterns.md`)
 2. Read MAP artifact: `.agents/outputs/map-{issue}-{mmddyy}.md`
 3. `cat .claude/rules.md | head -50` — Verify constraints
 

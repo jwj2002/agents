@@ -1,6 +1,10 @@
 ---
+name: orchestrate-discuss
+description: Identifies gray areas and gathers implementation decisions before planning. Use only when explicitly dispatched by /orchestrate --discuss; do not auto-invoke.
+tools: Read, Grep, Glob, Bash
+model: sonnet
 agent: "DISCUSS"
-version: 1.0
+version: 1.1
 phase: 0.5
 extends: _base.md
 purpose: "Identify gray areas and capture implementation decisions before planning"

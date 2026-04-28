@@ -1,3 +1,7 @@
+---
+paths: ["**/.agents/**", "**/backend/**", "**/frontend/**", "**/PROVE*.md"]
+---
+
 # Eval-to-File Mapping
 
 PROVE uses this mapping to select which behavioral evals to run based on changed files.

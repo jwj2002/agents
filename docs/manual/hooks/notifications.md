@@ -113,4 +113,4 @@ The hook is registered as the second Stop hook in `settings.json`:
 }
 ```
 
-Order matters: `verify_completion.py` runs first (it may block the stop), then `notify_completion.py` sends the alert.
+Order matters: `verify_completion.py` runs first so its advisory warning appears before `notify_completion.py` sends the alert.

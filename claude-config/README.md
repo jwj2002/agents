@@ -94,7 +94,7 @@ After installation, all commands and rules are immediately available in every Cl
 | File | Loading | Description |
 |------|---------|-------------|
 | `core-patterns.md` | Always (~10 lines) | Top 3 failure patterns with one-line prevention |
-| `fastapi-layered-pattern.md` | Conditional (`**/backend/**`, `**/api/**`) | Definitive FastAPI layered architecture reference |
+| `templates/fastapi-layered-pattern.md` | Read on demand by `/scaffold-project` and `/scaffold-module` | Definitive FastAPI layered architecture reference (moved out of `rules/` since it is reference, not a rule) |
 | `orchestrate-workflow.md` | Conditional (`.agents/**`) | Multi-phase workflow definition |
 | `spec-review-workflow.md` | Conditional (`**/specs/**`, `**/.agents/**`) | Spec finalization gate workflow |
 
@@ -136,7 +136,7 @@ Issue → MAP/MAP-PLAN → [TEST-PLANNER] → CONTRACT* → PATCH → PROVE
 |------|---------|---------|
 | `precompact_checkpoint.py` | Before context compaction | Saves conversation state to YAML checkpoint |
 | `sessionstart_restore_state.py` | Session start | Restores context from most recent checkpoint |
-| `verify_completion.py` | Stop | Anti-rationalization gate — blocks premature completion if uncommitted changes or TODOs exist |
+| `verify_completion.py` | Stop | Anti-rationalization gate — warns on premature completion signals such as uncommitted changes or TODOs |
 
 All hooks log errors to `~/.claude/hooks.log` with timestamps.
 
@@ -158,7 +158,7 @@ Provides tools for querying agent metrics from within Claude Code.
 | `failure_patterns` | Read failures.jsonl → top failure patterns |
 
 **Location**: `~/agents/mcp-server/`
-**Config**: `mcpServers` section in `settings.json`
+**Config**: user-level registration in `~/.claude.json` via `claude mcp add --scope user`
 **Standalone**: `python3 server.py` (works without MCP SDK)
 
 ## Self-Learning System

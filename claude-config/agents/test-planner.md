@@ -1,6 +1,10 @@
 ---
+name: orchestrate-test-planner
+description: Plans tests and generates edge cases before implementation. Phase 1.5 of orchestrate. Use only when dispatched by /orchestrate --with-tests or /test-plan; do not auto-invoke.
+tools: Read, Grep, Glob, Bash
+model: sonnet
 agent: "TEST-PLANNER"
-version: 1.0
+version: 1.1
 phase: "1.5"
 extends: _base.md
 purpose: "Pre-implementation test planning and edge case generation"
@@ -23,7 +27,7 @@ ls .agents/outputs/{map,map-plan}-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOC
 
 ## Pre-Flight (from _base.md)
 
-1. Load patterns via MCP `failure_patterns()` (fallback: `cat .claude/memory/patterns.md`) — Identify past test failures
+1. Load patterns via MCP `failure_patterns_v1()` (fallback: `cat .claude/memory/patterns.md`) — Identify past test failures
 2. Read issue/spec — Extract ALL testable requirements
 3. Read MAP-PLAN artifact — Understand implementation scope
 

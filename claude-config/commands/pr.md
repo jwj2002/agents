@@ -1,6 +1,7 @@
 ---
 description: Execute a "main stays green" PR workflow for this monorepo
 argument-hint: [pr-number]
+disable-model-invocation: true
 ---
 
 # PR Workflow
@@ -49,6 +50,48 @@ cd frontend && npm run lint && npm run build
 git fetch origin main
 git log origin/main..HEAD --oneline  # Show commits to include
 ```
+
+---
+
+## Pre-PR Fresh-Context Review
+
+Spawn the `pr-fresh-reviewer` subagent to look at the diff with no
+inheritance from the implementation discussion. Anthropic's published
+guidance: a reviewer with fresh context catches what familiarity obscures.
+
+```
+Task(
+  description='Fresh-context PR review',
+  subagent_type='pr-fresh-reviewer',
+  prompt='''Review the staged changes for this PR. The diff is the
+  authoritative input — do not assume context from any prior discussion.
+
+  Run `git diff origin/main...HEAD` to see all changes.
+  Run `gh issue view {ISSUE} --json title,body,labels` to see the issue.
+
+  Check the full E01-E15 behavioral evals as relevant to changed files.
+  Apply the file→eval mapping from rules/eval-file-mapping.md.
+
+  Report:
+  - CRITICAL findings (block PR): security holes, data loss, broken
+    deploys, missing migrations, secrets in code
+  - WARNING findings (note in PR): correctness bugs, missing tests,
+    inadequate error handling
+  - SUGGESTION findings (optional): style, performance, readability
+
+  If no issues: report "No issues found."
+  Keep output under 30 lines.
+  '''
+)
+```
+
+**Gate**:
+- If CRITICAL findings: STOP. Report to user. Do NOT create the PR until fixed.
+- If WARNING findings: Include in PR body under `## Reviewer Notes`. Continue.
+- If clean: Note "Fresh-context review: clean" in PR body. Continue.
+
+This runs in addition to (not instead of) any Codex review the user runs
+manually via `/codex:review` or `/codex:adversarial-review` for risky diffs.
 
 ---
 
@@ -206,3 +249,5 @@ cd frontend && npm run build
 
 - `/orchestrate` — Generate implementation with artifacts
 - `/review` — Pre-commit code review
+- `/codex:review` — Native Codex review for risky diffs (plugin)
+- `/codex:adversarial-review` — Adversarial review with focus text (plugin)

@@ -1,6 +1,7 @@
 ---
 description: Review a specification against the codebase and optionally create GitHub issues
 argument-hint: <spec-file> [--dry-run] [--create-issues]
+disable-model-invocation: true
 ---
 
 # Spec Review Command

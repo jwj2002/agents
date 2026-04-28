@@ -1,6 +1,7 @@
 ---
 description: Create a feature request issue from specification analysis (used by /spec-review)
 argument-hint: [feature title]
+disable-model-invocation: true
 ---
 
 ## Specification Reference

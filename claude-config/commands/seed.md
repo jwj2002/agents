@@ -1,6 +1,7 @@
 ---
 description: Capture a deferred idea with a trigger condition for when it should surface
 argument-hint: <idea description>
+disable-model-invocation: true
 ---
 
 # Seed Command
