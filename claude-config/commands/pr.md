@@ -1,6 +1,7 @@
 ---
 description: Execute a "main stays green" PR workflow for this monorepo
 argument-hint: [pr-number]
+disable-model-invocation: true
 ---
 
 # PR Workflow
@@ -54,14 +55,14 @@ git log origin/main..HEAD --oneline  # Show commits to include
 
 ## Pre-PR Fresh-Context Review
 
-Spawn the `code-reviewer` subagent to look at the diff with no inheritance
-from the implementation discussion. Anthropic's published guidance: a
-reviewer with fresh context catches what familiarity obscures.
+Spawn the `pr-fresh-reviewer` subagent to look at the diff with no
+inheritance from the implementation discussion. Anthropic's published
+guidance: a reviewer with fresh context catches what familiarity obscures.
 
 ```
 Task(
   description='Fresh-context PR review',
-  subagent_type='code-reviewer',
+  subagent_type='pr-fresh-reviewer',
   prompt='''Review the staged changes for this PR. The diff is the
   authoritative input — do not assume context from any prior discussion.
 

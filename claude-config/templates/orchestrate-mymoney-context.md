@@ -1,6 +1,11 @@
-# Orchestrate Command — Complete Reference
+# Orchestrate — mymoney-dev project context (deprecated location)
 
-This is the detailed reference for the orchestrate workflow. The main skill definition is in [SKILL.md](./SKILL.md).
+> **Note:** This file was preserved when `skills/orchestrate/` was retired. It is
+> mostly mymoney-dev-specific context (monorepo paths, FastAPI/React stack
+> details). Anything generally applicable lives in `commands/orchestrate.md`,
+> `templates/orchestrate-pipeline.md`, and `templates/orchestrate-parallel.md`.
+> If you still want this content, copy the relevant sections into
+> `~/projects/mymoney-dev/.claude/CLAUDE.md` and delete this file.
 
 ## Workflow Overview
 

@@ -1,6 +1,7 @@
 ---
 description: Create a new bug report issue in GitHub
 argument-hint: <bug title>
+disable-model-invocation: true
 ---
 
 # Bug Report Command

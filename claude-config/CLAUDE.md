@@ -140,7 +140,7 @@ Every endpoint gets a permission check (E11). Detail: `~/.claude/rules/rbac-patt
 | `git-workflow.md` | Any commit/branch/PR work |
 | `github-accounts.md` / `gitlab-access.md` | Before any push or auth-sensitive op |
 | `behavioral-evals.md` + `eval-file-mapping.md` | PROVE phase, code review |
-| `fastapi-layered-pattern.md` | `**/backend/**`, `**/api/**` paths only |
+| `fastapi-layered-pattern.md` (in `templates/`, not `rules/`) | Read by `/scaffold-project` and `/scaffold-module` |
 | `rbac-pattern.md` | Auth/permissions code |
 | `orchestrate-workflow.md` | `/orchestrate` runs |
 | `spec-review-workflow.md` | Specs and `.agents/` paths |

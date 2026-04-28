@@ -1,6 +1,7 @@
 ---
 description: Scaffold a complete FastAPI project with layered architecture (database, auth, core, alembic, tests)
 argument-hint: <project_name> [--with-auth] [--db postgres|sqlite] [--target-dir .]
+disable-model-invocation: true
 ---
 
 # Scaffold Project Command
@@ -24,7 +25,7 @@ argument-hint: <project_name> [--with-auth] [--db postgres|sqlite] [--target-dir
 **MANDATORY** — Read the pattern reference before generating anything:
 
 ```bash
-cat ~/.claude/rules/fastapi-layered-pattern.md
+cat ~/.claude/templates/fastapi-layered-pattern.md
 ```
 
 Apply ALL conventions from this document.
@@ -155,7 +156,7 @@ Lint:
 ## Rules
 
 **MUST**:
-- Follow ALL conventions from `~/.claude/rules/fastapi-layered-pattern.md`
+- Follow ALL conventions from `~/.claude/templates/fastapi-layered-pattern.md`
 - Generate the enhanced BaseRepository with `get_with_filter`, `list_by`, `exists`, `count`
 - Include exception hierarchy + error handlers
 - Include SQLite test fixtures in conftest.py

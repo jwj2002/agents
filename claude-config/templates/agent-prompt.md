@@ -1,95 +1,122 @@
-# Agent Prompt Template
+# Agent Prompt Template (Native Subagent Dispatch)
 
-Used by orchestrate.md to construct Task() prompts. The orchestrator reads this template and substitutes variables before passing to the Task tool.
+Used by `/orchestrate` to construct Task() invocations for phase agents.
 
-## Context Isolation (MANDATORY)
+## Dispatch model — IMPORTANT CHANGE
 
-Every agent spawned via this template runs with a **fresh context window**. To maintain consistent quality from task 1 to task 50:
+Phase agents are now invoked via **native subagent dispatch**:
 
-1. **DO NOT** pass conversation history, prior tool results, or orchestrator reasoning to agents
-2. **DO** pass only: this template (filled), the referenced artifact files, and rules/patterns
-3. **DO** let the agent read its own files via Read tool rather than pasting file contents into the prompt
-4. The agent's prompt should consume <30% of context, leaving >70% for the agent's own work
+```python
+Task(
+    description='MAP for issue 184',
+    subagent_type='orchestrate-map',   # registered agent name
+    prompt=AGENT_PROMPT,                # context only, NOT instructions
+)
+```
 
-### What Goes Into an Agent Prompt
-- Filled template variables (issue, branch, stack, complexity, artifact list)
-- Prior failure block (if re-attempt)
-- Agent-specific instructions (1-2 sentences)
+When `subagent_type` matches a registered agent (one with valid `name:`
+frontmatter, located at `~/.claude/agents/<file>.md`), Claude Code:
 
-### What NEVER Goes Into an Agent Prompt
-- Orchestrator's exploration results or reasoning
-- Contents of files (let the agent Read them)
-- Conversation history between user and orchestrator
-- Other agents' full artifact contents (pass file paths, not contents)
+1. Loads the agent body as the spawned subagent's system prompt automatically
+2. Applies the agent's `tools:` restriction
+3. Applies the agent's `model:` setting (Haiku for MAP / PLAN-CHECK / DISCUSS;
+   Sonnet for PLAN / PATCH / PROVE / etc.)
+4. Spawns with a fresh context window
+
+**Implication for the prompt template below**: do NOT instruct the agent to
+"read your instructions from `agents/<file>.md`" — Claude Code already loads
+that as the system prompt. Pass *only* per-invocation context.
 
 ## Variables
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `{AGENT_NAME}` | Agent role name | MAP-PLAN, PATCH, PROVE |
+| `{AGENT_NAME}` | Display name (for the description field) | MAP-PLAN, PATCH, PROVE |
+| `{SUBAGENT_TYPE}` | Registered agent name from frontmatter | orchestrate-map-plan, orchestrate-patch |
 | `{ISSUE}` | Issue number | 184 |
 | `{TITLE}` | Issue title | Add member role validation |
 | `{BRANCH}` | Current branch | feature/issue-184-validation |
 | `{STACK}` | Stack scope | backend, frontend, fullstack |
 | `{COMPLEXITY}` | Issue complexity | TRIVIAL, SIMPLE, COMPLEX |
-| `{AGENT_FILE}` | Agent instruction filename | map-plan.md, patch.md |
 | `{ARTIFACT_NAME}` | Output artifact filename | map-plan-184-032526.md |
-| `{ARTIFACT_LIST}` | Prior artifacts (markdown list) | - MAP-PLAN: .agents/outputs/... |
+| `{ARTIFACT_LIST}` | Prior artifacts (markdown list of paths only) | - MAP-PLAN: .agents/outputs/... |
 | `{PRIOR_FAILURE_BLOCK}` | Failure context or "First attempt" | ## Prior Failure ... |
-| `{AGENT_INSTRUCTIONS}` | Agent-specific extra instructions | Implement changes per MAP-PLAN. |
+| `{AGENT_INSTRUCTIONS}` | Per-invocation extra instructions (1-2 sentences) | Read MAP-PLAN. Generate test matrix. |
 | `{SCOPE}` | Optional scope constraint | BACKEND ONLY, FRONTEND ONLY |
 
-## Template
+## Template (passed as `prompt:` to Task)
 
 ```markdown
-You are {AGENT_NAME} agent.
-
-## Inherited Context (DO NOT re-read these files)
-- Issue: #{ISSUE} - {TITLE}
+## Inherited Context (read paths if needed; do NOT re-paste contents)
+- Issue: #{ISSUE} — {TITLE}
 - Branch: {BRANCH}
 - Stack: {STACK}
 - Complexity: {COMPLEXITY}
-
-## Critical Patterns
-Loaded from rules/core-patterns.md (auto-loaded by Claude Code).
-Apply VERIFICATION_GAP, ENUM_VALUE, and COMPONENT_API checks as relevant.
 
 ## Prior Artifacts
 {ARTIFACT_LIST}
 
 {PRIOR_FAILURE_BLOCK}
 
-## Instructions
-Read agent instructions (check .claude/agents/{AGENT_FILE} first, else ~/.claude/agents/{AGENT_FILE}).
+## Per-Run Instructions
 {AGENT_INSTRUCTIONS}
-Write to .agents/outputs/{ARTIFACT_NAME}
-End with AGENT_RETURN: {ARTIFACT_NAME}
+
+Write your output artifact to `.agents/outputs/{ARTIFACT_NAME}`.
+End your response with `AGENT_RETURN: {ARTIFACT_NAME}`.
 ```
 
-## Scoped Variant (for parallel fullstack PATCH)
+## Context Isolation (MANDATORY)
 
-When `{SCOPE}` is set, add to Inherited Context:
+Every agent spawned via this dispatch runs with a **fresh context window**.
+
+1. **DO NOT** pass conversation history, prior tool results, or orchestrator reasoning to agents
+2. **DO** pass only: filled template variables and references to prior artifact *paths* (not their contents)
+3. **DO** let the agent read its own files via the Read tool
+4. The prompt should consume <30% of the agent's context, leaving >70% for actual work
+
+### What NEVER goes into the prompt
+- Orchestrator's exploration results or reasoning
+- Contents of files (the agent will Read them as needed)
+- Conversation history between user and orchestrator
+- Other agents' full artifact contents (pass paths, not contents)
+- Repeating the agent's own instructions (Claude Code auto-loads them via `subagent_type`)
+
+## Scoped Variant (parallel fullstack PATCH)
+
+When `{SCOPE}` is set, add this line to "Inherited Context":
+
 ```markdown
-- SCOPE: Only implement {SCOPE} changes from MAP-PLAN
+- SCOPE: Implement ONLY {SCOPE} changes from MAP-PLAN
 ```
 
-## PROVE-lite Variant (for TRIVIAL issues)
+Use `subagent_type='orchestrate-patch'` for both backend and frontend halves;
+the SCOPE line tells the agent which side to implement.
 
-Uses a minimal prompt — gates only, no Level 2-3 checks:
+## PROVE-lite Variant (TRIVIAL issues)
+
+For TRIVIAL issues, use the same `subagent_type='orchestrate-prove'` but a
+minimal prompt — gates only, no Level 2-3 checks:
+
 ```markdown
-You are PROVE agent (lite mode for TRIVIAL issues).
-
 ## Inherited Context
-- Issue: #{ISSUE} - {TITLE}
+- Issue: #{ISSUE} — {TITLE}
 - Stack: {STACK}
-- Complexity: TRIVIAL
+- Complexity: TRIVIAL — RUN GATES ONLY
 
-## Instructions
-Run verification gates ONLY (skip Level 2 SUBSTANTIVE and Level 3 WIRED checks):
-- If backend touched: cd backend && ruff check . && pytest -q
-- If frontend touched: cd frontend && npm run lint && npm run build
+## Per-Run Instructions
+Run verification gates only (skip Level 2 SUBSTANTIVE and Level 3 WIRED):
+- If backend touched: `cd backend && ruff check . && pytest -q`
+- If frontend touched: `cd frontend && npm run lint && npm run build`
 
-Record outcome to .claude/memory/metrics.jsonl
-Write to .agents/outputs/{ARTIFACT_NAME}
-End with AGENT_RETURN: {ARTIFACT_NAME}
+Record outcome to `.claude/memory/metrics.jsonl`.
+Write artifact to `.agents/outputs/{ARTIFACT_NAME}`.
+End with `AGENT_RETURN: {ARTIFACT_NAME}`.
 ```
+
+## Backwards-compatibility note
+
+If a `subagent_type` lookup fails (e.g., the registered name has not been
+picked up after a config change), Claude Code falls back to `general-purpose`.
+In that case the orchestrator should re-prompt with an explicit "read your
+instructions from `~/.claude/agents/<file>.md`" line so the legacy path still
+works. After the next session restart the native dispatch should resolve.

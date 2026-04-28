@@ -221,11 +221,29 @@ fi
 
 ### Step 3: Spawn Agents (Task Tool)
 
-**CRITICAL**: Use the Task tool to spawn each agent with inherited context.
+**CRITICAL**: Use the Task tool to spawn each phase agent via **native subagent
+dispatch**. Each phase agent (MAP, PLAN, PATCH, PROVE, etc.) is a registered
+Claude Code subagent at `~/.claude/agents/<file>.md` with a frontmatter
+`name:` of `orchestrate-<phase>`. Invoke as:
 
-For per-agent prompt templates, validation gates, and failure-context injection, **read `templates/orchestrate-pipeline.md`**.
+```python
+Task(
+    description='<phase> for issue <N>',
+    subagent_type='orchestrate-<phase>',  # registered name
+    prompt=AGENT_PROMPT,                   # context only — no instructions
+)
+```
 
-For parallel patterns (MAP fan-out, speculative PATCH, parallel fullstack PATCH, worktree setup, resume mode), **read `templates/orchestrate-parallel.md`**.
+Claude Code auto-loads the agent body, applies the agent's `tools:` restriction,
+and uses the agent's `model:` (Haiku for read-only phases, Sonnet otherwise).
+Do NOT include "read your instructions from agents/X.md" in the prompt — the
+agent body is loaded automatically.
+
+For per-agent dispatch tables, validation gates, and failure-context injection,
+**read `templates/orchestrate-pipeline.md`**.
+
+For parallel patterns (MAP fan-out, speculative PATCH, parallel fullstack PATCH,
+worktree setup, resume mode), **read `templates/orchestrate-parallel.md`**.
 
 ### Step 4: Report Status
 

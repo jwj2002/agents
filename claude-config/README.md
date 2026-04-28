@@ -94,7 +94,7 @@ After installation, all commands and rules are immediately available in every Cl
 | File | Loading | Description |
 |------|---------|-------------|
 | `core-patterns.md` | Always (~10 lines) | Top 3 failure patterns with one-line prevention |
-| `fastapi-layered-pattern.md` | Conditional (`**/backend/**`, `**/api/**`) | Definitive FastAPI layered architecture reference |
+| `templates/fastapi-layered-pattern.md` | Read on demand by `/scaffold-project` and `/scaffold-module` | Definitive FastAPI layered architecture reference (moved out of `rules/` since it is reference, not a rule) |
 | `orchestrate-workflow.md` | Conditional (`.agents/**`) | Multi-phase workflow definition |
 | `spec-review-workflow.md` | Conditional (`**/specs/**`, `**/.agents/**`) | Spec finalization gate workflow |
 

@@ -18,6 +18,28 @@ from pathlib import Path
 # File-based error logging
 _log_file = Path.home() / ".claude" / "hooks.log"
 _log_file.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _rotate_log_if_oversize(max_bytes: int = 10 * 1024 * 1024) -> None:
+    """Rotate hooks.log if it exceeds max_bytes (default 10 MB).
+
+    Keeps one rotated copy at hooks.log.1; older copies are discarded.
+    Runs once per session via SessionStart so the cost is negligible.
+    """
+    try:
+        if not _log_file.exists() or _log_file.stat().st_size <= max_bytes:
+            return
+        rotated = _log_file.with_suffix(_log_file.suffix + ".1")
+        if rotated.exists():
+            rotated.unlink()
+        _log_file.rename(rotated)
+    except Exception:
+        # Never let log rotation break session startup.
+        pass
+
+
+_rotate_log_if_oversize()
+
 logging.basicConfig(
     filename=str(_log_file),
     level=logging.WARNING,
