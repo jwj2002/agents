@@ -33,12 +33,11 @@ If no issue provided, instruct user to create one with `/feature` or `/bug`.
 ## Workflow
 
 ```
-TRIVIAL:        MAP-PLAN → PATCH → PROVE-lite
 SIMPLE:         [DISCUSS] → MAP-PLAN → [TEST-PLANNER] → CONTRACT* → PATCH → PROVE
 COMPLEX:        [DISCUSS] → MAP → PLAN → [TEST-PLANNER] → CONTRACT* → PLAN-CHECK → PATCH → PROVE
 ```
 
-- `TRIVIAL` skips PLAN-CHECK and uses PROVE-lite
+- TRIVIAL work is **rejected** by Step 1 with a redirect to `/quick` (see `rules/implementation-routing.md`)
 - `[TEST-PLANNER]` runs if `--with-tests` is provided
 - `CONTRACT*` is **MANDATORY** if fullstack — PATCH will STOP without it
 - Codex is not a mandatory phase. Use `/codex:review` or `/codex:adversarial-review`
@@ -145,9 +144,11 @@ If seeds match, report before proceeding. If no `.planning/seeds/`, skip silentl
 
 | Level | Criteria | Workflow |
 |-------|----------|----------|
-| TRIVIAL | Docs, config | MAP-PLAN |
 | SIMPLE | 1-3 files | MAP-PLAN |
 | COMPLEX | Endpoints, migrations | MAP + PLAN |
+
+TRIVIAL work (typo, single-config-line fix, obvious one-file change) is **not**
+handled by `/orchestrate` — see the routing gate below.
 
 Report:
 
@@ -155,6 +156,30 @@ Report:
 Issue #184 classified as: SIMPLE (backend)
 Using workflow: MAP-PLAN → PATCH → PROVE
 ```
+
+### Step 1.0.1: Reject TRIVIAL — Redirect to /quick
+
+After classification, if `TIER=TRIVIAL`, exit immediately with a clear pointer
+to `/quick`. The full MAP-PLAN → PATCH → PROVE pipeline is over-ceremonious
+for a typo-class change.
+
+```bash
+if [ "$TIER" = "TRIVIAL" ]; then
+  echo "Issue #${ISSUE} classified as TRIVIAL — full orchestrate pipeline is over-ceremonious."
+  echo ""
+  echo "Use /quick instead:"
+  echo "  /quick \"${ISSUE_TITLE}\""
+  echo ""
+  echo "TRIVIAL work (typo, single-config-line fix, obvious one-file change) doesn't"
+  echo "need MAP-PLAN/PATCH/PROVE artifacts. /quick handles it directly without"
+  echo "branching, agent dispatches, or PR ceremony for changes that don't warrant them."
+  exit 0
+fi
+```
+
+If you genuinely want the full pipeline for a TRIVIAL issue (tracking,
+artifacts, parallel-wave bookkeeping), manually upgrade the classification to
+SIMPLE before re-running.
 
 ### Step 1.1: Decide Codex Escalation
 
