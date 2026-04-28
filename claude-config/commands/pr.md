@@ -90,8 +90,8 @@ Task(
 - If WARNING findings: Include in PR body under `## Reviewer Notes`. Continue.
 - If clean: Note "Fresh-context review: clean" in PR body. Continue.
 
-This runs in addition to (not instead of) the Codex adversarial review for
-MODERATE+ orchestrate work, which fires post-PROVE.
+This runs in addition to (not instead of) any Codex review the user runs
+manually via `/codex:review` or `/codex:adversarial-review` for risky diffs.
 
 ---
 
@@ -249,3 +249,5 @@ cd frontend && npm run build
 
 - `/orchestrate` — Generate implementation with artifacts
 - `/review` — Pre-commit code review
+- `/codex:review` — Native Codex review for risky diffs (plugin)
+- `/codex:adversarial-review` — Adversarial review with focus text (plugin)

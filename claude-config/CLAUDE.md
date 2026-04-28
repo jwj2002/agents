@@ -40,14 +40,17 @@ Before starting any task, classify it:
 |---|---|---|---|
 | TRIVIAL | 1 | Typo, rename, obvious fix | `/quick` |
 | SIMPLE | 1–3 | Clear single-subsystem | Plan mode |
-| MODERATE | 4–5 | Clear pattern, single subsystem | `/orchestrate` (SIMPLE tier) + Codex review |
-| COMPLEX | 6+ | Cross-cutting / architectural | `/orchestrate` (COMPLEX tier) + Codex adversarial review |
+| MODERATE | 4–5 | Clear pattern, single subsystem | `/orchestrate` (SIMPLE tier), Codex review recommended |
+| COMPLEX | 6+ | Cross-cutting / architectural | `/orchestrate` (COMPLEX tier), Codex review recommended |
 | FULLSTACK | any | Backend + frontend | `/orchestrate` with CONTRACT phase |
 
 **Modifiers:** `--parallel` for independent issues, `--resume` for interrupted
 workflows, `--discuss` for ambiguous requirements (recommended on COMPLEX/FULLSTACK).
 
-Full routing logic and Codex delegation patterns: `~/.claude/rules/implementation-routing.md`.
+Codex rule: simple work gets one agent; risky work gets two opinions; failed
+work gets a different model. Do not use Codex for trivial ceremony.
+
+Full routing logic: `~/.claude/rules/implementation-routing.md`.
 
 ---
 

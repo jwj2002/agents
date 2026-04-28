@@ -69,7 +69,7 @@ Symlinked to `~/.claude/hooks/`. Python scripts attached to Claude Code lifecycl
 |------|------|-------|---------|
 | `sessionstart_restore_state.py` | 4.8 KB | SessionStart | Restore PERSISTENT_STATE and critical patterns (~500 tokens) |
 | `precompact_checkpoint.py` | 7.5 KB | PreCompact | Extract state from transcript, update YAML, auto-clean old files |
-| `verify_completion.py` | 3.3 KB | Stop | Anti-rationalization: block if uncommitted changes or TODOs exist |
+| `verify_completion.py` | 3.3 KB | Stop | Anti-rationalization: warn if uncommitted changes or TODOs exist |
 | `notify_completion.py` | 3.5 KB | Stop | macOS Notification Center alert with iPhone relay via Handoff |
 | `state_manager.py` | 4.5 KB | (shared module) | Centralized PERSISTENT_STATE.yaml read/write operations |
 | `worktree_manager.py` | 6.5 KB | (shared module) | Git worktree lifecycle for `--parallel` flag |

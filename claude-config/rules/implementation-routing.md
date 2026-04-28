@@ -2,286 +2,89 @@
 paths: ["**"]
 ---
 
-# Implementation Routing: Task Assessment → Workflow → Codex Delegation → Review
+# Implementation Routing: Right-Sized Claude + Codex Use
 
-When given any task, assess complexity and route to the right workflow. Maximize use of Codex (GPT) for tasks within its capability — reviews, parallel implementation, debugging, and background work. **Make the call yourself — do not ask the user which mode to use.**
+Use Codex when a second model materially reduces risk. Do not create ceremony
+for trivial work. The default principle:
 
-## Step 1: Assess and Route
-
-**Assess BEFORE entering any mode.** Read the issue/task, check files involved, then decide.
-
-| Complexity | Files | Criteria | Route To | Codex Role |
-|------------|-------|----------|----------|-----------|
-| **TRIVIAL** | 1 | Typo, config, rename, obvious fix | `/quick` | None |
-| **SIMPLE** | 1-3 | Clear requirements, single subsystem | Plan Mode | Offer review after |
-| **MODERATE** | 4-5 | Clear pattern, single subsystem | `/orchestrate` (SIMPLE tier) | Review (recommended) |
-| **COMPLEX** | 6+ | Cross-cutting, architectural decisions | `/orchestrate` (COMPLEX tier) | Review (automatic) + delegate subtasks |
-| **FULLSTACK** | Any | Backend + frontend changes | `/orchestrate` + CONTRACT | Review (enum/API focus) + parallel implementation |
-| **PRIOR FAIL** | Any | Re-attempt of a BLOCKED issue | `/codex:rescue` first, then `/orchestrate` | Primary implementer (different model) |
-
-**Modifiers:**
-- **Multiple independent issues** → add `--parallel` (worktree isolation, separate tabs)
-- **Interrupted workflow** → add `--resume` (skip completed phases)
-- **Ambiguous requirements** → add `--discuss` (identify gray areas before planning). Recommended for COMPLEX and FULLSTACK.
-- **Subtasks within an issue** → delegate independent subtasks to Codex via `/codex:rescue --background`
-
-## Step 2: Maximize Codex Delegation
-
-After routing the primary workflow, identify work that Codex should handle. Codex (GPT) runs **in background** — Claude continues working in parallel.
-
-### When to Delegate to Codex
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                  CODEX DELEGATION RULES                       │
-│                                                               │
-│  DELEGATE TO CODEX when:                                      │
-│  ├── Task is independent (doesn't block Claude's work)       │
-│  ├── Prior attempt by Claude was BLOCKED (try different model)│
-│  ├── Fullstack: frontend can run parallel to Claude's backend│
-│  ├── Debugging: test failures, regression investigation      │
-│  ├── Refactoring: mechanical changes (rename, extract, move) │
-│  └── Review: any MODERATE+ task after implementation         │
-│                                                               │
-│  KEEP IN CLAUDE when:                                         │
-│  ├── Task requires orchestrate pipeline state (MAP→PATCH)    │
-│  ├── Task needs MCP server access (vault-metrics, etc.)      │
-│  ├── Task involves project-specific rules/patterns           │
-│  ├── Task is the primary implementation thread                │
-│  └── Architectural decisions that need deep context           │
-└──────────────────────────────────────────────────────────────┘
+```text
+Simple work gets one agent.
+Risky work gets two opinions.
+Failed work gets a different model.
 ```
 
-### Codex Prompt Construction (MANDATORY for all delegations)
+## Step 1: Assess Risk
 
-When constructing `/codex:rescue` prompts, ALWAYS use XML prompt blocks from the Codex recipe library. Read these reference files on first delegation in a session:
+Assess before choosing a workflow. Base the decision on changed files, blast
+radius, ambiguity, and failure history.
 
-```bash
-# Read once per session, before first Codex delegation
-cat ~/.claude/plugins/cache/openai-codex/codex/*/skills/gpt-5-4-prompting/references/prompt-blocks.md
-cat ~/.claude/plugins/cache/openai-codex/codex/*/skills/gpt-5-4-prompting/references/codex-prompt-recipes.md
+| Tier | Signals | Primary Route | Codex Role |
+|---|---|---|---|
+| TRIVIAL | Typo, copy, obvious one-file config/import fix | `/quick` | None |
+| SIMPLE | 1-3 files, one subsystem, clear behavior | Plan mode or direct implementation | Optional only |
+| MODERATE | 4-5 files, shared behavior, meaningful tests | `/orchestrate` SIMPLE tier | Diff review recommended |
+| COMPLEX | 6+ files, architecture, migrations, data model, cross-cutting behavior | `/orchestrate` COMPLEX tier | Diff review recommended |
+| FULLSTACK | Backend + frontend contract/API/enum behavior | `/orchestrate` + CONTRACT | Diff review with contract/API/enum focus |
+| PRIOR FAIL | PROVE blocked, repeated failed attempt, stuck debugging | Reassess before retry | Codex rescue or review recommended |
+
+## Codex Escalation Triggers
+
+Use Codex review when one or more apply:
+
+- Auth, permissions, tenancy, payments, money, migrations, data loss, or secrets.
+- Public API, backend/frontend contract, enum/status/role values.
+- Shared library behavior or cross-module refactor.
+- New tests are hard to reason about or failure modes are subtle.
+- Claude already failed PROVE or repeated the same approach twice.
+
+Skip Codex when all apply:
+
+- One obvious file or docs-only change.
+- No public/user-facing behavior change.
+- Verification is straightforward and passes.
+- A second review would cost more than the risk it reduces.
+
+## Review Commands
+
+Use the Codex plugin commands instead of inventing ad-hoc prompts:
+
+```text
+/codex:review               # native diff review (no focus text)
+/codex:adversarial-review   # adversarial diff review with focus text
+/codex:rescue               # delegate implementation when Claude is stuck
 ```
 
-**Minimum blocks for every delegation prompt:**
+## Step 2: Announce Routing Briefly
 
-1. `<task>` — concrete job description with expected end state
-2. `<completeness_contract>` — don't stop at first plausible answer
-3. `<verification_loop>` — verify result before finalizing
+Examples:
 
-**Add based on task type:**
-
-| Task Type | Additional Blocks |
-|-----------|------------------|
-| Bug fix / implementation | `<action_safety>`, `<default_follow_through_policy>` |
-| Review / analysis | `<grounding_rules>`, `<dig_deeper_nudge>` |
-| Research | `<research_mode>`, `<citation_rules>` |
-| Write-capable tasks | `<action_safety>` (scope changes tightly) |
-
-**Never delegate with plain language alone.** Structured prompts produce dramatically better Codex output.
-
-### Delegation Patterns
-
-#### Pattern 1: Parallel Fullstack Split
-Claude handles backend (needs MCP, rules, patterns). Codex handles frontend in background.
-
-```
-Claude: PATCH backend (services, models, routes)
-  │
-  └── /codex:rescue --background --write \
-        "Implement frontend component per CONTRACT:
-         - Component: PaymentForm at frontend/src/components/
-         - API endpoint: POST /api/payments (see contract artifact)
-         - Enum VALUES: STATUS='pending','completed','failed'
-         - Run: npm run lint && npm run build when done"
-  │
-  ├── Claude continues with backend tests
-  └── /codex:status → check when frontend is done
+```text
+Quick: one docs typo. No Codex.
+Simple: two backend files. I will implement and offer /codex:review only if risk appears.
+Moderate: shared service change. I will run /codex:adversarial-review after verification.
+Complex: migration + service + API. I will run /codex:adversarial-review after PATCH.
+Fullstack: backend endpoint + UI. /codex:adversarial-review with focus on contract and enum values.
+Prior fail: Claude PROVE blocked. I will /codex:rescue as a second-model attempt before retrying.
 ```
 
-#### Pattern 2: Debug Delegation
-Claude is implementing issue A. Tests for issue B start failing. Delegate debugging to Codex.
+## Step 3: Apply Codex Findings
 
-```
-Claude: working on issue A...
-  │
-  └── /codex:rescue --background \
-        "Investigate why tests in backend/auth/tests/ are failing.
-         Started failing after commit abc123. Find root cause and fix."
-  │
-  ├── Claude continues issue A
-  └── /codex:result → review Codex's fix when done
-```
+Codex output is advisory until classified by Claude:
 
-#### Pattern 3: Prior Failure Escalation
-Claude's PATCH was BLOCKED. Instead of re-running Claude with failure context, try Codex first (different model = different approach).
+| Finding Type | Action |
+|---|---|
+| BLOCKING | Fix before PR; rerun relevant verification |
+| NON-BLOCKING | Note in PR or backlog if useful |
+| CLEAN | Continue |
 
-```
-PROVE: BLOCKED (root cause: MULTI_MODEL — forgot to update related model)
-  │
-  ├── OLD: re-run Claude PATCH with failure context
-  │
-  └── NEW: /codex:rescue --write --effort high \
-        "Fix issue #184. Prior attempt failed with MULTI_MODEL error:
-         forgot to update Advisor model when changing User.
-         See .agents/outputs/patch-184-032626.md for what was tried.
-         Fix the multi-model coordination."
-```
+Do not let broad or speculative Codex feedback expand scope. Only act on
+findings tied to concrete changed code, tests, contracts, or security risk.
 
-#### Pattern 4: Mechanical Refactoring
-Large rename, extract, or move operations that don't require architectural judgment.
+## Model And Permission Defaults
 
-```
-Claude: planning the refactor...
-  │
-  └── /codex:rescue --background --write \
-        "Rename all occurrences of 'UserAccount' to 'Account' across
-         backend/backend/ directory. Update imports, type hints, and
-         test references. Run ruff check . when done."
-  │
-  ├── Claude works on the architectural changes
-  └── /codex:status → merge Codex's renames with Claude's work
-```
-
-#### Pattern 5: Test Writing
-Claude implements the feature. Codex writes the tests.
-
-```
-Claude: PATCH completes feature implementation
-  │
-  └── /codex:rescue --background --write \
-        "Write tests for the new payment processing module.
-         Source: backend/backend/payments/services.py
-         Test file: backend/backend/payments/tests/test_services.py
-         Use pytest + pytest-asyncio. SQLite in-memory only.
-         Cover: success cases, validation errors, edge cases.
-         Run: cd backend && pytest -q when done."
-  │
-  ├── Claude continues to PROVE phase
-  └── /codex:result → incorporate tests before commit
-```
-
-## Step 3: Announce Your Decision
-
-State the routing decision AND any Codex delegation briefly:
-
-> **Quick** — typo in README, 1 file. No Codex.
-
-> **Plan mode** — 2 files, clear requirements. Will offer Codex review after.
-
-> **Orchestrate (MODERATE)** — 4 files, backend-only. Codex review after PROVE.
-
-> **Orchestrate (COMPLEX, fullstack)** — new module + frontend. Claude handles backend, delegating frontend to Codex in background. Adversarial review automatic.
-
-> **Codex-first** — issue 184 failed twice. Sending to `/codex:rescue` before re-attempting with Claude.
-
-> **Parallel** — Issues 42 and 57 independent. `--parallel` in separate tabs. Codex reviews both in background.
-
-The user can override any routing or delegation decision.
-
-## Step 4: Apply Codex Review
-
-After implementation (regardless of workflow), apply review based on risk:
-
-| Risk Level | Codex Action | Command |
-|------------|-------------|---------|
-| **TRIVIAL** | Skip entirely | — |
-| **SIMPLE** | Offer (don't force) | "Want a cross-model review?" |
-| **MODERATE** | Run after implementation | `/codex:review --background` |
-| **COMPLEX** | Run adversarial after PROVE | `/codex:adversarial-review --background` |
-| **FULLSTACK** | Run with enum/API focus | `/codex:adversarial-review --background "Focus on: enum value mismatches, API contract compliance, access control"` |
-| **PRIOR FAIL** | Run before commit | `/codex:adversarial-review --wait "Focus on: {prior root cause}"` |
-
-### Review Integration with Orchestrate
-
-For MODERATE+ tasks, Codex review runs **after PROVE passes**:
-
-```
-PATCH → PROVE passes → /codex:adversarial-review --background
-                               │
-                          findings?
-                          ├── No  → /pr
-                          └── Yes → fix → re-run PROVE → /pr
-```
-
-## Codex Model Selection Guide
-
-| Task Type | Recommended Model | Effort | Why |
-|-----------|------------------|--------|-----|
-| Quick review | `gpt-5.4-mini` | `medium` | Fast, cheap, sufficient for review |
-| Adversarial review | `gpt-5.4` | `high` | Needs reasoning depth to challenge decisions |
-| Bug investigation | `gpt-5.4-mini` | `medium` | Read-only diagnosis, speed matters |
-| Feature implementation | `gpt-5.4` | `high` | Write-capable, needs quality |
-| Mechanical refactoring | `gpt-5.4-mini` | `low` | Repetitive, pattern-following |
-| Test writing | `gpt-5.4` | `medium` | Needs understanding of code but not deep reasoning |
-| Prior failure rescue | `gpt-5.4` | `xhigh` | Maximum reasoning for stuck problems |
-
-## Workflow Flows
-
-### Quick (`/quick`)
-
-For TRIVIAL tasks. No pipeline, no agents, no GitHub issue required.
-
-1. Load critical patterns
-2. Make the change directly
-3. Verify (lint/test if applicable)
-4. Report what was done
-
-### Plan Mode
-
-For SIMPLE tasks. Plan before implementing.
-
-1. Enter plan mode (`EnterPlanMode`)
-2. Explore codebase, read relevant files
-3. Write implementation plan to plan file
-4. Exit plan mode — present plan with options:
-
-```
-Options:
-1. "Compact and implement" (Recommended) — Compact context and implement the plan
-2. "Implement now" — Implement immediately without compacting
-3. "Revise plan" — Adjust the approach before implementing
-```
-
-5. After implementation, **offer** Codex review.
-
-### Orchestrate
-
-For MODERATE, COMPLEX, and FULLSTACK tasks. Full agent pipeline.
-
-```
-TRIVIAL pipeline:  MAP-PLAN → PATCH → PROVE-lite
-SIMPLE pipeline:   MAP-PLAN → [CONTRACT*] → PATCH → PROVE   (v5: PLAN-CHECK dropped)
-COMPLEX pipeline:  MAP → PLAN → [CONTRACT*] → PLAN-CHECK → PATCH → PROVE
-```
-
-**v5 change rationale:** SIMPLE work doesn't earn the cost of a separate
-PLAN-CHECK phase — PATCH catches plan defects fast enough, and Codex
-adversarial review (post-PROVE, automatic for MODERATE+) picks up the rest.
-COMPLEX retains PLAN-CHECK because the failure cost is higher and the
-verification step is cheaper than a botched PATCH on a multi-file change.
-
-Use `/orchestrate <issue-number>` with optional flags: `--with-tests`, `--resume`, `--parallel`.
-
-During PATCH phase, identify subtasks to delegate to Codex (see Delegation Patterns above).
-
-## Examples
-
-### Quick
-- "Fix the typo in the README" → **Quick**, no Codex
-
-### Plan Mode
-- "Add feature flag to config.py" → **Plan mode**, offer review after
-
-### Orchestrate + Codex Delegation
-- "Add validation endpoint with tests" → **Orchestrate MODERATE**. Claude implements endpoint, `/codex:rescue --background` writes tests. Codex review after.
-- "Create fact_vocabulary table + service + seed data + tests" → **Orchestrate COMPLEX**. Claude handles all (single subsystem). Automatic adversarial review.
-- "Implement payment form with backend API" → **Orchestrate FULLSTACK**. Claude does backend, Codex does frontend in background via `/codex:rescue`. Automatic review with enum/API focus.
-
-### Codex-First (Prior Failure)
-- "Issue 184 has failed twice" → `/codex:rescue --effort xhigh` first. If Codex succeeds, review with Claude. If not, escalate to human.
-
-### Parallel + Codex
-- "Implement issues 42, 57, and 63":
-  - 42 and 57 independent → `--parallel` in separate tabs
-  - Both get Codex adversarial review in background
-  - 63 depends on 42 → sequential after 42 merges
+- Prefer the plugin commands above; they handle execution mode, scope, and
+  size estimation. Drop to `codex exec` directly only for ad-hoc one-offs.
+- Use `codex-danger` only when the user explicitly wants no prompts and accepts
+  unsandboxed execution.
+- Keep implementation local to Claude unless Codex has an independent, bounded
+  slice or prior Claude attempts failed.

@@ -1,4 +1,4 @@
-id: PAT-018
+id: PAT-039
 category: infrastructure
 name: FastAPI dev infrastructure (CORS, health, Docker)
 status: pilot

@@ -41,6 +41,8 @@ COMPLEX:        [DISCUSS] → MAP → PLAN → [TEST-PLANNER] → CONTRACT* → 
 - `TRIVIAL` skips PLAN-CHECK and uses PROVE-lite
 - `[TEST-PLANNER]` runs if `--with-tests` is provided
 - `CONTRACT*` is **MANDATORY** if fullstack — PATCH will STOP without it
+- Codex is not a mandatory phase. Use `/codex:review` or `/codex:adversarial-review`
+  only when risk justifies a second model (see `rules/implementation-routing.md`).
 
 ---
 
@@ -154,6 +156,21 @@ Issue #184 classified as: SIMPLE (backend)
 Using workflow: MAP-PLAN → PATCH → PROVE
 ```
 
+### Step 1.1: Decide Codex Escalation
+
+Apply the right-sized rule from `~/.claude/rules/implementation-routing.md`:
+
+| Tier | Codex Use |
+|------|-----------|
+| TRIVIAL | Skip |
+| SIMPLE | Skip by default; offer only if auth/data/API risk appears |
+| MODERATE | Run or recommend `/codex:adversarial-review` after PROVE |
+| COMPLEX | Recommend `/codex:adversarial-review` after PROVE |
+| FULLSTACK | Use `/codex:adversarial-review` after PROVE with contract/API/enum focus |
+| PRIOR FAIL | Use `/codex:rescue` as second-model rescue before another retry |
+
+Do not run Codex just because it exists. The review must reduce concrete risk.
+
 ### Step 1.5: Detect Stack
 
 After MAP-PLAN (or MAP), scan its artifact for stack scope:
@@ -256,6 +273,7 @@ Artifacts:
 - prove-184-010325.md
 
 PROVE status: PASS ✅
+Codex review: skipped | recommended | complete
 
 Next: /pr 184 to create pull request
 ```

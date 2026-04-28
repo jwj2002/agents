@@ -10,20 +10,33 @@ The practical benefit: agents get structured data instead of parsing markdown fi
 
 ## Configured Servers
 
-Three MCP servers are configured in `settings.json`:
+MCP servers are registered at user scope by `claude-config/install.sh` using `claude mcp add --scope user`, which writes to `~/.claude.json`. This is per-machine config — not committed to the repo and not symlinked.
+
+The installer registers four servers (apple-mcp on macOS only). Each subsection below shows the registration command the installer runs.
+
+### knowledge
+
+A TypeScript MCP server that exposes the local knowledge graph (patterns, decisions, project state) over MCP. Backed by `knowledge-mcp/index.ts` running under tsx.
+
+```bash
+claude mcp add --scope user knowledge -- \
+  ~/agents/knowledge-mcp/node_modules/.bin/tsx \
+  ~/agents/knowledge-mcp/index.ts
+```
+
+Requires `npm install` in `~/agents/knowledge-mcp/` (handled by install.sh on first run).
 
 ### vault-metrics
 
 A custom Python server that provides access to the Obsidian vault and `.claude/memory/` files.
 
-```json
-{
-  "vault-metrics": {
-    "command": "python3",
-    "args": ["~/agents/mcp-server/server.py", "--mcp"]
-  }
-}
+```bash
+claude mcp add --scope user vault-metrics -- \
+  ~/agents/mcp-server/.venv/bin/python \
+  ~/agents/mcp-server/server.py
 ```
+
+Runs in a dedicated venv (`mcp-server/.venv/`) created by install.sh Phase 2.
 
 **Tools provided**:
 
@@ -35,34 +48,25 @@ A custom Python server that provides access to the Obsidian vault and `.claude/m
 | `agent_metrics` | Performance metrics from `metrics.jsonl` (supports time ranges) |
 | `failure_patterns` | Learned failure patterns with root causes and prevention steps |
 
-!!! note "Machine-Local Configuration"
-    The vault-metrics server path varies by machine. Configure it in `settings.local.json` (not symlinked) rather than `settings.json` (symlinked) when the path differs across machines.
-
 ### context7
 
-Injects current library documentation into agent context. This eliminates stale API hallucinations -- when an agent needs to use a library method, context7 provides the current docs instead of relying on training data that may be outdated.
+Injects current library documentation into agent context. This eliminates stale API hallucinations — when an agent needs to use a library method, context7 provides the current docs instead of relying on training data that may be outdated.
 
-```json
-{
-  "context7": {
-    "command": "npx",
-    "args": ["-y", "@upstash/context7-mcp@latest"]
-  }
-}
+```bash
+claude mcp add --scope user context7 -- \
+  npx -y @upstash/context7-mcp@latest
 ```
 
 ### apple-mcp
 
-macOS platform integration providing access to system features like Calendar, Contacts, and other Apple services.
+macOS platform integration providing access to system features like Calendar, Contacts, Notes, and Reminders.
 
-```json
-{
-  "apple-mcp": {
-    "command": "bunx",
-    "args": ["--no-cache", "apple-mcp@latest"]
-  }
-}
+```bash
+claude mcp add --scope user apple-mcp -- \
+  npx -y apple-mcp@latest
 ```
+
+Skipped on non-macOS platforms.
 
 ## MCP-First Pattern Loading
 
@@ -105,63 +109,24 @@ Agents use MCP tools as the preferred source for failure patterns during pre-fli
     }
     ```
 
-## settings.json Configuration
-
-All MCP servers are configured under the `mcpServers` key in `settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "vault-metrics": {
-      "command": "python3",
-      "args": ["~/agents/mcp-server/server.py", "--mcp"]
-    },
-    "apple-mcp": {
-      "command": "bunx",
-      "args": ["--no-cache", "apple-mcp@latest"]
-    },
-    "context7": {
-      "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp@latest"]
-    }
-  }
-}
-```
-
-Each server entry specifies:
-
-| Field | Description |
-|-------|-------------|
-| `command` | The executable to run (e.g., `python3`, `npx`, `bunx`) |
-| `args` | Arguments passed to the command |
-
-Claude Code starts each MCP server as a subprocess at session start and communicates with it over the MCP protocol.
-
 ## Adding a New MCP Server
 
 To add a new MCP server:
 
 1. **Implement the server** following the MCP protocol specification. The server must handle tool discovery and tool execution requests.
 
-2. **Add the entry** to `settings.json` (or `settings.local.json` for machine-specific servers):
+2. **Register the server** with Claude Code:
 
-    ```json
-    {
-      "mcpServers": {
-        "my-server": {
-          "command": "python3",
-          "args": ["/path/to/my_server.py", "--mcp"]
-        }
-      }
-    }
+    ```bash
+    claude mcp add --scope user my-server -- python3 /path/to/my_server.py
     ```
 
 3. **Restart Claude Code** to pick up the new server. MCP servers are discovered at session start.
 
 4. **Test the tools** by asking Claude Code to list available MCP tools or by calling one directly.
 
-!!! tip "Local vs Global Servers"
-    Use `settings.json` (symlinked, version-controlled) for servers that work on all machines. Use `settings.local.json` (not symlinked, machine-specific) for servers with paths that vary by machine.
+!!! tip "Project vs User Servers"
+    Use user-scope registration for personal machine tooling. Use project `.mcp.json` only when a repo should share an MCP server definition with collaborators.
 
 ## Troubleshooting
 

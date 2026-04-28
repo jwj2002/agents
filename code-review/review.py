@@ -111,7 +111,17 @@ def get_staged_files() -> list[str]:
     return [f for f in result.stdout.strip().split("\n") if f]
 
 
-def review_with_claude(diff: str) -> dict:
+def get_all_files() -> list[str]:
+    """Get list of all uncommitted files."""
+    result = subprocess.run(
+        ["git", "diff", "--name-only", "HEAD"],
+        capture_output=True,
+        text=True
+    )
+    return [f for f in result.stdout.strip().split("\n") if f]
+
+
+def review_with_claude(diff: str, *, fail_closed: bool = False) -> dict:
     """Send diff to Claude for review."""
     if not diff.strip():
         return {
@@ -120,9 +130,12 @@ def review_with_claude(diff: str) -> dict:
             "approved": True
         }
 
+    truncated = False
+
     # Truncate very long diffs
     if len(diff) > 50000:
         diff = diff[:50000] + "\n\n... (diff truncated)"
+        truncated = True
 
     prompt = REVIEW_PROMPT + diff
 
@@ -138,7 +151,7 @@ def review_with_claude(diff: str) -> dict:
             "summary": "Review failed",
             "issues": [{"severity": "warning", "category": "tool",
                        "description": f"Claude CLI error: {result.stderr}"}],
-            "approved": True
+            "approved": not fail_closed
         }
 
     try:
@@ -155,16 +168,34 @@ def review_with_claude(diff: str) -> dict:
         start = content.find('{')
         end = content.rfind('}') + 1
         if start >= 0 and end > start:
-            return json.loads(content[start:end])
+            review = json.loads(content[start:end])
+            if truncated:
+                review.setdefault("issues", []).append({
+                    "severity": "warning",
+                    "category": "tool",
+                    "file": "?",
+                    "line": None,
+                    "description": "Diff exceeded 50,000 characters and was truncated before review.",
+                    "suggestion": "Split the change or review per file before committing."
+                })
+                if fail_closed:
+                    review["approved"] = False
+            return review
 
     except (json.JSONDecodeError, Exception) as e:
         return {
             "summary": f"Failed to parse review: {e}",
-            "issues": [],
-            "approved": True
+            "issues": [{"severity": "warning", "category": "tool",
+                       "description": "Could not parse Claude review output."}],
+            "approved": not fail_closed
         }
 
-    return {"summary": "No review generated", "issues": [], "approved": True}
+    return {
+        "summary": "No review generated",
+        "issues": [{"severity": "warning", "category": "tool",
+                   "description": "Claude returned no review content."}],
+        "approved": not fail_closed,
+    }
 
 
 def format_review(review: dict, files: list[str]) -> str:
@@ -254,7 +285,7 @@ def main():
     # Get diff
     if args.all:
         diff = get_all_diff()
-        files = []  # Could parse from diff
+        files = get_all_files()
     else:
         diff = get_staged_diff()
         files = get_staged_files()
@@ -268,7 +299,7 @@ def main():
     print("")
 
     # Run review
-    review = review_with_claude(diff)
+    review = review_with_claude(diff, fail_closed=args.strict)
 
     if args.json:
         print(json.dumps(review, indent=2))

@@ -62,7 +62,7 @@ Install the hook to run review before every commit:
 
 After installation:
 - Review runs automatically on `git commit`
-- Commit blocked if critical issues found
+- Commit blocked if critical issues, warnings, review tool failures, or truncated diffs are found
 - Bypass with `git commit --no-verify`
 
 ## Output Example

@@ -14,7 +14,7 @@ A markdown file produced by an agent during the orchestrate pipeline. Named with
 The practice of committing after each logical change group during PATCH, rather than one monolithic commit. Enables `git bisect` and granular revertability. Format: `type(#issue): description`.
 
 **Anti-Rationalization**
-A failure mode where AI agents declare a task complete when it is not. The `verify_completion.py` Stop hook combats this by checking for uncommitted changes and TODO/FIXME markers before allowing session completion.
+A failure mode where AI agents declare a task complete when it is not. The `verify_completion.py` Stop hook combats this by warning on uncommitted changes and TODO/FIXME markers at session completion.
 
 ## B
 

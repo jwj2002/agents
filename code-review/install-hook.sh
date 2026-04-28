@@ -31,7 +31,7 @@ cat > "$HOOK_FILE" << 'EOF'
 echo "Running code review..."
 echo ""
 
-python3 ~/agents/code-review/review.py
+python3 ~/agents/code-review/review.py --strict
 
 EXIT_CODE=$?
 

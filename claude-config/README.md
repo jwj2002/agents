@@ -136,7 +136,7 @@ Issue → MAP/MAP-PLAN → [TEST-PLANNER] → CONTRACT* → PATCH → PROVE
 |------|---------|---------|
 | `precompact_checkpoint.py` | Before context compaction | Saves conversation state to YAML checkpoint |
 | `sessionstart_restore_state.py` | Session start | Restores context from most recent checkpoint |
-| `verify_completion.py` | Stop | Anti-rationalization gate — blocks premature completion if uncommitted changes or TODOs exist |
+| `verify_completion.py` | Stop | Anti-rationalization gate — warns on premature completion signals such as uncommitted changes or TODOs |
 
 All hooks log errors to `~/.claude/hooks.log` with timestamps.
 
@@ -158,7 +158,7 @@ Provides tools for querying agent metrics from within Claude Code.
 | `failure_patterns` | Read failures.jsonl → top failure patterns |
 
 **Location**: `~/agents/mcp-server/`
-**Config**: `mcpServers` section in `settings.json`
+**Config**: user-level registration in `~/.claude.json` via `claude mcp add --scope user`
 **Standalone**: `python3 server.py` (works without MCP SDK)
 
 ## Self-Learning System
