@@ -27,7 +27,7 @@ ls .agents/outputs/map-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOCKED: MAP ar
 
 ## Pre-Flight (from _base.md)
 
-1. Load patterns via MCP `failure_patterns()` (fallback: `cat .claude/memory/patterns.md`)
+1. Load patterns via MCP `failure_patterns_v1()` (fallback: `cat .claude/memory/patterns.md`)
 2. Read MAP artifact: `.agents/outputs/map-{issue}-{mmddyy}.md`
 3. `cat .claude/rules.md | head -50` — Verify constraints
 

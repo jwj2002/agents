@@ -117,6 +117,41 @@ def run_standalone():
     print(json.dumps(result, indent=2))
 
 
+# Tool versioning: register every tool under both `<name>` (deprecated alias)
+# and `<name>_v1` (current). When the schema or semantics of a tool change,
+# bump to `_v2` and keep `_v1` as a stable alias. Callers (notably _base.md
+# pre-flight) should reference _v1 names so an internal rename here doesn't
+# silently break agent behavior.
+CURRENT_VERSION = "v1"
+
+
+def _build_registered_tools():
+    """Return dict mapping registered tool names → (fn, description, schema).
+
+    Each canonical tool is registered twice: as `<name>_v1` (current) and as
+    `<name>` (deprecated alias kept for backwards compatibility).
+    """
+    registered = {}
+    for canonical, tool in TOOLS.items():
+        versioned = f"{canonical}_{CURRENT_VERSION}"
+        registered[versioned] = {
+            "fn": tool["fn"],
+            "description": tool["description"],
+            "input_schema": tool["input_schema"],
+        }
+        registered[canonical] = {
+            "fn": tool["fn"],
+            "description": (
+                f"[DEPRECATED — use {versioned}] " + tool["description"]
+            ),
+            "input_schema": tool["input_schema"],
+        }
+    return registered
+
+
+REGISTERED_TOOLS = _build_registered_tools()
+
+
 async def run_mcp():
     """Run as MCP server."""
     server = Server("vault-metrics")
@@ -129,15 +164,22 @@ async def run_mcp():
                 description=tool["description"],
                 inputSchema=tool["input_schema"],
             )
-            for name, tool in TOOLS.items()
+            for name, tool in REGISTERED_TOOLS.items()
         ]
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict):
-        if name not in TOOLS:
+        if name not in REGISTERED_TOOLS:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
-        result = TOOLS[name]["fn"](**arguments)
+        # Log a deprecation hint when the unversioned alias is used.
+        if not name.endswith(f"_{CURRENT_VERSION}"):
+            sys.stderr.write(
+                f"[vault-metrics] note: '{name}' is a deprecated alias; "
+                f"prefer '{name}_{CURRENT_VERSION}'\n"
+            )
+
+        result = REGISTERED_TOOLS[name]["fn"](**arguments)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     async with stdio_server() as (read_stream, write_stream):

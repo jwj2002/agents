@@ -52,6 +52,48 @@ git log origin/main..HEAD --oneline  # Show commits to include
 
 ---
 
+## Pre-PR Fresh-Context Review
+
+Spawn the `code-reviewer` subagent to look at the diff with no inheritance
+from the implementation discussion. Anthropic's published guidance: a
+reviewer with fresh context catches what familiarity obscures.
+
+```
+Task(
+  description='Fresh-context PR review',
+  subagent_type='code-reviewer',
+  prompt='''Review the staged changes for this PR. The diff is the
+  authoritative input — do not assume context from any prior discussion.
+
+  Run `git diff origin/main...HEAD` to see all changes.
+  Run `gh issue view {ISSUE} --json title,body,labels` to see the issue.
+
+  Check the full E01-E15 behavioral evals as relevant to changed files.
+  Apply the file→eval mapping from rules/eval-file-mapping.md.
+
+  Report:
+  - CRITICAL findings (block PR): security holes, data loss, broken
+    deploys, missing migrations, secrets in code
+  - WARNING findings (note in PR): correctness bugs, missing tests,
+    inadequate error handling
+  - SUGGESTION findings (optional): style, performance, readability
+
+  If no issues: report "No issues found."
+  Keep output under 30 lines.
+  '''
+)
+```
+
+**Gate**:
+- If CRITICAL findings: STOP. Report to user. Do NOT create the PR until fixed.
+- If WARNING findings: Include in PR body under `## Reviewer Notes`. Continue.
+- If clean: Note "Fresh-context review: clean" in PR body. Continue.
+
+This runs in addition to (not instead of) the Codex adversarial review for
+MODERATE+ orchestrate work, which fires post-PROVE.
+
+---
+
 ## Create PR
 
 ### Step 1: Summarize Scope

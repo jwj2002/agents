@@ -23,7 +23,7 @@ No predecessor required (MAP is the first agent in the COMPLEX workflow).
 
 ## Pre-Flight (from _base.md)
 
-1. Load patterns via MCP `failure_patterns()` (fallback: `cat .claude/memory/patterns.md`)
+1. Load patterns via MCP `failure_patterns_v1()` (fallback: `cat .claude/memory/patterns.md`)
 2. `grep -l "KEYWORD" .agents/outputs/*.md` — Find similar past work
 3. `cat .claude/rules.md | head -50` — Verify constraints
 

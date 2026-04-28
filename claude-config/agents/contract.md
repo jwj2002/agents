@@ -37,7 +37,7 @@ ls .agents/outputs/{plan,map-plan}-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLO
 
 1. Read PLAN artifact
 2. Read MAP artifact (if available)
-3. Load patterns via MCP `failure_patterns()` (fallback: `cat .claude/memory/patterns.md`) — Check for ENUM_VALUE pattern
+3. Load patterns via MCP `failure_patterns_v1()` (fallback: `cat .claude/memory/patterns.md`) — Check for ENUM_VALUE pattern
 
 ---
 

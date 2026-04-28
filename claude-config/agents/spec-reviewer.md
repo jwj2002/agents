@@ -28,7 +28,7 @@ max_lines: 400
 
 ## Pre-Flight (from _base.md)
 
-1. Load patterns via MCP `failure_patterns()` (fallback: `cat .claude/memory/patterns.md`)
+1. Load patterns via MCP `failure_patterns_v1()` (fallback: `cat .claude/memory/patterns.md`)
 2. Read the spec file completely
 3. Check for existing issues: `gh issue list --label "from-spec" --search "SPEC_NAME"`
 
