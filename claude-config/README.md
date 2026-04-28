@@ -68,6 +68,21 @@ After installation, all commands and rules are immediately available in every Cl
 | `/spec-draft` | `/spec-draft "User auth"` | Interactive spec creation with codebase discovery |
 | `/feature-from-spec` | `/feature-from-spec` | Create feature issue from spec analysis (used by /spec-review) |
 
+#### Issue creation commands — when to use which
+
+| Command | When to use | Internal/External |
+|---|---|---|
+| `/bug` | Standalone bug report; no spec involved | External |
+| `/feature` | Standalone feature request; no spec involved | External |
+| `/spec-draft` | Author a new spec via guided Q&A | External |
+| `/spec-review` | Validate a spec against the codebase, optionally generate issues | External |
+| `/feature-from-spec` | Generate one issue from a spec entry — invoked by `/spec-review` | Internal helper |
+
+Canonical paths:
+- Bug found → `/bug`
+- Small feature → `/feature`
+- Larger feature → `/spec-draft` → `/spec-review` (issues auto-generated via `/feature-from-spec`)
+
 ### Review & Testing
 
 | Command | Usage | Description |
