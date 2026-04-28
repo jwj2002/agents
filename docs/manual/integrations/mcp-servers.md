@@ -136,3 +136,4 @@ To add a new MCP server:
 | Server crashes at startup | Run the command manually to see error output |
 | `failure_patterns()` returns empty | Verify `.claude/memory/failures.jsonl` exists and has data |
 | context7 slow on first call | Normal -- `npx` downloads the package on first run |
+| `claude mcp list` shows context7 / apple-mcp / playwright "Failed to connect" right after install or `npm cache clean` | Cold-cache artifact: the first `npx -y <pkg>@latest` invocation downloads the package, which can exceed Claude Code's MCP handshake timeout. Re-run `claude mcp list` once the cache is warm, or run the install script (Phase 2.6 includes a warm-up step). To verify a server can start at all, run the registered command manually: `npx -y @upstash/context7-mcp@latest </dev/null` should print `... running on stdio` within ~1s once warm. See issue [#77](https://github.com/jwj2002/agents/issues/77). |
