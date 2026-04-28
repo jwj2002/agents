@@ -46,17 +46,10 @@ def check_uncommitted_changes() -> str | None:
     if not changed_files:
         return None
 
-    substantive = [
-        f for f in changed_files
-        if not f.endswith((".lock", ".yaml", ".yml", ".toml"))
-        or f.endswith("package.json")
-    ]
-
-    if substantive:
-        file_list = ", ".join(substantive[:5])
-        return f"Uncommitted changes: {file_list}"
-
-    return None
+    n = len(changed_files)
+    preview = ", ".join(changed_files[:5])
+    suffix = f", +{n - 5} more" if n > 5 else ""
+    return f"Uncommitted changes ({n} files): {preview}{suffix}"
 
 
 def check_todos_in_changes() -> str | None:
