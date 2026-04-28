@@ -354,27 +354,40 @@ if command -v claude &>/dev/null; then
     # immediately on EOF without doing any real work. This is best-effort:
     # network failures here do not break install (the registration already
     # succeeded; the user can warm the cache later by re-running `claude mcp list`).
+    # Note: playwright is registered via the Claude plugin system (Phase 2.5),
+    # not Phase 2.6, so warming it isn't this script's job — the plugin owns
+    # its own lifecycle. This warm-up only covers the Phase 2.6 npx servers.
     if command -v npx &>/dev/null; then
         echo "  Warming npm cache for npx-based MCP servers (one-time, ~10s)..."
-        (npx -y @upstash/context7-mcp@latest </dev/null >/dev/null 2>&1) &
+        # Background npx directly (no subshell) so $! captures the npx PID,
+        # which lets the timeout-kill below actually target the download.
+        npx -y @upstash/context7-mcp@latest </dev/null >/dev/null 2>&1 &
         WARM_PID1=$!
+        WARM_PIDS="$WARM_PID1"
         if [ "$PLATFORM" = "macos" ]; then
-            (npx -y apple-mcp@latest </dev/null >/dev/null 2>&1) &
+            npx -y apple-mcp@latest </dev/null >/dev/null 2>&1 &
             WARM_PID2=$!
+            WARM_PIDS="$WARM_PIDS $WARM_PID2"
         fi
         # Bound the wait — if a download is genuinely stuck, don't block install.
         WAIT_DEADLINE=$(( $(date +%s) + 30 ))
-        for pid in $WARM_PID1 ${WARM_PID2:-}; do
+        WARM_TIMED_OUT=0
+        for pid in $WARM_PIDS; do
             while kill -0 "$pid" 2>/dev/null; do
                 if [ "$(date +%s)" -ge "$WAIT_DEADLINE" ]; then
                     kill "$pid" 2>/dev/null || true
+                    WARM_TIMED_OUT=1
                     break
                 fi
                 sleep 1
             done
             wait "$pid" 2>/dev/null || true
         done
-        echo "  ✓ npm cache warmed"
+        if [ "$WARM_TIMED_OUT" -eq 1 ]; then
+            echo "  ~ npm cache warm-up timed out (best-effort; first session may still see Failed to connect)"
+        else
+            echo "  ✓ npm cache warmed"
+        fi
     fi
 else
     echo "  ⚠ claude CLI not found — skipping MCP server registration"
