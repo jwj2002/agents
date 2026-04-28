@@ -19,7 +19,7 @@ outcome: In use for flotilla aggregation pipeline. ~3x throughput improvement ov
   ORM baseline.
 linked:
   patterns:
-  - PAT-004
+  - pat-database-asyncpg
   issues: []
   prs: []
   related_decisions: []

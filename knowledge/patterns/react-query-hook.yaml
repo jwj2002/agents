@@ -1,4 +1,5 @@
-id: PAT-028
+id: pat-react-query-hook
+legacy_id: PAT-028
 category: frontend
 name: react-query-hook
 status: pilot

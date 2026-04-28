@@ -1,4 +1,5 @@
-id: PAT-030
+id: pat-dnd-kit-schedule
+legacy_id: PAT-030
 category: frontend
 name: dnd-kit-schedule
 status: pilot

@@ -1,4 +1,5 @@
-id: PAT-013
+id: pat-fastapi-error-handling
+legacy_id: PAT-013
 category: error-handling
 name: FastAPI structured error handling with domain exceptions
 status: pilot

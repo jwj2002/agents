@@ -1,4 +1,5 @@
-id: PAT-023
+id: pat-behavioral-evals
+legacy_id: PAT-023
 category: workflow
 name: behavioral-evals
 status: pilot

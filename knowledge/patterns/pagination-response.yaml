@@ -1,4 +1,5 @@
-id: PAT-037
+id: pat-pagination-response
+legacy_id: PAT-037
 category: schemas
 name: PaginatedResponse generic schema
 status: pilot

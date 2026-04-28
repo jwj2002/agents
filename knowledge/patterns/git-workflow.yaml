@@ -1,4 +1,5 @@
-id: PAT-026
+id: pat-git-workflow
+legacy_id: PAT-026
 category: workflow
 name: git-workflow
 status: pilot

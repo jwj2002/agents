@@ -1,4 +1,5 @@
-id: PAT-027
+id: pat-implementation-routing
+legacy_id: PAT-027
 category: workflow
 name: implementation-routing
 status: pilot

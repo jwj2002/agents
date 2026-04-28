@@ -1,4 +1,5 @@
-id: PAT-008
+id: pat-fastapi-base-model
+legacy_id: PAT-008
 category: database
 name: SQLAlchemy base model with UUID and timestamps
 status: pilot
@@ -16,7 +17,7 @@ implementation:
   - UUID primary keys for all models — safe for distributed systems
   - 'Dialect-agnostic UUID: GUID TypeDecorator stores as CHAR(32) hex on non-PostgreSQL,
     native UUID on PostgreSQL'
-  - TimestampMixin is OWNED by this pattern (PAT-008) — PAT-007 imports it but does
+  - TimestampMixin is OWNED by this pattern (pat-fastapi-base-model) — pat-fastapi-database-layer imports it but does
     not define it
   - No soft-delete at base level — add SoftDeleteMixin only where needed
   - Use Mapped[T] and mapped_column() (SQLAlchemy 2.0 syntax)

@@ -16,7 +16,7 @@ reasoning: Redis provides the speed needed for session lookups on every request 
 outcome: Deployed to docketiq production. Session reads under 1ms.
 linked:
   patterns:
-  - PAT-002
+  - pat-auth-redis-sessions
   issues: []
   prs: []
   related_decisions:

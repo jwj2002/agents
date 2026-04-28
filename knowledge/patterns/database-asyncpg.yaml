@@ -1,4 +1,5 @@
-id: PAT-004
+id: pat-database-asyncpg
+legacy_id: PAT-004
 category: database
 name: asyncpg direct (no ORM)
 status: pilot

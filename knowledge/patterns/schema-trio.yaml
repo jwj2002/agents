@@ -1,4 +1,5 @@
-id: PAT-038
+id: pat-schema-trio
+legacy_id: PAT-038
 category: schemas
 name: Create/Update/Read schema trio convention
 status: pilot

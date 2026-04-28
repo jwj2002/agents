@@ -167,7 +167,7 @@ Validated doesn't mean frozen. The learning loop continues:
 Human decides to deprecate when:
 - Technology changes (e.g., framework dropped JWT support)
 - Security vulnerability discovered in the approach
-- Better pattern exists (new PAT-XXX replaces this one)
+- Better pattern exists (new pat-<slug> replaces this one)
 - Pattern is no longer relevant (no projects need this anymore)
 
 ```yaml
@@ -175,10 +175,10 @@ status: deprecated
 lifecycle:
   deprecated_at: "2026-08-15"
   deprecated_reason: "Switched to Passport.js for multi-provider support"
-  replaced_by: PAT-015
+  replaced_by: pat-fastapi-alembic-setup
 ```
 
-**Deprecated patterns are never deleted.** Existing projects may still use them. Agents seeing a deprecated pattern in a project flag it: "This project uses deprecated pattern PAT-001. Recommended replacement: PAT-015."
+**Deprecated patterns are never deleted.** Existing projects may still use them. Agents seeing a deprecated pattern in a project flag it: "This project uses deprecated pattern pat-auth-jwt. Recommended replacement: pat-fastapi-alembic-setup."
 
 ---
 
@@ -186,7 +186,7 @@ lifecycle:
 
 ```yaml
 # patterns/auth-jwt.yaml
-id: PAT-001
+id: pat-auth-jwt
 category: auth
 name: "JWT with refresh tokens"
 status: pilot                    # draft | pilot | validated | deprecated
@@ -282,6 +282,11 @@ created_at: "2026-04-04"
 updated_at: "2026-04-04"
 ```
 
+> Pattern IDs follow the `pat-<filename-stem>` slug format. The filename is the
+> namespace — git enforces uniqueness by construction. An optional `legacy_id:
+> PAT-NNN` field preserves traceability to pre-migration references. See
+> issue #78 for the migration rationale.
+
 ---
 
 ## Agent Behavior by Pattern Status
@@ -291,7 +296,7 @@ updated_at: "2026-04-04"
 | **DRAFT** | Agent flags: "This pattern is unvalidated (draft). Use only if explicitly directed." | Level 3 (consult human) |
 | **PILOT** | Agent uses with awareness: "This pattern is in pilot (N/3 successes). Flagging for review." | Level 2 (approve) |
 | **VALIDATED** | Agent uses with confidence. Standard review applies. | Level 0-1 (autonomous or inform) |
-| **DEPRECATED** | Agent flags: "This project uses deprecated pattern PAT-XXX. Recommended replacement: PAT-YYY." | Level 2 (approve migration) |
+| **DEPRECATED** | Agent flags: "This project uses deprecated pattern pat-<slug>. Recommended replacement: pat-<slug>." | Level 2 (approve migration) |
 
 ---
 

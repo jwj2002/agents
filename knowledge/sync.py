@@ -107,6 +107,14 @@ def _build_patterns(conn: sqlite3.Connection, patterns_dir: Path) -> int:
         logger.warning("Patterns directory not found: %s", patterns_dir)
         return count
 
+    # Guard: refuse to build if any pattern id is duplicated across files.
+    # Slug IDs (#78) make collisions structurally impossible by construction;
+    # this guard catches accidental copies, bad merges, and manual edit errors.
+    ids = [d.get("id") for d in (_load_yaml(p) for p in patterns_dir.glob("*.yaml")) if d]
+    dups = sorted({i for i in ids if i and ids.count(i) > 1})
+    if dups:
+        raise SystemExit(f"Duplicate pattern IDs detected, refusing to build: {dups}")
+
     for path in sorted(patterns_dir.glob("*.yaml")):
         data = _load_yaml(path)
         if data is None:
@@ -627,8 +635,8 @@ def _export_pattern(row: sqlite3.Row, patterns_dir: Path) -> None:
     data["created_at"] = row["created_at"]
     data["updated_at"] = row["updated_at"]
 
-    # Build filename from id: PAT-001 -> pat-001.yaml won't match existing
-    # Use a slug: lowercase id with hyphens preserved
+    # Build filename from id: pat-auth-jwt -> pat-auth-jwt.yaml.
+    # Slug IDs (issue #78) match filenames directly; `lower()` is defensive only.
     slug = row["id"].lower()
     # Try to match an existing file by id
     existing = _find_existing_pattern_file(row["id"], patterns_dir)

@@ -1,4 +1,5 @@
-id: PAT-024
+id: pat-codex-delegation
+legacy_id: PAT-024
 category: workflow
 name: codex-delegation
 status: pilot

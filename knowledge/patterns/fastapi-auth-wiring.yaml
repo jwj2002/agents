@@ -1,10 +1,11 @@
-id: PAT-016
+id: pat-fastapi-auth-wiring
+legacy_id: PAT-016
 category: auth
 name: FastAPI auth wiring with JWT and CORS
 status: pilot
 tier: primary
-description: 'Wires JWT authentication into the FastAPI layered architecture (PAT-007
-  through PAT-012). This is NOT about JWT itself (that''s PAT-001) — it''s about how
+description: 'Wires JWT authentication into the FastAPI layered architecture (pat-fastapi-database-layer
+  through pat-fastapi-router-layer). This is NOT about JWT itself (that''s pat-auth-jwt) — it''s about how
   auth integrates with the layers: the get_current_user dependency, login/signup router,
   refresh tokens with httpOnly cookie rotation, password hashing, and CORS config
   for React frontends. Follows the repository-service-router pattern with auth as
@@ -15,7 +16,7 @@ when_to_use: 'Any FastAPI project using the layered architecture that needs user
   with JWT access tokens and refresh token rotation via httpOnly cookies.
 
   '
-when_not_to_use: 'Session-based auth (use PAT-002 redis sessions), API-key-only services,
+when_not_to_use: 'Session-based auth (use pat-auth-redis-sessions redis sessions), API-key-only services,
   or projects not using the layered architecture.
 
   '
@@ -313,7 +314,7 @@ implementation:
     older than REFRESH_TOKEN_EXPIRE_DAYS
   - Reference code uses `backend.` package prefix — adapt if your project package
     has a different name
-  - Use GUID() from PAT-008 for UUID columns, not sqlalchemy.dialects.postgresql.UUID
+  - Use GUID() from pat-fastapi-base-model for UUID columns, not sqlalchemy.dialects.postgresql.UUID
     — ensures SQLite compatibility
 dependencies:
 - PyJWT

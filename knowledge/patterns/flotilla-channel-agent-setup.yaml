@@ -1,4 +1,5 @@
-id: PAT-018
+id: pat-flotilla-channel-agent-setup
+legacy_id: PAT-018
 category: agent-infrastructure
 name: Claude Channel Agent with MCP Controller
 status: draft

@@ -1,4 +1,5 @@
-id: PAT-034
+id: pat-fastapi-module
+legacy_id: PAT-034
 category: architecture
 name: FastAPI layered module scaffold
 status: pilot

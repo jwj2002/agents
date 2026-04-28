@@ -17,7 +17,7 @@ reasoning: asyncio.Lock is the simplest solution for single-process concurrency.
 outcome: Fixed auth concurrency bug. No more session data races in production.
 linked:
   patterns:
-  - PAT-002
+  - pat-auth-redis-sessions
   issues: []
   prs: []
   related_decisions:

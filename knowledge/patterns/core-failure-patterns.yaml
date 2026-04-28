@@ -1,4 +1,5 @@
-id: PAT-025
+id: pat-core-failure-patterns
+legacy_id: PAT-025
 category: workflow
 name: core-failure-patterns
 status: pilot

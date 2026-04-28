@@ -85,7 +85,7 @@ Each pattern is one YAML file in `knowledge/patterns/`.
 
 ```yaml
 # patterns/auth-jwt.yaml
-id: PAT-001
+id: pat-auth-jwt
 category: auth
 name: "JWT with refresh tokens"
 status: validated                # draft | pilot | validated | deprecated (see pattern-lifecycle spec)
@@ -158,7 +158,7 @@ reasoning: "JWT is the standard for API-first. No server-side state needed.
 outcome: "Implemented in PR #28. Working in production since Feb 2026."
 
 linked:
-  patterns: [PAT-001]
+  patterns: [pat-auth-jwt]
   issues: ["vitalailabs#15"]
   prs: ["vitalailabs#28"]
   related_decisions: [D-042]    # docketiq chose differently (sessions)
@@ -189,8 +189,8 @@ by_topic:
   caching: [D-042]
 
 by_pattern:
-  PAT-001: [D-015]
-  PAT-002: [D-042, D-091]
+  pat-auth-jwt: [D-015]
+  pat-auth-redis-sessions: [D-042, D-091]
 ```
 
 ### Learning Rules
@@ -421,7 +421,7 @@ Get standard patterns by category.
 **Example:**
 ```
 Agent calls: get_patterns(category: "auth", tier: "primary")
-Returns: [{ id: "PAT-001", name: "JWT with refresh tokens", status: "validated", ... }]
+Returns: [{ id: "pat-auth-jwt", name: "JWT with refresh tokens", status: "validated", ... }]
 ```
 
 #### `get_pattern_detail`
@@ -430,7 +430,7 @@ Get full detail for a specific pattern including implementation notes.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `id` | string | yes | Pattern ID (e.g., "PAT-001") |
+| `id` | string | yes | Pattern ID (e.g., "pat-auth-jwt") |
 
 **Returns:** Full pattern object with implementation details, key files, dependencies.
 

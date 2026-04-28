@@ -1,4 +1,5 @@
-id: PAT-029
+id: pat-auth-context
+legacy_id: PAT-029
 category: frontend
 name: auth-context
 status: pilot

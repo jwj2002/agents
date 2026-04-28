@@ -1,4 +1,5 @@
-id: PAT-007
+id: pat-fastapi-database-layer
+legacy_id: PAT-007
 category: database
 name: FastAPI database layer with SQLAlchemy
 status: pilot
@@ -18,7 +19,7 @@ implementation:
   - Sync SQLAlchemy (not async) — simpler, sufficient for most apps
   - pool_pre_ping=True for stale connection detection
   - get_db() yields session with explicit rollback on exception in finally block
-  - TimestampMixin defined in PAT-008 — this pattern imports it, does not define it
+  - TimestampMixin defined in pat-fastapi-base-model — this pattern imports it, does not define it
   - No Active Record pattern (no CRUDMixin on Base) — repositories handle all DB ops
   - 'Dialect-agnostic core: engine creation and get_db() are identical across databases.
     Only connection string and pool settings change.'

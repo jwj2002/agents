@@ -1,4 +1,5 @@
-id: PAT-002
+id: pat-auth-redis-sessions
+legacy_id: PAT-002
 category: auth
 name: Redis session cache
 status: validated

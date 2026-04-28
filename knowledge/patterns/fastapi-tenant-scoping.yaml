@@ -1,4 +1,5 @@
-id: PAT-017
+id: pat-fastapi-tenant-scoping
+legacy_id: PAT-017
 category: auth
 name: FastAPI tenant scoping with account isolation
 status: pilot
@@ -243,15 +244,15 @@ implementation:
   - Use AccountRole string enum values in API responses (OWNER not AccountRole.OWNER)
     -- see E01 ENUM_VALUE_MISMATCH
   - User model needs account_memberships relationship added when using this pattern
-    -- PAT-016's User model doesn't include it by default
+    -- pat-fastapi-auth-wiring's User model doesn't include it by default
   - Reference code uses `backend.` package prefix -- adapt if your project package
     has a different name
-  - Use GUID() from PAT-008 for UUID columns, not sqlalchemy.dialects.postgresql.UUID
+  - Use GUID() from pat-fastapi-base-model for UUID columns, not sqlalchemy.dialects.postgresql.UUID
     -- ensures SQLite compatibility
 dependencies:
 - SQLAlchemy
 - FastAPI
-- BaseRepository[T] (PAT-010)
+- BaseRepository[T] (pat-fastapi-generic-repository)
 tests:
 - test_require_account_access_allows_member
 - test_require_account_access_denies_non_member

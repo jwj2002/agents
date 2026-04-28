@@ -1,4 +1,5 @@
-id: PAT-011
+id: pat-fastapi-service-layer
+legacy_id: PAT-011
 category: service
 name: FastAPI service layer pattern
 status: pilot
