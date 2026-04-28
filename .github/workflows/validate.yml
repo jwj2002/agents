@@ -1,0 +1,58 @@
+name: Validate config
+on:
+  pull_request:
+    paths:
+      - 'claude-config/**'
+      - 'knowledge/**'
+      - 'codex-config/**'
+      - 'install*.sh'
+  workflow_dispatch: {}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Validate settings.json is valid JSON
+        run: python3 -c "import json; json.load(open('claude-config/settings.json'))"
+
+      - name: Validate install.sh shell syntax
+        run: bash -n claude-config/install.sh
+
+      - name: Validate hook script paths in settings.json
+        env:
+          SETTINGS_PATH: ${{ github.workspace }}/claude-config/settings.json
+        run: python3 claude-config/scripts/validate-hooks.py
+
+      - name: Build knowledge.db (catches duplicate pattern IDs + schema drift)
+        run: |
+          cd knowledge
+          python3 sync.py build
+
+      - name: Verify pattern ID slug format
+        run: |
+          set -e
+          fail=0
+          for f in knowledge/patterns/*.yaml; do
+            stem=$(basename "$f" .yaml)
+            id=$(grep "^id:" "$f" | head -1 | awk '{print $2}')
+            if [ "$id" != "pat-$stem" ]; then
+              echo "MISMATCH: $f has id=$id (expected pat-$stem)"
+              fail=1
+            fi
+          done
+          if [ "$fail" = "1" ]; then
+            exit 1
+          fi
+          echo "All $(ls knowledge/patterns/*.yaml | wc -l | tr -d ' ') patterns have correct slug IDs"
