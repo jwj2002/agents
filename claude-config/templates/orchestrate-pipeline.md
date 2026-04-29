@@ -202,7 +202,11 @@ After both complete, validate no file conflicts and merge into a single `patch-{
 | subagent_type | `orchestrate-prove` |
 | ARTIFACT_NAME | `prove-{ISSUE}-{MMDDYY}.md` |
 | ARTIFACT_LIST | `- PATCH: ...` and `- MAP-PLAN: ...` |
-| AGENT_INSTRUCTIONS | Run verification commands (ruff, pytest, npm lint, npm build). Record outcome to `metrics.jsonl`. If BLOCKED, record to `failures.jsonl`. |
+| AGENT_INSTRUCTIONS | Run verification commands (ruff, pytest, npm lint, npm build). Populate frontmatter `status`, `complexity`, `stack`, `agents_run`, `root_cause` (if BLOCKED), `blocking_agent` (if BLOCKED). Do NOT write to `.claude/memory/` — the orchestrator records via `state_manager` after PROVE returns (see `commands/orchestrate.md` Step 4). |
+
+**Post-condition**: PROVE artifact frontmatter contains the outcome fields.
+Orchestrator's Step 4 reads them and calls `state_manager.record_metrics`
+(and `record_failure` if BLOCKED) — that step is the authoritative writer.
 
 ### PROVE-lite — TRIVIAL only
 

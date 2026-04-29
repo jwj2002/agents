@@ -77,9 +77,26 @@ Quick task complete:
 
 ## Optional: Metrics Recording
 
+`/quick` doesn't go through `/orchestrate`, so it records its own outcome
+via the same `state_manager` helper the orchestrator uses (see issue #104
+for why we no longer rely on free-form `echo >> file` placeholders).
+
 ```bash
-echo '{"date":"'$(date +%Y-%m-%d)'","source":"quick","task":"DESCRIPTION","status":"PASS","files_changed":N}' >> .claude/memory/metrics.jsonl
+# After verification passes, optionally append a /quick outcome record.
+# /quick changes don't have GitHub issues, so use issue=0 as a sentinel.
+python3 -c "
+import sys
+sys.path.insert(0, '$HOME/.claude/hooks')
+from state_manager import record_metrics
+from pathlib import Path
+record_metrics(
+    Path('.'), 0, 'PASS', 'TRIVIAL', '$STACK',
+    ['quick'],
+)
+"
 ```
+
+`$STACK` is `backend`, `frontend`, or `config` based on Step 2's classification.
 
 ---
 
