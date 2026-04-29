@@ -245,6 +245,10 @@ Both review and delegation are **automatically applied based on task complexity*
 | **FULLSTACK** | Automatic (enum/API focus) | Delegate frontend to Codex |
 | **PRIOR FAIL** | Automatic | Codex-first implementation |
 
+### `/pr` Advisory Review Gate
+
+Independent of the routing table above, the `/pr` command runs a lightweight diff inspection before squash-merge. When the diff matches **COMPLEX-tier signals** -- more than five files changed, database migrations, authentication or authorization code, data-model files, or cross-cutting refactors of foundational rules (`_base.md`, `core-patterns.md`, `behavioral-evals.md`) -- `/pr` prompts the user to run `/codex:adversarial-review` before merging. The prompt is **advisory, not blocking**: the user can decline and proceed with the merge. This catches changes that slipped through orchestrate without an automatic adversarial review (for example, hot-fixes that bypass `/orchestrate`, or changes made manually in plan mode).
+
 ### Orchestrate Integration
 
 ```
@@ -383,13 +387,21 @@ PROVE passes → /codex:adversarial-review --background
 
     ## Review Gate
 
-    When enabled via `/codex:setup`, the review gate runs an automatic Codex review before certain operations (e.g., commit, PR creation). If the review identifies critical issues, it blocks the operation until the issues are addressed.
+    Two distinct review mechanisms exist, and they operate independently:
+
+    ### 1. Plugin-Level Review Gate (toggled via `/codex:setup`)
+
+    When enabled via `/codex:setup`, the plugin's built-in review gate runs an automatic Codex review at certain plugin lifecycle moments (e.g., before commit). If the review identifies critical issues, it blocks the operation until the issues are addressed.
 
     Enable or disable the gate:
 
     ```bash
     /codex:setup    # Toggle review gate on/off
     ```
+
+    ### 2. `/pr` Advisory Pre-Merge Prompt (always on)
+
+    Separate from the plugin gate, the `/pr` command inspects the diff and -- when COMPLEX-tier signals are present (>5 files, migrations, auth, data models, cross-cutting refactors) -- prompts the user to run `/codex:adversarial-review` before squash-merge. This prompt is **advisory only** and cannot be turned off via `/codex:setup`; the user can always decline and proceed. See [Automatic Routing](#automatic-routing-review--delegation) above for the full signal list.
 
 ## Configuration
 

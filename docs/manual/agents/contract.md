@@ -6,11 +6,14 @@ CONTRACT defines the API boundary between backend and frontend for fullstack wor
 
 ## When CONTRACT Runs
 
-CONTRACT is positioned between planning and implementation:
+CONTRACT is positioned between planning and implementation. The downstream chain depends on the pipeline tier:
 
 ```
-PLAN or MAP-PLAN  -->  CONTRACT  -->  PLAN-CHECK  -->  PATCH
+SIMPLE:   MAP-PLAN  -->  CONTRACT  -->  PATCH
+COMPLEX:  PLAN      -->  CONTRACT  -->  PLAN-CHECK  -->  PATCH
 ```
+
+PLAN-CHECK only runs in the COMPLEX pipeline; the SIMPLE pipeline drops PLAN-CHECK and goes straight from CONTRACT to PATCH.
 
 | Condition | CONTRACT Required? |
 |-----------|--------------------|

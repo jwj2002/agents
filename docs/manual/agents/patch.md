@@ -1,6 +1,6 @@
 # PATCH Agent
 
-**Version**: 1.2 | **Phase**: 3 | **Role**: Implementer
+**Version**: 1.5 | **Phase**: 3 | **Role**: Implementer
 
 PATCH is the only agent that modifies code. It reads the plan from MAP-PLAN, follows the project's architecture patterns, and implements the changes. Before writing any code, it runs a pre-flight checklist. After implementation, it runs verification gates (linting, tests). If anything fails, it fixes in-place before submitting.
 

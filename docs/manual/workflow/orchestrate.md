@@ -33,15 +33,18 @@ If no issue number is provided, you will be prompted to create one with `/featur
 ```
 GitHub Issue
      |
-     +-- TRIVIAL --> MAP-PLAN --> PATCH --> PROVE-lite
+     +-- TRIVIAL --> rejected; /orchestrate redirects to /quick
      |
-     +-- SIMPLE ---> [DISCUSS] --> MAP-PLAN --> [TEST-PLANNER] --> CONTRACT* --> PLAN-CHECK --> PATCH --> PROVE
+     +-- SIMPLE ---> [DISCUSS] --> MAP-PLAN --> [TEST-PLANNER] --> CONTRACT* --> PATCH --> PROVE
      |
      +-- COMPLEX --> [DISCUSS] --> MAP --> PLAN --> [TEST-PLANNER] --> CONTRACT* --> PLAN-CHECK --> PATCH --> PROVE
 
      * CONTRACT is MANDATORY for fullstack (PATCH will STOP without it)
        CONTRACT-lite (inline) for simple fullstack (0 new endpoints, <=2 frontend files)
      [ ] = Optional (requires --with-tests or --discuss flag)
+
+     PLAN-CHECK runs only on the COMPLEX pipeline (per PR #93). SIMPLE relies on PATCH
+     to catch plan defects and Codex adversarial review (post-PROVE) for the rest.
 ```
 
 ## Complexity Classification
@@ -65,27 +68,26 @@ GitHub Issue
           +----+----+     +----+-----+     +----+-----+
                |               |                |
                v               v                v
-          MAP-PLAN       [DISCUSS]          [DISCUSS]
-               |               |                |
-               |          MAP-PLAN        MAP --> PLAN
-               |               |                |
-               |          +----+----+      +----+----+
-               |          |fullstack|      |fullstack|
-               |          +----+----+      +----+----+
-               |          yes  | no        yes  | no
-               |               v                v
-               |          CONTRACT(*)       CONTRACT
-               |               |                |
-               |          PLAN-CHECK       PLAN-CHECK
-               |               |                |
-               v               v                v
-            PATCH            PATCH            PATCH
-               |               |                |
-               v               v                v
-          PROVE-lite         PROVE            PROVE
-          (gates only)         |                |
-               |               v                v
-               +------------- /pr --------------+
+          rejected;       [DISCUSS]          [DISCUSS]
+          go to /quick         |                |
+          (PR #94)        MAP-PLAN        MAP --> PLAN
+                               |                |
+                          +----+----+      +----+----+
+                          |fullstack|      |fullstack|
+                          +----+----+      +----+----+
+                          yes  | no        yes  | no
+                               v                v
+                          CONTRACT(*)       CONTRACT
+                               |                |
+                               |           PLAN-CHECK
+                               |                |
+                               v                v
+                             PATCH            PATCH
+                               |                |
+                               v                v
+                             PROVE            PROVE
+                               |                |
+                               +----- /pr ------+
 
          (*) CONTRACT-lite if 0 new endpoints + <=2 frontend files
              CONTRACT-full otherwise
@@ -95,9 +97,9 @@ GitHub Issue
 
 | Level | Files | Criteria | Workflow |
 |-------|-------|----------|----------|
-| **TRIVIAL** | 1-2 | Docs, config, obvious fixes | MAP-PLAN, skips PLAN-CHECK, PROVE-lite |
-| **SIMPLE** | 3-5 | Clear pattern, single subsystem | MAP-PLAN with full verification |
-| **COMPLEX** | 6+ | Endpoints, migrations, architectural | Separate MAP and PLAN phases |
+| **TRIVIAL** | 1-2 | Docs, config, obvious fixes | Rejected by `/orchestrate`; redirected to `/quick` (per PR #94) |
+| **SIMPLE** | 3-5 | Clear pattern, single subsystem | MAP-PLAN → [CONTRACT*] → PATCH → PROVE (no PLAN-CHECK) |
+| **COMPLEX** | 6+ | Endpoints, migrations, architectural | MAP → PLAN → [CONTRACT*] → PLAN-CHECK → PATCH → PROVE |
 
 ??? info "Detailed step-by-step process"
 
@@ -215,10 +217,24 @@ When `--resume` is provided:
 3. Verifies artifacts exist for all completed phases
 4. Resumes from the next incomplete phase
 
+SIMPLE pipeline (no PLAN-CHECK):
+
 | Last Completed | Next Phase |
 |----------------|------------|
-| (none) | MAP-PLAN or MAP |
-| MAP-PLAN | PLAN-CHECK (or CONTRACT if fullstack) |
+| (none) | MAP-PLAN |
+| MAP-PLAN | CONTRACT (if fullstack) or PATCH |
+| CONTRACT | PATCH |
+| PATCH | PROVE |
+| PROVE | Done |
+
+COMPLEX pipeline (PLAN-CHECK still in chain):
+
+| Last Completed | Next Phase |
+|----------------|------------|
+| (none) | MAP |
+| MAP | PLAN |
+| PLAN | CONTRACT (if fullstack) or PLAN-CHECK |
+| CONTRACT | PLAN-CHECK |
 | PLAN-CHECK | PATCH |
 | PATCH | PROVE |
 | PROVE | Done |
@@ -308,6 +324,10 @@ Each agent validates the chain: PROVE checks for PATCH, PATCH checks for MAP-PLA
                               ├── No  → /pr
                               └── Yes → fix → re-run PROVE → /pr
     ```
+
+    ### Advisory Review Gate in /pr
+
+    Independent of the post-PROVE review above, the `/pr` command (per PR #95) detects COMPLEX-tier signals — file count > 5, migration paths, auth code, data models, cross-cutting refactors — and prompts you to run `/codex:adversarial-review` before squash-merge. This gate is **advisory, not blocking**: you can decline and proceed, but for COMPLEX or fullstack changes the second opinion typically catches enum, contract, and access-control drift that PROVE does not gate on.
 
     ### Parallel Delegation During PATCH
 

@@ -92,12 +92,12 @@ For a guided walkthrough, see [First 10 Minutes](getting-started/first-10-minute
     ```
     ~/agents/                              Source of truth (git repo)
     ├── claude-config/                     Claude Code configuration
-    │   ├── agents/     → ~/.claude/agents/    9 agent definitions
-    │   ├── commands/   → ~/.claude/commands/  18 slash commands
-    │   ├── hooks/      → ~/.claude/hooks/     6 lifecycle hooks + modules
-    │   ├── rules/      → ~/.claude/rules/     4 conditional rules
-    │   ├── skills/     → ~/.claude/skills/    3 workflow skills
-    │   ├── templates/  agent prompt template  1 shared prompt template
+    │   ├── agents/     → ~/.claude/agents/    12 agent definitions
+    │   ├── commands/   → ~/.claude/commands/  16 slash commands
+    │   ├── hooks/      → ~/.claude/hooks/     11 lifecycle hooks + modules
+    │   ├── rules/      → ~/.claude/rules/     12 rules (mix of always-loaded and conditional)
+    │   ├── skills/     → ~/.claude/skills/    7 workflow skills
+    │   ├── templates/  agent prompt template  8 template entries
     │   └── settings.json → ~/.claude/settings.json
     ├── mcp-server/                        Custom MCP (metrics, vault access)
     ├── obsidian-agent/                    Session → Obsidian vault writer
@@ -132,13 +132,15 @@ For a guided walkthrough, see [First 10 Minutes](getting-started/first-10-minute
     | **FULLSTACK** | Any | `/orchestrate` + CONTRACT | Cross-stack feature with enum/API contracts |
     | **PRIOR FAIL** | Any | `/orchestrate` + failure context | Retry with root cause injection |
 
+    `/orchestrate` rejects TRIVIAL classifications and redirects to `/quick`; the TRIVIAL row above is the canonical destination.
+
     ```
     TRIVIAL ──────────────── /quick (direct fix, no agents)
     SIMPLE ─────────────────  Plan Mode (no agents, no pipeline)
     MODERATE ───┐
     FULLSTACK ──┤            /orchestrate pipelines:
     PRIOR FAIL ─┤
-    COMPLEX ────┘              SIMPLE:   MAP-PLAN → [CONTRACT*] → PLAN-CHECK → PATCH → PROVE
+    COMPLEX ────┘              SIMPLE:   MAP-PLAN → [CONTRACT*] → PATCH → PROVE
                                COMPLEX:  MAP → PLAN → [CONTRACT*] → PLAN-CHECK → PATCH → PROVE
     ```
 

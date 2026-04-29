@@ -4,7 +4,7 @@
 
 ## How It Works
 
-The hook runs on the `Stop` event, after `verify_completion.py`. It follows this sequence:
+The hook runs on the `Stop` event as the second of three Stop hooks: `verify_completion.py` runs first (so any advisory warnings appear before the notification fires), `notify_completion.py` runs second, and `session_end_context_update.py` runs last (after the user has been notified). It follows this sequence:
 
 1. **Platform guard** -- Check `sys.platform`. If not `darwin` (macOS), exit 0 immediately. The hook is a no-op on Linux, WSL, and Windows.
 2. **Read context** -- Call `state_manager.get_active_work()` to get the current issue number, phase, and last action.
@@ -95,7 +95,7 @@ The hook is designed to never interfere with the session:
 
 ## Configuration
 
-The hook is registered as the second Stop hook in `settings.json`:
+The hook is registered as the second of three Stop hooks in `settings.json`:
 
 ```json
 {
@@ -105,7 +105,8 @@ The hook is registered as the second Stop hook in `settings.json`:
         "matcher": "",
         "hooks": [
           {"type": "command", "command": "python3 ~/.claude/hooks/verify_completion.py"},
-          {"type": "command", "command": "python3 ~/.claude/hooks/notify_completion.py"}
+          {"type": "command", "command": "python3 ~/.claude/hooks/notify_completion.py"},
+          {"type": "command", "command": "python3 ~/.claude/hooks/session_end_context_update.py"}
         ]
       }
     ]
@@ -113,4 +114,4 @@ The hook is registered as the second Stop hook in `settings.json`:
 }
 ```
 
-Order matters: `verify_completion.py` runs first so its advisory warning appears before `notify_completion.py` sends the alert.
+Order matters: `verify_completion.py` runs first so its advisory warning appears before the notification, `notify_completion.py` sends the alert, and `session_end_context_update.py` persists rolling state for the next session.

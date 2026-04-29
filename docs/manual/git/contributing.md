@@ -150,6 +150,6 @@ When onboarding a new project:
 - [ ] Enable merge queue (squash merge, required checks)
 - [ ] Allow only squash merging (disable merge commit and rebase options)
 - [ ] Auto-delete head branches after merge
-- [ ] Add CI workflow (`.github/workflows/ci.yml`)
+- [ ] Add CI workflow (`.github/workflows/validate.yml`) covering: settings.json JSON validity, `install.sh` shell syntax, hook script paths via `claude-config/scripts/validate-hooks.py`, the `sync.py` knowledge build, and the pattern slug invariant (every YAML in `knowledge/patterns/` has a unique slug-format `id`). The workflow runs on every PR that touches `claude-config/`, `knowledge/`, `codex-config/`, or `install*.sh`.
 - [ ] Add `.gitignore` covering generated files, secrets, IDE configs
 - [ ] Create `CLAUDE.md` referencing this policy

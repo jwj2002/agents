@@ -5,13 +5,13 @@
 MAP-PLAN is the first agent to run on most issues. It reads the issue, investigates your codebase, and produces a detailed implementation plan. The plan includes which files to modify, what patterns to follow, and acceptance criteria for verification. It does not write any code -- that's PATCH's job.
 
 !!! info "Routing context"
-    MAP-PLAN runs when the routing model selects `/orchestrate` for MODERATE or higher tasks, and the orchestrate pipeline classifies the work as TRIVIAL or SIMPLE pipeline tier. Tasks routed to `/quick` or Plan Mode never reach MAP-PLAN.
+    MAP-PLAN runs when `/orchestrate` classifies the work as the SIMPLE pipeline tier. TRIVIAL classifications are rejected by `/orchestrate` and redirected to `/quick` (no pipeline). COMPLEX classifications use separate MAP and PLAN agents instead. Tasks routed to `/quick` or Plan Mode never reach MAP-PLAN.
 
 ## When to Use
 
 | Pipeline Tier | Use MAP-PLAN? | Alternative |
 |---------------|---------------|-------------|
-| TRIVIAL | Yes | -- |
+| TRIVIAL | No | `/orchestrate` rejects TRIVIAL; use `/quick` |
 | SIMPLE | Yes | -- |
 | COMPLEX | No | Use separate MAP + PLAN agents |
 
@@ -69,11 +69,11 @@ Every MAP-PLAN output must include a **Verification Steps** section documenting:
 
     ### 1. Classify Pipeline Tier
 
-    | Pipeline Tier | Criteria |
-    |---------------|----------|
-    | TRIVIAL | Docs, config, renames, deletions |
-    | SIMPLE | 1-3 files, localized change |
-    | COMPLEX | New endpoints, migrations, cross-module |
+    | Pipeline Tier | Criteria | Handling |
+    |---------------|----------|----------|
+    | TRIVIAL | Docs, config, renames, deletions | Rejected by `/orchestrate`; redirected to `/quick` |
+    | SIMPLE | 1-3 files, localized change | Run MAP-PLAN |
+    | COMPLEX | New endpoints, migrations, cross-module | Escalate to separate MAP + PLAN agents |
 
     ### 2. Identify Stack
 

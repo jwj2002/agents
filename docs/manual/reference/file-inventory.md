@@ -1,148 +1,260 @@
 # File Inventory
 
-Complete listing of all files in the `~/agents/claude-config/` repository, organized by category. All paths are relative to `~/agents/claude-config/` and symlinked to `~/.claude/` via `install.sh`.
+Complete listing of all files in `~/agents/claude-config/` and related directories. All paths are relative to repo root unless noted.
+
+`claude-config/` is symlinked into `~/.claude/` by `install.sh`. The repo is the source of truth; runtime references via `~/.claude/...` resolve through symlinks.
+
+---
 
 ## Agents (12 files)
 
-Symlinked to `~/.claude/agents/`. Agent definitions are markdown files that define role, constraints, input requirements, output format, and verification gates.
+Located in `claude-config/agents/`. Each agent is a markdown file with frontmatter (`name:`, `description:`, `tools:`, `model:`) followed by the agent's prompt body.
 
 | File | Size | Purpose |
-|------|------|---------|
-| `_base.md` | 10.3 KB | Base agent inherited by all others: pre-flight, artifact naming, validation, AGENT_RETURN directive |
-| `map.md` | 3.6 KB | Investigator for COMPLEX issues (read-only, phase 1) |
-| `map-plan.md` | 6.5 KB | Combined investigator + architect for TRIVIAL/SIMPLE pipeline tiers (read-only, phase 1+2) |
-| `plan.md` | 4.1 KB | Architect for COMPLEX issues (read-only, phase 2) |
-| `contract.md` | 3.3 KB | Interface designer for fullstack issues (read-only, phase 2.5) |
-| `plan-checker.md` | 3.1 KB | Plan validator (read-only, phase 2.8) |
-| `patch.md` | 5.8 KB | Implementer --- the only agent that modifies code (phase 3) |
-| `prove.md` | 7.3 KB | Reviewer and outcome recorder (phase 4) |
-| `test-planner.md` | 7.9 KB | Test architect for `--with-tests` flag (optional, phase 1.5) |
-| `spec-reviewer.md` | 6.1 KB | Spec analyst and GitHub issue creator (pre-pipeline) |
-| `code-reviewer.md` | 1.3 KB | Proactive lightweight review (runs on Haiku model) |
-| `discuss.md` | 4.5 KB | Decision capturer --- identifies gray areas before planning (optional, `--discuss` flag) |
+|------|-----:|---------|
+| `_base.md` | 9.6 KB | Base prompt inherited by every agent (pre-flight pattern loading, AGENT_RETURN spec, failure prevention, artifact validation). Trimmed in PR #97 — verification commands now live in `snippets/verify-commands.md`. |
+| `contract.md` | 3.6 KB | Defines backend ↔ frontend API contract. **Mandatory for fullstack changes.** |
+| `discuss.md` | 4.6 KB | Captures design decisions and trade-offs before MAP/PLAN. Runs only when `--discuss` flag is set. |
+| `map-plan.md` | 6.8 KB | Combined MAP + PLAN for SIMPLE-tier work — investigates the codebase and produces an implementation plan. |
+| `map.md` | 3.9 KB | Investigates current state. Runs in COMPLEX tier as a separate phase before PLAN. |
+| `patch.md` | 8.4 KB | Implementation phase. Edits files, writes tests, runs verification commands. |
+| `plan-checker.md` | 3.3 KB | Validates a PLAN artifact's completeness before PATCH burns context implementing it. **COMPLEX-only** since v5 dropped PLAN-CHECK from SIMPLE. |
+| `plan.md` | 4.4 KB | Authors implementation plan in COMPLEX tier (after MAP). |
+| `pr-fresh-reviewer.md` | 1.7 KB | Fresh-context PR reviewer. Spawned by `/pr` to look at the diff with no inheritance from the implementation discussion. |
+| `prove.md` | 8.6 KB | Verification phase. Runs lint/tests, validates acceptance criteria, applies behavioral evals (E01–E15) per `eval-file-mapping.md`. |
+| `spec-reviewer.md` | 6.4 KB | Reviews a specification document against the codebase, optionally generates GitHub issues. |
+| `test-planner.md` | 8.2 KB | Generates pre-implementation test plan with edge cases. Runs when `--with-tests` flag is set. |
 
-## Commands (16 files)
+---
 
-Symlinked to `~/.claude/commands/`. Slash commands invokable by the user during a session.
+## Slash Commands (16 files)
+
+Located in `claude-config/commands/`. Each is a markdown file with frontmatter (`description:`, `argument-hint:`, sometimes `disable-model-invocation:`) and a process spec.
+
+### Implementation
+| File | Size | Purpose |
+|------|-----:|---------|
+| `quick.md` | 2.0 KB | Direct executor for TRIVIAL tasks. No pipeline, no artifacts. |
+| `orchestrate.md` | 10.8 KB | MAP-PLAN → PATCH → PROVE pipeline for SIMPLE+ tasks. **Rejects TRIVIAL classification** (PR #94) — redirects to `/quick`. |
+
+### Issue creation
+| File | Size | Purpose |
+|------|-----:|---------|
+| `bug.md` | 2.3 KB | Create a bug-report GitHub issue. |
+| `feature.md` | 2.8 KB | Create a feature-request GitHub issue. |
+| `spec-draft.md` | 7.5 KB | Draft a feature specification via guided Q&A. |
+| `spec-review.md` | 3.4 KB | Validate a spec against the codebase, optionally generate issues. |
+| `feature-from-spec.md` | 2.7 KB | Internal helper invoked by `/spec-review` to create one issue per spec entry. |
+
+### Quality + review
+| File | Size | Purpose |
+|------|-----:|---------|
+| `review.md` | 0.4 KB | Pre-commit code review. |
+| `test-plan.md` | 2.5 KB | Generate edge-case test plan before implementation. |
+| `pr.md` | 7.6 KB | Pre-PR fresh-context review, advisory Codex review gate for COMPLEX changes (PR #95), then `gh pr create`. |
+
+### Scaffolding
+| File | Size | Purpose |
+|------|-----:|---------|
+| `scaffold-project.md` | 6.0 KB | Scaffold a complete FastAPI project with layered architecture. |
+| `scaffold-module.md` | 7.5 KB | Scaffold a new FastAPI module (model, schema, repo, service, router, deps). |
+
+### Learning + insight
+| File | Size | Purpose |
+|------|-----:|---------|
+| `learn.md` | 11.0 KB | Analyze failure patterns, update learned knowledge base. |
+| `metrics.md` | 15.8 KB | Display agent performance metrics and trends. |
+| `seed.md` | 5.0 KB | Capture a deferred idea with a trigger condition for when it should surface. |
+
+### Design
+| File | Size | Purpose |
+|------|-----:|---------|
+| `frontend-design.md` | 3.7 KB | Frontend design helpers (per the `frontend-design` plugin). |
+
+---
+
+## Rules (12 files)
+
+Located in `claude-config/rules/`. Rules use `paths: [...]` frontmatter to declare when they auto-load. `paths: ["**"]` means "always load." Only `git-workflow.md` declares `alwaysApply: true`.
+
+| File | Size | Path scope | Purpose |
+|------|-----:|-----------|---------|
+| `core-patterns.md` | 0.7 KB | `["**"]` | Top 3 failure patterns (VERIFICATION_GAP, ENUM_VALUE, COMPONENT_API). Always loaded. |
+| `implementation-routing.md` | 3.5 KB | `["**"]` | Tier classification + Codex routing rules. Always loaded. |
+| `git-workflow.md` | 3.8 KB | `["**"]` (`alwaysApply: true`) | Branch naming, conventional commits, squash-merge contract. |
+| `github-accounts.md` | 1.6 KB | `["**"]` | Multi-account routing (jwj2002 vs jjob-spec). |
+| `dev-environment.md` | 5.0 KB | `["**"]` | Three development modes (laptop / jbox06 / hybrid). |
+| `behavioral-evals.md` | 7.2 KB | `["**/backend/**", "**/frontend/**", "**/.agents/**", "**/Dockerfile", "**/*.env*"]` | E01–E15 behavioral evals. |
+| `eval-file-mapping.md` | 1.8 KB | `["**/.agents/**", "**/backend/**", "**/frontend/**", "**/PROVE*.md"]` | Maps changed-file globs to applicable E-codes. |
+| `gitlab-access.md` | 2.9 KB | `["**/app-repos/**", "**/vitalailabs/**", "**/.gitlab/**"]` | Internal GitLab access for VitalAILabs apps. |
+| `post-merge-verification.md` | 1.2 KB | `["**/.github/**", "**/CHANGELOG*", "**/.agents/**"]` | Post-merge health checks. |
+| `rbac-pattern.md` | 3.8 KB | `["**/auth/**", ...]` | Permission-check dependency pattern for FastAPI. |
+| `orchestrate-workflow.md` | 16.7 KB | `.agents/**/*.md` | Internal workflow rules for orchestrate agents. |
+| `spec-review-workflow.md` | 12.0 KB | `["**/specs/**", "**/.agents/**"]` | Spec finalization workflow. |
+
+---
+
+## Hooks (10 files)
+
+Located in `claude-config/hooks/`. Python scripts attached to Claude Code lifecycle events via `settings.json`. Two of these are shared modules (`state_manager.py`, `worktree_manager.py`) imported by other hooks.
+
+| File | Size | Lifecycle event | Purpose |
+|------|-----:|----------------|---------|
+| `sessionstart_restore_state.py` | 5.5 KB | SessionStart | Restore PERSISTENT_STATE.yaml and critical patterns into context. |
+| `load_learning_rules.py` | 1.1 KB | SessionStart | Load learning rules into context at session start. |
+| `precompact_checkpoint.py` | 8.1 KB | PreCompact | Checkpoint orchestrate state to YAML before context compaction. |
+| `verify_completion.py` | 4.1 KB | Stop | Anti-rationalization gate. Warns on uncommitted files (all types post #84), un-pushed commits, branches ahead of main with no PR (post #85), TODO/FIXME/HACK markers. Always exits 0 (advisory). |
+| `notify_completion.py` | 3.1 KB | Stop | macOS Notification Center alert with iPhone Handoff relay. |
+| `session_end_context_update.py` | 5.7 KB | Stop | Updates project state YAML with session-end context. |
+| `context_monitor.py` | 4.3 KB | PostToolUse | Tracks context usage, flags approaching limits. |
+| `secret_guard.py` | 3.2 KB | (not currently wired) | Bash-side secret-exfil guard. Bundled but not registered in `settings.json` — covered by `permissions.deny` rules instead. |
+| `state_manager.py` | 4.9 KB | (shared module) | Centralized PERSISTENT_STATE.yaml read/write. |
+| `worktree_manager.py` | 6.7 KB | (shared module) | Git worktree lifecycle for `--parallel` flag. |
+
+### Hook registrations in `settings.json`
+
+| Event | Hooks (in order) |
+|-------|-----------------|
+| `SessionStart` | `sessionstart_restore_state.py`, `load_learning_rules.py` |
+| `PreCompact` | `precompact_checkpoint.py` |
+| `PostToolUse` | `context_monitor.py` |
+| `Stop` | `verify_completion.py`, `notify_completion.py`, `session_end_context_update.py` |
+| `PreToolUse` | (none) |
+
+---
+
+## Skills (7 directories)
+
+Located in `claude-config/skills/`. Each is a directory containing a `SKILL.md` (and optionally supporting files). Skills are listed at session start when Claude Code's harness asks "what can I help with?"
+
+| Directory | Purpose |
+|-----------|---------|
+| `capture/` | Quick non-interrupting capture to inbox. |
+| `dashboard/` | Cross-project status overview. |
+| `deep-review/` | Comprehensive critical code review. |
+| `inbox/` | View and triage inbox captures. |
+| `pdf/` | Convert markdown to PDF. |
+| `project/` | View or update project context. |
+| `review-session/` | Review session commits and propose focus updates. |
+
+---
+
+## Snippets (1 file, growing)
+
+Located in `claude-config/snippets/`. Shared prompt fragments referenced from multiple agents to avoid duplication. Introduced in PR #97.
 
 | File | Size | Purpose |
-|------|------|---------|
-| `orchestrate.md` | 18.4 KB | Full agent pipeline for GitHub issues (`/orchestrate`) |
-| `learn.md` | 8.5 KB | Pattern extraction from failures (`/learn`) |
-| `metrics.md` | 15.8 KB | Performance dashboard (`/metrics`) |
-| `pr.md` | 3.1 KB | PR creation with checklist (`/pr`) |
-| `spec-review.md` | 3.4 KB | Spec analysis and issue creation (`/spec-review`) |
-| `spec-draft.md` | 7.5 KB | Interactive specification creation (`/spec-draft`) |
-| `feature.md` | 2.8 KB | Feature request issue creation (`/feature`) |
-| `feature-from-spec.md` | 2.7 KB | Create issues from spec gaps (`/feature-from-spec`) |
-| `bug.md` | 2.3 KB | Bug report with investigation (`/bug`) |
-| `test-plan.md` | 2.5 KB | Pre-implementation test planning (`/test-plan`) |
-| `scaffold-project.md` | 22.4 KB | Full FastAPI project scaffolding (`/scaffold-project`) |
-| `scaffold-module.md` | 7.5 KB | Domain module addition (`/scaffold-module`) |
-| `quick.md` | 2.0 KB | Ad-hoc fix without orchestrate (`/quick`) |
-| `review.md` | 0.4 KB | Code review of staged changes (`/review`) |
-| `frontend-design.md` | --- | Frontend design plugin integration (`/frontend-design`) |
-| `seed.md` | 5.5 KB | Capture deferred ideas with trigger conditions for future surfacing |
+|------|-----:|---------|
+| `verify-commands.md` | 1.6 KB | Canonical backend/frontend verification command catalog. Referenced from `_base.md`, `patch.md`, and `prove.md`. |
 
-## Rules (10 files)
+---
 
-Symlinked to `~/.claude/rules/`. Conditional and always-loaded instruction files.
+## Scripts (2 files)
 
-| File | Size | Trigger | Purpose |
-|------|------|---------|---------|
-| `core-patterns.md` | 0.7 KB | Always | Top 3 failure patterns (89% coverage) |
-| `git-workflow.md` | 3.2 KB | Always | Branch, commit, and PR conventions |
-| `implementation-routing.md` | 2.1 KB | Always | Plan mode vs orchestrate decision matrix |
-| `github-accounts.md` | 1.0 KB | Always | Multi-account GitHub configuration |
-| `fastapi-layered-pattern.md` | 23.6 KB | `**/backend/**`, `**/api/**`, `**/services/**` | Full layered architecture reference |
-| `orchestrate-workflow.md` | 16.7 KB | `.agents/**/*.md` | Agent efficiency, artifact naming, CONTRACT rules |
-| `spec-review-workflow.md` | 12.0 KB | `**/specs/**`, `**/.agents/**` | Spec finalization gate and issue creation |
-| `behavioral-evals.md` | 4.2 KB | PROVE phase | Behavioral test suite for PROVE agent verification |
-| `eval-file-mapping.md` | 1.2 KB | PROVE phase | Maps changed file patterns to relevant behavioral evals |
-| `post-merge-verification.md` | 1.2 KB | `/pr --merge` | Post-merge ops checklist for /pr command |
-
-## Hooks (7 files)
-
-Symlinked to `~/.claude/hooks/`. Python scripts attached to Claude Code lifecycle events.
-
-| File | Size | Event | Purpose |
-|------|------|-------|---------|
-| `sessionstart_restore_state.py` | 4.8 KB | SessionStart | Restore PERSISTENT_STATE and critical patterns (~500 tokens) |
-| `precompact_checkpoint.py` | 7.5 KB | PreCompact | Extract state from transcript, update YAML, auto-clean old files |
-| `verify_completion.py` | 3.3 KB | Stop | Anti-rationalization: warn if uncommitted changes or TODOs exist |
-| `notify_completion.py` | 3.5 KB | Stop | macOS Notification Center alert with iPhone relay via Handoff |
-| `state_manager.py` | 4.5 KB | (shared module) | Centralized PERSISTENT_STATE.yaml read/write operations |
-| `worktree_manager.py` | 6.5 KB | (shared module) | Git worktree lifecycle for `--parallel` flag |
-| `context_monitor.py` | 4.5 KB | PostToolUse | Warns when context window is running low (35% WARNING, 25% CRITICAL) |
-
-## Skills (3 directories)
-
-Symlinked to `~/.claude/skills/`. Multi-step workflow definitions with reference documentation.
-
-| Directory | Files | Purpose |
-|-----------|-------|---------|
-| `orchestrate/` | SKILL.md (2.4 KB), ORCHESTRATE_REFERENCE.md (7.5 KB) | Multi-agent pipeline execution |
-| `test-plan/` | SKILL.md (2.1 KB) | Test matrix generation with edge cases |
-| `spec-review/` | SKILL.md (1.2 KB) | Spec analysis and gap identification |
-
-## Templates (2 entries)
-
-Not symlinked --- referenced by orchestrate and other commands directly.
+Located in `claude-config/scripts/`. Standalone validators callable independently or from `install.sh`.
 
 | File | Size | Purpose |
-|------|------|---------|
-| `agent-prompt.md` | 2.5 KB | Shared prompt template with variable substitution for all agents |
-| `github-actions/` | --- | GitHub Actions workflow templates (Copilot review setup) |
+|------|-----:|---------|
+| `validate-hooks.py` | 5.2 KB | Walks every hook command in `settings.json`, verifies each script path resolves. Skips `${CLAUDE_PLUGIN_ROOT}` references. **PR #82.** |
+| `validate-paths-globs.py` | 2.6 KB | Validates rule-file path globs are well-formed. |
 
-## Plugins (7 installed)
+---
 
-Installed via `install.sh` Phase 2.5. Stored in `~/.claude/plugins/cache/` (not symlinked — installed per machine).
+## Templates (8 entries)
 
-| Plugin | Source | Category | Purpose |
-|--------|--------|----------|---------|
-| `codex` | `openai-codex` | Cross-model AI | GPT-powered review, adversarial challenge, task delegation, rescue |
-| `security-guidance` | `claude-plugins-official` | Security | Vulnerability detection, compliance checks, secure coding guidance |
-| `typescript-lsp` | `claude-plugins-official` | Language | TypeScript/React type errors, auto-imports, go-to-definition |
-| `pyright-lsp` | `claude-plugins-official` | Language | Python type checking for FastAPI backend code |
-| `pr-review-toolkit` | `claude-plugins-official` | Git | Enhanced PR review with deeper analysis capabilities |
-| `playwright` | `claude-plugins-official` | Testing | End-to-end browser testing for frontend verification |
-| `frontend-design` | `claude-plugins-official` | Frontend | Production-grade UI generation with distinctive design |
+Located in `claude-config/templates/`. Used by scaffolding commands and the orchestrate pipeline.
 
-## Config Files
+| Entry | Type | Size | Purpose |
+|-------|------|-----:|---------|
+| `agent-prompt.md` | file | 4.8 KB | Base agent prompt template (variable substitution). |
+| `orchestrate-pipeline.md` | file | 8.2 KB | Per-agent prompt templates, validation gates, failure-context injection. |
+| `orchestrate-parallel.md` | file | 7.8 KB | MAP fan-out, speculative PATCH, worktree mode, resume mode. |
+| `orchestrate-mymoney-context.md` | file | 7.8 KB | Project-specific context for orchestrate runs in mymoney. |
+| `fastapi-layered-pattern.md` | file | 23.6 KB | Layered FastAPI architecture reference (read by `/scaffold-project` and `/scaffold-module`). |
+| `scaffold-fastapi-core.md` | file | 15.3 KB | FastAPI core scaffolding spec. |
+| `scaffold-fastapi-auth.md` | file | 1.8 KB | FastAPI auth scaffolding spec. |
+| `PLAN.md.template` | file | 2.4 KB | Template for per-project `PLAN.md`. |
+| `github-actions/` | dir | — | GitHub Actions workflow templates. |
+
+---
+
+## Top-level claude-config files
 
 | File | Size | Purpose |
-|------|------|---------|
-| `settings.json` | 2.1 KB | Global settings: hooks, MCP servers, permissions, plugins (symlinked) |
-| `statusline.py` | 1.2 KB | Custom ANSI status bar: hostname, user, date, context usage (symlinked) |
-| `install.sh` | 11.5 KB | Idempotent symlink installer (macOS/WSL/Linux aware) |
-| `project-template/` | --- | Starter `CLAUDE.md` and `.claude/rules/` for new projects |
+|------|-----:|---------|
+| `CLAUDE.md` | 6.6 KB | Top-level orientation file. Loaded into context at every session start. Symlinked to `~/.claude/CLAUDE.md`. |
+| `README.md` | 10.7 KB | Repo README — install instructions, structure overview, command map. |
+| `settings.json` | 3.7 KB | Hook registrations, plugin enablement, permissions, statusLine, skipDangerousModePermissionPrompt. Symlinked to `~/.claude/settings.json`. |
+| `statusline.py` | 2.0 KB | Custom status bar (hostname, user, date, context %). |
+| `install.sh` | 22.4 KB | Symlink installer + dependency setup + MCP registration + warm-up + hook validation. |
+| `new-project-claude.sh` | 1.4 KB | Bootstrap a per-project `CLAUDE.md` skeleton. |
 
-## Per-Project Files (Not in Repo)
+---
 
-These files live in each project repository, not in `~/agents/claude-config/`:
+## Repo-level files (outside claude-config/)
 
-```
-~/projects/<project>/
-  CLAUDE.md                              # Project-specific agent instructions
-  .claude/
-    settings.json                        # Project permissions
-    memory/
-      patterns.md                        # Project-specific learned patterns
-      patterns-full.md                   # Extended patterns (~660 lines)
-      metrics.jsonl                      # Issue outcome tracking
-      failures.jsonl                     # Failure details
-      pattern-events.jsonl               # /learn --apply tracking
-  .agents/
-    outputs/
-      map-plan-{issue}-{mmddyy}.md      # Agent artifacts
-      patch-{issue}-{mmddyy}.md
-      prove-{issue}-{mmddyy}.md
-      archive/                           # Post-merge artifact archive
-      claude_checkpoints/
-        PERSISTENT_STATE.yaml            # Workflow state
-  .worktrees/                            # Worktree isolation (gitignored)
-    issue-{N}/                           # Full repo copy on own branch
-```
+### Knowledge graph (`knowledge/`)
 
-!!! note "Machine-Local Files"
-    `~/.claude/settings.local.json` and `~/.claude/memory/` are machine-specific and not symlinked from the repo. Each machine configures its own MCP server paths and maintains its own global pattern files.
+| Path | Count | Purpose |
+|------|------:|---------|
+| `knowledge/patterns/*.yaml` | 39 | Patterns with slug IDs (`pat-<filename-stem>`). Each has a `legacy_id: PAT-NNN` field for backwards-compat (PR #87). |
+| `knowledge/decisions/*.yaml` | 9 | Decision log with `linked_patterns` cross-references. |
+| `knowledge/learning_rules/` | varies | Auto-extracted learning rules. |
+| `knowledge/projects/*.yaml` | 6 | Project state snapshots. |
+| `knowledge/specs/*.md` | several | Spec docs (knowledge-base-spec, pattern-lifecycle, etc.). |
+| `knowledge/sync.py` | — | Builds `knowledge.db` from YAMLs. Includes uniqueness guard (PR #87). |
+| `knowledge/knowledge.db` | — | SQLite, gitignored, rebuilt by post-merge hook. |
+
+### MCP servers (`knowledge-mcp/`, `mcp-server/`)
+
+| Server | Path | Language | Tools |
+|--------|------|----------|-------|
+| `knowledge` | `knowledge-mcp/index.ts` | TypeScript (tsx) | Pattern/decision query interface. |
+| `vault-metrics` | `mcp-server/server.py` | Python (.venv) | `vault_status`, `vault_search`, `vault_dashboard`, `agent_metrics`, `failure_patterns`. |
+
+### Migration scripts (`scripts/`)
+
+| File | Purpose |
+|------|---------|
+| `scripts/migrate-pattern-ids-to-slugs.py` | One-shot migration from `PAT-NNN` to slug IDs (PR #87). Idempotent — re-running is a no-op. |
+
+### CI (`.github/workflows/`)
+
+| File | Size | Purpose |
+|------|-----:|---------|
+| `.github/workflows/validate.yml` | 1.7 KB | Pre-merge config validation. Runs on PRs touching `claude-config/`, `knowledge/`, `codex-config/`, `install*.sh`. **PR #98.** |
+
+---
+
+## Per-project files (in any project's `.agents/outputs/`)
+
+When `/orchestrate` runs in a project, it produces artifacts in that project's `.agents/outputs/`:
+
+| Filename pattern | Producer | When |
+|------------------|----------|------|
+| `map-{issue}-{mmddyy}.md` | MAP agent | COMPLEX tier |
+| `plan-{issue}-{mmddyy}.md` | PLAN agent | COMPLEX tier |
+| `map-plan-{issue}-{mmddyy}.md` | MAP-PLAN agent | SIMPLE tier |
+| `discuss-{issue}-{mmddyy}.md` | DISCUSS agent | When `--discuss` is set |
+| `test-plan-{issue}-{mmddyy}.md` | TEST-PLANNER agent | When `--with-tests` is set |
+| `contract-{issue}-{mmddyy}.md` | CONTRACT agent | Fullstack tasks |
+| `plan-check-{issue}-{mmddyy}.md` | PLAN-CHECK agent | COMPLEX tier only |
+| `patch-{issue}-{mmddyy}.md` | PATCH agent | Always |
+| `prove-{issue}-{mmddyy}.md` | PROVE agent | Always (PROVE-lite for TRIVIAL no longer runs through orchestrate) |
+| `archive/*.md` | (post-merge) | Archived after PR merges |
+| `claude_checkpoints/PERSISTENT_STATE.yaml` | state_manager | Across sessions |
+
+Memory + metrics:
+
+| File | Purpose |
+|------|---------|
+| `~/agents/.claude/memory/metrics.jsonl` | One JSON-line per orchestrate outcome. |
+| `~/agents/.claude/memory/failures.jsonl` | One JSON-line per BLOCKED outcome with root_cause classification. |
+
+---
+
+## Where to look next
+
+- High-level orientation: [`claude-config/CLAUDE.md`](https://github.com/jwj2002/agents/blob/main/claude-config/CLAUDE.md)
+- All system diagrams: [Architecture Diagrams](architecture-diagrams.md)
+- Term definitions: [Glossary](glossary.md)

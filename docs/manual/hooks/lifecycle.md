@@ -1,15 +1,28 @@
 # Hook Lifecycle
 
-Claude Code hooks fire at specific moments during a session. Five hooks turn stateless chat sessions into stateful development workflows by persisting context across compactions, monitoring context usage, verifying completion quality, and sending notifications.
+Claude Code hooks fire at specific moments during a session. The `hooks/` directory contains **11 Python files**: 7 hook entry points wired into `settings.json`, plus shared modules (`state_manager.py`, `worktree_manager.py`) and a guard script (`secret_guard.py`) that is not currently wired into the lifecycle. Together they turn stateless chat sessions into stateful development workflows by persisting context across compactions, monitoring context usage, verifying completion quality, and sending notifications.
+
+## Wired Hooks
+
+| Lifecycle Event | Wired Scripts (in order) |
+|-----------------|--------------------------|
+| SessionStart | `sessionstart_restore_state.py`, `load_learning_rules.py` |
+| PreCompact | `precompact_checkpoint.py` |
+| PostToolUse | `context_monitor.py` |
+| Stop | `verify_completion.py`, `notify_completion.py`, `session_end_context_update.py` |
+
+`secret_guard.py` exists in `hooks/` but is not registered in `settings.json` — it can be wired into a `PreToolUse` matcher when secret-scanning is desired.
 
 ## Hook Execution Order
 
 ```
-+-- SessionStart ------------------------------------------------+
-|  sessionstart_restore_state.py                                  |
-|  +-- state_manager.get_active_work() -> restore active context  |
-|  +-- Load patterns (project -> global -> core-patterns.md)      |
-|  +-- Output ~500 tokens of restored context                     |
++-- SessionStart (2 hooks, sequential) -------------------------+
+|  1. sessionstart_restore_state.py                              |
+|     +-- state_manager.get_active_work() -> restore context     |
+|     +-- Load patterns (project -> global -> core-patterns.md)  |
+|     +-- Output ~500 tokens of restored context                 |
+|  2. load_learning_rules.py                                     |
+|     +-- Inject any project-specific learning rules             |
 +-----------------------------------------------------------------+
                           |
                     [Session Work]
@@ -32,9 +45,11 @@ Claude Code hooks fire at specific moments during a session. Five hooks turn sta
                           |
                     [Session Stop]
                           |
-+-- Stop (2 hooks, sequential) ---------------------------------+
++-- Stop (3 hooks, sequential) ---------------------------------+
 |  1. verify_completion.py                                       |
 |     +-- Check for uncommitted changes                          |
+|     +-- Check for un-pushed commits vs upstream                |
+|     +-- Check for branch ahead of origin/main with no PR       |
 |     +-- Scan for TODO/FIXME/HACK in diff                       |
 |     +-- Exit 0 to allow, advisory warning printed              |
 |                                                                |
@@ -43,6 +58,9 @@ Claude Code hooks fire at specific moments during a session. Five hooks turn sta
 |     +-- state_manager.get_active_work() -> get context         |
 |     +-- osascript display notification -> Notification Center  |
 |     +-- Auto-forwards to iPhone via Handoff                    |
+|                                                                |
+|  3. session_end_context_update.py                              |
+|     +-- Persist end-of-session context updates                 |
 +-----------------------------------------------------------------+
 ```
 
@@ -109,8 +127,10 @@ The extracted state is written to `PERSISTENT_STATE.yaml` via `state_manager.upd
 
 This hook checks for signs of incomplete work:
 
-- **Uncommitted changes** in substantive files (ignoring lock files and config files like `.yaml`, `.yml`, `.toml`)
-- **TODO/FIXME/HACK markers** in added lines within the current diff
+- **Uncommitted changes** -- any tracked file with staged or unstaged modifications. Reports as `Uncommitted changes (N files): a, b, c[, +K more]`. (As of PR #84 the hook flags every uncommitted file, including `.yaml`, `.yml`, `.toml`, and lock files — earlier versions excluded those.)
+- **Un-pushed commits** -- commits on the current branch that have not been pushed to its upstream. Reports as `N commit(s) not pushed to upstream`. Skipped silently if no upstream is configured.
+- **Branch ahead of origin/main with no open PR** -- a feature branch with commits beyond `origin/main` and no matching open PR according to `gh pr list`. Reports as `branch '<name>' is N commit(s) ahead of origin/main with no open PR`. Skipped silently if `gh` is unavailable or the current branch is `main`/`master`.
+- **TODO/FIXME/HACK markers** in added lines within the current diff.
 
 The output is advisory -- it prints warnings visible to the user as context for whether to continue the conversation. The hook always exits 0 to avoid feedback loops.
 
@@ -119,6 +139,18 @@ The output is advisory -- it prints warnings visible to the user as context for 
 **File**: `notify_completion.py`
 
 Sends a macOS Notification Center alert when the session finishes. See [Notifications](notifications.md) for details.
+
+## Stop: Session End Context Update
+
+**File**: `session_end_context_update.py`
+
+Runs last in the Stop chain. Persists end-of-session context — session metadata, last touched files, and any rolling state — so the next SessionStart has fresh material to restore from. Always exits 0; failures are logged but never block.
+
+## SessionStart: Load Learning Rules
+
+**File**: `load_learning_rules.py`
+
+Runs after `sessionstart_restore_state.py`. Injects project-specific learning rules drawn from the local memory store so that learned patterns surface alongside the always-loaded rule files. Output is appended to the same restored-context block — no separate banner.
 
 ## PostToolUse: Context Monitor
 
@@ -162,6 +194,10 @@ Hooks are configured in `settings.json`:
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/sessionstart_restore_state.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/load_learning_rules.py"
           }
         ]
       }
@@ -188,6 +224,10 @@ Hooks are configured in `settings.json`:
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/notify_completion.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/session_end_context_update.py"
           }
         ]
       }

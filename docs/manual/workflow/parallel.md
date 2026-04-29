@@ -42,8 +42,8 @@ Within a single orchestrate session, certain agents can run concurrently when th
 |---------|--------|-----------|
 | MAP fan-out | Explore backend + frontend + tests | COMPLEX pipeline tier |
 | MAP + TEST-PLANNER | MAP + TEST-PLANNER | COMPLEX pipeline with `--with-tests` |
-| PLAN-CHECK + TEST-PLANNER | PLAN-CHECK + TEST-PLANNER | `--with-tests` flag |
-| Speculative PATCH | PLAN-CHECK + PATCH | SIMPLE pipeline, backend-only |
+| PLAN-CHECK + TEST-PLANNER | PLAN-CHECK + TEST-PLANNER | COMPLEX only (PLAN-CHECK was dropped from SIMPLE in v5) + `--with-tests` |
+| Speculative PATCH | PLAN-CHECK + PATCH | COMPLEX only, backend-only |
 | Fullstack PATCH | Backend PATCH + Frontend PATCH | Fullstack with CONTRACT |
 
 ### MAP Fan-Out
@@ -65,7 +65,7 @@ Skip fan-out for TRIVIAL/SIMPLE pipeline tiers (MAP-PLAN handles exploration inl
 
 ### Speculative PATCH
 
-PLAN-CHECK passes approximately 90% of the time. Instead of waiting for validation, PATCH can start speculatively in parallel:
+This pattern only applies to the **COMPLEX pipeline**, since PLAN-CHECK was dropped from SIMPLE in v5. PLAN-CHECK passes approximately 90% of the time, so on COMPLEX backend-only issues PATCH can start speculatively in parallel:
 
 ```
 Spawn in parallel:
@@ -77,7 +77,7 @@ Spawn in parallel:
 ```
 
 !!! warning "When NOT to speculate"
-    Disable speculative PATCH for COMPLEX issues, fullstack changes, or issues that were previously BLOCKED. The plan rejection rate is higher in these cases.
+    Speculative PATCH never applies on the SIMPLE pipeline (no PLAN-CHECK to gate against). On COMPLEX, also disable speculation for fullstack changes or issues that were previously BLOCKED — the plan rejection rate is higher in those cases.
 
 ### Fullstack PATCH Split
 

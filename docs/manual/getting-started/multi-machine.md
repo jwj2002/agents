@@ -47,6 +47,10 @@ Because `~/.claude/` is symlinked to the repo, a `git pull` in `~/agents/` insta
 !!! note "Project-level memory lives in the project repo"
     Files under `<project>/.claude/memory/` (metrics, failures, patterns) are committed to each project's own repository, not to the agents repo. They sync with the project, not with the configuration.
 
+### Pattern IDs Across Machines
+
+Patterns under `knowledge/patterns/*.yaml` use slug-format IDs derived from the filename: a pattern in `pat-fastapi-base-model.yaml` has `id: pat-fastapi-base-model`. Because the filename is the namespace, two machines authoring different patterns get different filenames automatically -- no coordination needed, no merge conflicts on numeric counters. Each pattern also retains a `legacy_id: PAT-NNN` field for cross-reference with the historical numeric IDs. The `sync.py` build enforces uniqueness across the corpus, so a stray duplicate slug is caught at validation time rather than at runtime.
+
 ## Updating Shared Config
 
 When you edit configuration on one machine:

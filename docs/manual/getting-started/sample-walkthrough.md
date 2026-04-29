@@ -25,7 +25,7 @@ The orchestrator reads the issue, classifies it, and selects a pipeline:
 
 ```
 Issue #42 classified as: SIMPLE (backend)
-Using workflow: MAP-PLAN → PLAN-CHECK → PATCH → PROVE
+Using workflow: MAP-PLAN → PATCH → PROVE
 ```
 
 No CONTRACT agent is needed because this is backend-only work.
@@ -87,20 +87,7 @@ No CONTRACT agent is needed because this is backend-only work.
     AGENT_RETURN: map-plan-42-033126.md
     ```
 
-## 4. PLAN-CHECK Result
-
-The orchestrator validates the plan before handing off to PATCH:
-
-```
-PLAN-CHECK: map-plan-42-033126.md
-  ✓ Frontmatter complete
-  ✓ Acceptance criteria present (3 items)
-  ✓ File plan covers all identified files
-  ✓ No unresolved ambiguities
-Result: PASS — cleared for PATCH
-```
-
-## 5. PATCH Artifact
+## 4. PATCH Artifact
 
 ???+ example "Full PATCH artifact"
 
@@ -146,7 +133,7 @@ Result: PASS — cleared for PATCH
     AGENT_RETURN: patch-42-033126.md
     ```
 
-## 6. PROVE Artifact
+## 5. PROVE Artifact
 
 ???+ example "Full PROVE artifact"
 
@@ -178,7 +165,7 @@ Result: PASS — cleared for PATCH
     AGENT_RETURN: prove-42-033126.md
     ```
 
-## 7. The Result
+## 6. The Result
 
 The orchestrator reports the completed workflow:
 
@@ -192,7 +179,7 @@ Next: /pr 42
 === "SIMPLE (this example)"
 
     ```
-    MAP-PLAN → PLAN-CHECK → PATCH → PROVE
+    MAP-PLAN → PATCH → PROVE
     2 files, 3 artifacts, ~3 minutes
     ```
 
@@ -204,12 +191,12 @@ Next: /pr 42
     Separate investigation and planning phases
     ```
 
-## 8. What's in metrics.jsonl
+## 7. What's in metrics.jsonl
 
 PROVE appended this record to `.claude/memory/metrics.jsonl`:
 
 ```json
-{"issue":42,"date":"2026-03-31","status":"PASS","complexity":"SIMPLE","stack":"backend","agents_run":["MAP-PLAN","PLAN-CHECK","PATCH","PROVE"],"agent_versions":{"map-plan":"1.0","patch":"1.2","prove":"1.3"}}
+{"issue":42,"date":"2026-03-31","status":"PASS","complexity":"SIMPLE","stack":"backend","agents_run":["MAP-PLAN","PATCH","PROVE"],"agent_versions":{"map-plan":"1.0","patch":"1.2","prove":"1.3"}}
 ```
 
 Over time, these records power the `/metrics` dashboard and the `/learn` pattern extraction loop.

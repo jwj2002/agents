@@ -81,7 +81,7 @@ These additional failure modes appear frequently enough to warrant awareness, ev
 
 ## How Agents Load It
 
-The rule file uses `alwaysApply: true` in its frontmatter, which means Claude Code loads it into every session automatically. No conditional trigger is needed. The file lives at:
+The rule file declares `paths: ["**"]` in its frontmatter, which matches every file in the workspace and causes Claude Code to load it into every session automatically. (Only `git-workflow.md` uses the legacy `alwaysApply: true` key; other always-loaded rules — including this one — use `paths: ["**"]` instead.) The file lives at:
 
 ```
 ~/.claude/rules/core-patterns.md  (symlink)

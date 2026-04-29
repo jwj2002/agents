@@ -2,6 +2,9 @@
 
 The `/quick` command handles small, well-scoped tasks without the overhead of the full orchestrate pipeline. No sub-agents, no artifacts, no GitHub issue required. In the routing model, `/quick` is the destination for **TRIVIAL** routing tier tasks (1 file, obvious fix).
 
+!!! note "/orchestrate redirects TRIVIAL here"
+    Per PR #94, `/orchestrate` actively rejects TRIVIAL classifications and redirects you to `/quick` with an explicit message. There is no longer a TRIVIAL pipeline running through `/orchestrate` — this page describes where that work actually lives.
+
 ## Usage
 
 ```bash

@@ -34,9 +34,11 @@ cd ~/agents/claude-config && ./install.sh
 ```
 
 !!! success "Expected output"
-    The installer prints progress for each phase: `[1/4] Symlinks... [2/4] Dependencies... [2.5/4] Plugins... [3/4] First-time setup... [4/4] Verification...` with a final summary of all checks passed.
+    The installer prints progress for each phase:
+    `[1/4] Symlinks... [2/4] Dependencies... [2.5/4] Plugins... [2.6/4] MCP Servers (registration + npm cache warm-up)... [3/4] First-time setup... [3.5/4] Git hooks... [4/4] Verify symlinks + MCP server health... [4.5/4] Hook script path validation...`
+    with a final summary of all checks passed.
 
-The installer runs four phases automatically.
+The installer runs the following phases automatically: symlinks, dependencies, plugins, MCP server registration, first-time setup, git hooks, verification, and hook validation.
 
 ### Phase 1: Symlinks
 
@@ -106,6 +108,35 @@ claude plugin install frontend-design@claude-plugins-official
     - **LSP plugins** (typescript-lsp, pyright-lsp) require their respective language servers installed locally
     - All other plugins work out of the box
 
+### Phase 2.6: MCP Servers
+
+Registers the four standard MCP servers at user scope (writes to `~/.claude.json` -- per-machine, not symlinked). The installer runs `claude mcp add --scope user` for each server:
+
+```bash
+# Knowledge graph (TypeScript, runs under tsx)
+claude mcp add --scope user knowledge -- \
+  ~/agents/knowledge-mcp/node_modules/.bin/tsx \
+  ~/agents/knowledge-mcp/index.ts
+
+# Vault metrics (Python, dedicated venv from Phase 2)
+claude mcp add --scope user vault-metrics -- \
+  ~/agents/mcp-server/.venv/bin/python \
+  ~/agents/mcp-server/server.py
+
+# Library docs (npx)
+claude mcp add --scope user context7 -- \
+  npx -y @upstash/context7-mcp@latest
+
+# macOS-only platform integration
+claude mcp add --scope user apple-mcp -- \
+  npx -y apple-mcp@latest
+```
+
+After registration, the installer warms the npm cache by invoking each `npx`-based server once with stdin closed. This avoids the cold-cache failure mode where the first `npx -y <pkg>@latest` invocation exceeds Claude Code's MCP handshake timeout and shows `Failed to connect` on `claude mcp list`. The warm-up is bounded at 30 seconds and is best-effort -- registration succeeds either way.
+
+!!! note "Why per-machine"
+    `~/.claude.json` holds machine-specific paths (the `mcp-server/.venv` location, the `knowledge-mcp/node_modules/.bin/tsx` binary). It is not committed to the repo and not symlinked.
+
 ### Phase 3: First-time Setup
 
 Creates the Obsidian vault directory and agent configuration:
@@ -124,6 +155,18 @@ The installer verifies all components:
 - MCP server runs from its dedicated venv
 - PyYAML is importable by `python3`
 - `python3` command is available (hooks depend on it)
+
+### Phase 4.5: Hook Validation
+
+The installer runs `claude-config/scripts/validate-hooks.py`, which walks every hook command in `settings.json` and verifies the referenced script exists on disk. This catches the failure mode where `settings.json` references a hook script that did not ship -- which would brick every tool call in subsequent sessions.
+
+The validator:
+
+- Resolves each hook `command` field, including shebang-style invocations
+- Skips commands that resolve through `${CLAUDE_PLUGIN_ROOT}` (those are owned by the plugin lifecycle, not by `install.sh`)
+- Reports any missing script paths and increments the installer's error count
+
+If validation fails, the installer reports which hook scripts are missing and exits non-zero. Fix the paths in `settings.json` before restarting Claude Code.
 
 ## Platform Detection
 
@@ -165,6 +208,7 @@ claude
     - All three `ls -la` commands show symlinks pointing to `~/agents/claude-config/...`
     - PyYAML prints `OK`
     - `claude` launches and typing `/` lists all slash commands (orchestrate, quick, pr, learn, metrics, etc.)
+    - Phase 4.5 confirms `validate-hooks.py` resolved every hook script path; any missing script is reported before Claude Code starts
 
 You should see all slash commands available (type `/` to list them).
 
