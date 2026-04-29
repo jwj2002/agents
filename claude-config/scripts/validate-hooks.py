@@ -60,6 +60,27 @@ def _resolve_settings_path() -> Path:
     return Path(__file__).resolve().parent.parent / "settings.json"
 
 
+def _resolve_to_repo_source(script: str, settings_path: Path) -> Path | None:
+    """Map a deployed-symlink path to the source-of-truth file in the repo.
+
+    install.sh symlinks claude-config/<dir>/<file> into ~/.claude/<dir>/<file>.
+    When install.sh hasn't run (e.g. CI), the deployed path doesn't resolve
+    but the source path under claude-config/ does. This lets the validator
+    pass in both pre- and post-install environments.
+
+    Returns None if the script doesn't look like a deployed claude-config
+    path (in which case only the deployed-path check applies).
+    """
+    home_prefix = "~/.claude/"
+    if not script.startswith(home_prefix):
+        return None
+    rel = script[len(home_prefix):]
+    # settings.json lives at <repo>/claude-config/settings.json
+    repo_claude_config = settings_path.parent
+    candidate = repo_claude_config / rel
+    return candidate
+
+
 def _extract_script(cmd: str) -> str | None:
     """Return the first script-extension token after a known interpreter, or None."""
     if not cmd or "${CLAUDE_PLUGIN_ROOT}" in cmd:
@@ -118,19 +139,28 @@ def main() -> int:
                     continue
                 checked += 1
                 resolved = Path(os.path.expanduser(script))
-                if not resolved.is_file():
-                    missing.append(
-                        {
-                            "stage": stage,
-                            "location": (
-                                f"hooks.{stage}[{entry_idx}]"
-                                f".hooks[{hook_idx}].command"
-                            ),
-                            "command": cmd,
-                            "script": script,
-                            "resolved": str(resolved),
-                        }
-                    )
+                if resolved.is_file():
+                    continue
+                # Fallback: ~/.claude/hooks/<file>.py is the deployed symlink
+                # target installed by claude-config/install.sh. In CI (or any
+                # environment where install.sh hasn't run), the symlink doesn't
+                # exist but the source-of-truth file does. Resolve to the repo
+                # source path and check there too.
+                source = _resolve_to_repo_source(script, settings_path)
+                if source is not None and source.is_file():
+                    continue
+                missing.append(
+                    {
+                        "stage": stage,
+                        "location": (
+                            f"hooks.{stage}[{entry_idx}]"
+                            f".hooks[{hook_idx}].command"
+                        ),
+                        "command": cmd,
+                        "script": script,
+                        "resolved": str(resolved),
+                    }
+                )
 
     if missing:
         print("  ✗ Hook script paths missing:", file=sys.stderr)
