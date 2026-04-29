@@ -80,6 +80,7 @@ docs_dir: docs/manual
 
 nav:
   - Home: index.md
+  - Cookbook: cookbook.md
 
   - Getting Started:
     - First 10 Minutes: getting-started/first-10-minutes.md
