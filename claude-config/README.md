@@ -93,8 +93,9 @@ Canonical paths:
 
 | Command | Usage | Description |
 |---------|-------|-------------|
-| `/learn` | `/learn --cross-project` | Analyze failures, extract patterns across projects |
+| `/learn` | `/learn --cross-project` | Analyze failures, extract patterns across projects (top-down) |
 | `/learn --validate` | `/learn --validate` | A/B test pattern effectiveness (before/after rates) |
+| `/discover-patterns` | `/discover-patterns api` | Bottom-up extraction: read existing code, surface non-obvious conventions as `knowledge/patterns/pat-<slug>.yaml` files. Complements `/learn`. |
 | `/metrics` | `/metrics --week` | Agent performance dashboard with version correlation |
 
 ### FastAPI Scaffolding

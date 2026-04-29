@@ -111,6 +111,25 @@ You've finished implementation. Diff includes auth, migrations, or a 50-file cro
 
 Codex reads the diff fresh (different model, different blind spots) and reports BLOCKING / NON-BLOCKING / CLEAN findings. `/pr` will prompt you to run this for COMPLEX-tier diffs automatically.
 
+### Document an existing project's conventions as patterns
+
+You've inherited a repo or are auditing established code. Surface the team's tribal knowledge as queryable patterns.
+
+```bash
+cd ~/projects/<repo>
+/discover-patterns
+```
+
+What happens:
+
+1. Claude scans the directory and offers 3-5 major focus areas (`api/`, `database/`, `auth/`, etc.)
+2. You pick one. Claude reads representative files and surfaces 3-5 candidate patterns.
+3. For each pattern you keep, Claude asks why the team does it that way (1-2 clarifying questions).
+4. Claude writes `knowledge/patterns/pat-<slug>.yaml` with `status: pilot` and a reference back to the source file.
+5. `sync.py` validates the slug-uniqueness invariant. New patterns surface through `vault-metrics` MCP at next session start.
+
+Capped at 3 patterns per run. Complements `/learn` (top-down from failures) — use `/discover-patterns` when you want bottom-up from working code.
+
 ### Capture a thought without losing focus
 
 Mid-implementation, an idea hits you. You don't want to context-switch.
