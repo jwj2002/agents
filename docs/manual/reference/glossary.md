@@ -45,7 +45,7 @@ Two related tier systems are used to categorize and route tasks:
 ## D
 
 **DISCUSS**
-An optional agent (phase 0.5) that identifies 2-5 gray areas in issue requirements and captures implementation decisions before MAP-PLAN runs. Triggered by `--discuss` flag.
+An optional agent (phase 0.5) that identifies 2-5 gray areas in issue requirements and captures implementation decisions before MAP/MAP-PLAN runs. Triggered by the `--discuss` flag on `/orchestrate`. Read-only -- produces a `discuss-{issue}-{mmddyy}.md` artifact that downstream agents reference. Recommended for COMPLEX and FULLSTACK tasks where requirements have ambiguities that would otherwise be resolved arbitrarily during PATCH.
 
 ## F
 
@@ -85,12 +85,18 @@ Structured outcome data recorded as JSON lines in `metrics.jsonl`. Each complete
 ## O
 
 **Orchestrate**
-The primary workflow command (`/orchestrate`) that takes a GitHub issue number and executes a multi-agent pipeline: MAP, PLAN, CONTRACT, PATCH, PROVE. Supports flags for test planning (`--with-tests`), session resumption (`--resume`), and parallel execution (`--parallel`).
+The primary workflow command (`/orchestrate`) that takes a GitHub issue number and executes a multi-agent pipeline. The canonical agent set is DISCUSS, MAP, PLAN, CONTRACT, TEST-PLANNER, PLAN-CHECK, PATCH, PROVE; any single run invokes a subset chosen by the routing tier, complexity classification, and flags. Supports flags for test planning (`--with-tests`), discussion (`--discuss`), session resumption (`--resume`), and parallel execution (`--parallel`).
 
 ## P
 
 **Pipeline Tier**
 One of three agent sequences used inside `/orchestrate`: TRIVIAL (MAP-PLAN, PATCH, PROVE-lite), SIMPLE (full agent chain with MAP-PLAN), or COMPLEX (full agent chain with separate MAP and PLAN). Distinct from routing tiers, which determine whether a task reaches `/orchestrate` at all.
+
+**plan-checker**
+A read-only agent that validates a PLAN or MAP-PLAN artifact for completeness before PATCH burns context implementing it. Confirms every acceptance criterion maps to a planned task, the file count matches the complexity classification, fullstack plans declare explicit enum VALUES, and multi-layer plans include integration steps. Runs in the COMPLEX pipeline only -- the v5 SIMPLE pipeline drops PLAN-CHECK because PATCH catches plan defects fast enough on small changes. Produces a `plan-check-{issue}-{mmddyy}.md` artifact (~80-120 lines).
+
+**pr-fresh-reviewer**
+A subagent invoked by `/pr` to review the proposed PR with a fresh context window -- no orchestrate-pipeline state, no prior conversation. The fresh perspective catches issues the implementing agent rationalized away during PATCH. Runs against the diff and produces concise findings; the user decides whether to address them before merge.
 
 **PRIOR FAIL (routing tier)**
 A routing tier applied to any task that previously failed. PRIOR FAIL tasks are routed to `/orchestrate` with the prior failure's root cause and prevention recommendation injected into agent context.
@@ -137,6 +143,9 @@ A multi-step workflow defined in `~/.claude/skills/`. Skills are more complex th
 
 **Slash Command**
 A user-invokable command defined as a markdown file in `~/.claude/commands/`. Examples: `/orchestrate`, `/pr`, `/learn`, `/metrics`, `/scaffold-project`. Commands encode workflow logic and can spawn agents, create PRs, or analyze data.
+
+**spec-reviewer**
+An agent that validates a specification document against the current codebase, identifies gaps and inconsistencies, and (after the spec is finalized) generates a set of GitHub issues that map spec requirements onto implementation work. Used by `/spec-review` and `/feature-from-spec`. Read-only against the codebase but write-capable against the issue tracker.
 
 **State Manager**
 The centralized Python module (`hooks/state_manager.py`) that handles all reads and writes to `PERSISTENT_STATE.yaml`. Used by orchestrate (update phase), precompact hook (save transcript state), sessionstart hook (restore context), and the `--resume`/`--parallel` flags.

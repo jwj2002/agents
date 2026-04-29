@@ -1,6 +1,6 @@
 # PROVE Agent
 
-**Version**: 1.3 | **Phase**: 4 | **Role**: Verifier + Outcome Recorder
+**Version**: 1.5 | **Phase**: 4 | **Role**: Verifier + Outcome Recorder
 
 PROVE is the final agent in the pipeline. It verifies that PATCH's implementation actually works, checks every acceptance criterion, records the outcome to structured data files, and classifies any failures by root cause. PROVE never fixes code -- it only reports.
 
@@ -13,6 +13,32 @@ ls .agents/outputs/patch-${ISSUE}-*.md
 ```
 
 If the PATCH artifact is missing, PROVE stops with `BLOCKED: PATCH artifact not found`.
+
+## Step 0: Select Applicable Behavioral Evals
+
+Before running the verification levels, PROVE selects which behavioral evals apply to the change. The eval framework is defined in `rules/behavioral-evals.md` (E01-E15) and the file-pattern routing in `rules/eval-file-mapping.md`.
+
+```bash
+git diff --name-only origin/main
+# Match each changed file against the eval-file-mapping table
+# Collect the unique set of applicable eval IDs
+```
+
+| File Pattern | Applicable Evals |
+|-------------|------------------|
+| `*.tsx`, `*.ts` | E01 (ENUM_VALUE), E02 (COMPONENT_API), E03 (HOOK_DEPS), E15 (SECRETS) |
+| `models/*.py`, `app/models/*.py` | E04, E05, E06, E08, E13, E15 |
+| `schemas/*.py`, `app/schemas/*.py` | E01, E05, E06 |
+| `alembic/versions/*.py` | E07, E08 |
+| `services/*.py`, `app/services/*.py` | E09, E10, E12, E15 |
+| `routers/*.py`, `app/routers/*.py` | E11, E12, E15 |
+| `repositories/*.py`, `app/repositories/*.py` | E10, E13 |
+| `Dockerfile`, `docker-compose.yml` | E14 |
+| `*.py` (catch-all) | E15 |
+
+If no files match any pattern, PROVE runs E15 (SECRETS) as a catch-all. Fullstack changes always add E01 (ENUM_VALUE). The `--thorough` flag forces all evals regardless of file mapping.
+
+The selected evals run inline within the verification levels below: file-pattern checks (E01, E02, E03, E11, etc.) feed into Level 3 (WIRED); secret/migration checks (E15, E07) feed into Level 4 (FUNCTIONAL).
 
 ## Four Verification Levels
 
@@ -144,7 +170,7 @@ Append to `.claude/memory/metrics.jsonl`:
   "complexity": "SIMPLE",
   "stack": "backend",
   "agents_run": ["MAP-PLAN", "PATCH", "PROVE"],
-  "agent_versions": {"map-plan": "1.0", "patch": "1.2", "prove": "1.3"}
+  "agent_versions": {"map-plan": "1.1", "patch": "1.5", "prove": "1.5"}
 }
 ```
 
@@ -185,13 +211,9 @@ When recording a BLOCKED outcome, PROVE classifies the failure using one of 12 c
 !!! tip "See also"
     For the full ENUM_VALUE pattern with code examples, see [Core Patterns -- ENUM_VALUE](../rules/core-patterns.md#enum_value-in-detail). For the complete 12-code taxonomy, see [Failure Patterns](../learning/failure-patterns.md#full-root-cause-taxonomy).
 
-## PROVE-lite
+## PROVE-lite (Deprecated)
 
-For TRIVIAL issues, PROVE runs in a lightweight mode:
-
-- Runs Level 4 (FUNCTIONAL) gates only
-- Skips Level 2 (SUBSTANTIVE) and Level 3 (WIRED) checks
-- Still records the outcome to `metrics.jsonl`
+PROVE-lite was the lightweight variant for the TRIVIAL pipeline (Level 4 gates only). Since `/orchestrate` now rejects TRIVIAL classifications and redirects them to `/quick` (which has no PROVE phase), PROVE-lite no longer runs in the orchestrate pipeline. It remains in the agent definition for historical reference but is not invoked by any current workflow.
 
 ## When BLOCKED
 

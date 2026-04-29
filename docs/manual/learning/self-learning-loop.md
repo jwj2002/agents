@@ -152,6 +152,12 @@ Agents prefer MCP tools over file reads for pattern data during pre-flight. MCP 
 !!! tip "See also"
     For the full MCP pattern loading diagram and configuration details, see [MCP Servers -- MCP-First Pattern Loading](../integrations/mcp-servers.md#mcp-first-pattern-loading).
 
+## Pattern IDs (Slug Format)
+
+Patterns under `knowledge/patterns/*.yaml` use slug-format IDs derived from the filename: a pattern stored in `pat-fastapi-base-model.yaml` has `id: pat-fastapi-base-model`. Each YAML also retains a `legacy_id: PAT-NNN` field that preserves the historical numeric ID for cross-reference with older artifacts and metrics records.
+
+Slugs are multi-machine safe by construction: the filename is the namespace, so two machines authoring different patterns concurrently get different filenames automatically -- no shared counter, no merge conflicts. The `sync.py` build enforces slug uniqueness across the whole corpus, so any accidental duplicate is caught at validation time. When `/learn --apply` writes a new pattern it picks the slug from the chosen filename and copies the legacy numeric counter only if the pattern is migrating from the old scheme.
+
 ## Real-World Results
 
 From one production project (86 issues analyzed over 5 weeks):

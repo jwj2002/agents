@@ -2,19 +2,33 @@
 
 When you run `/orchestrate`, a team of specialized agents handles your issue. Each agent has one job — investigate, plan, implement, or verify. Only one agent (PATCH) writes code. The rest are read-only, which means they can't break anything while they work.
 
-## Agent Roles
+## Agent Roster
+
+There are **12 agent definitions** in `claude-config/agents/`. Nine participate in the orchestrate pipeline; three are dispatched by other commands (`/spec-review`, `/pr`).
+
+### Pipeline Agents (9)
 
 | Agent | Phase | Role | Read-Only? | Target / Max Lines |
 |-------|-------|------|------------|-------------------|
+| DISCUSS | 0.5 | Decision Capturer (optional, `--discuss`) | Yes | 80 / 120 |
 | MAP | 1 | Investigator (COMPLEX pipeline only) | Yes | 150 / 200 |
-| MAP-PLAN | 1+2 | Investigator + Architect (TRIVIAL/SIMPLE pipeline) | Yes | 400 / 500 |
+| MAP-PLAN | 1+2 | Investigator + Architect (SIMPLE pipeline) | Yes | 400 / 500 |
 | PLAN | 2 | Architect (COMPLEX pipeline only) | Yes | 400 / 500 |
 | TEST-PLANNER | 2 | Test matrix designer | Yes | 250 / 350 |
 | CONTRACT | 2.5 | Interface designer (fullstack) | Yes | 200 / 300 |
-| PLAN-CHECK | 2.8 | Plan validator | Yes | 80 / 120 |
+| PLAN-CHECK | 2.8 | Plan validator (COMPLEX pipeline only) | Yes | 80 / 120 |
 | PATCH | 3 | Implementer | **No** | 300 / 400 |
 | PROVE | 4 | Verifier + outcome recorder | Metrics only | 250 / 350 |
-| DISCUSS | 0.5 | Decision Capturer (optional, `--discuss`) | Yes | 80 / 120 |
+
+### Dispatched Agents (3)
+
+| Agent | Dispatched By | Role | Read-Only? |
+|-------|---------------|------|------------|
+| spec-reviewer | `/spec-review` | Spec analysis and gap classification | Yes |
+| plan-checker | `/orchestrate` (COMPLEX) | Plan validator (alias for PLAN-CHECK) | Yes |
+| pr-fresh-reviewer | `/pr` | Pre-merge fresh-eyes diff review | Yes |
+
+Plus the shared `_base.md` definition (not an agent itself, but inherited by all).
 
 !!! warning "Separation of Concerns"
     Only PATCH writes code. Only PROVE records metrics. Investigation agents must never start implementing. Verification agents must never start fixing.
@@ -24,39 +38,41 @@ When you run `/orchestrate`, a team of specialized agents handles your issue. Ea
 !!! info "Pipeline tiers vs routing tiers"
     This page describes the **pipeline tiers** — which agents run inside `/orchestrate`. For the full **routing model** (how tasks are classified and directed to `/quick`, Plan Mode, or `/orchestrate`), see the [Orchestrate Pipeline](../workflow/orchestrate.md) page.
 
-When `/orchestrate` runs, it selects one of three pipeline tiers:
+When `/orchestrate` runs, it selects one of two pipeline tiers. TRIVIAL classifications are rejected — `/orchestrate` redirects them to `/quick` (no pipeline).
 
 ```
-TRIVIAL pipeline:  MAP-PLAN ─────────────────────────────────────────── PATCH ── PROVE-lite
-SIMPLE pipeline:   [DISCUSS] ── MAP-PLAN ── [TEST-PLANNER] ── CONTRACT* ── PLAN-CHECK ── PATCH ── PROVE
+SIMPLE pipeline:   [DISCUSS] ── MAP-PLAN ── [TEST-PLANNER] ── CONTRACT* ── PATCH ── PROVE
 COMPLEX pipeline:  [DISCUSS] ── MAP ── PLAN ── [TEST-PLANNER] ── CONTRACT* ── PLAN-CHECK ── PATCH ── PROVE
 
 * = mandatory for fullstack only
 [ ] = optional, enabled with --with-tests or --discuss
 ```
 
+PLAN-CHECK was removed from the SIMPLE pipeline in v5 — the cost of a separate validation phase did not justify the savings on small changes. PATCH catches plan defects fast enough on SIMPLE work, and Codex adversarial review (post-PROVE) picks up the rest. COMPLEX retains PLAN-CHECK because the cost of a botched multi-file PATCH is much higher.
+
 ```
                   +----------------+
                   | /orchestrate   |
                   +-------+--------+
                           |
-                +---------+---------+
-                | Select Pipeline   |
-                +---------+---------+
-           +----------+----------+----------+
-           v          v                     v
-     TRIVIAL       SIMPLE              COMPLEX
-     pipeline      pipeline            pipeline
-           |          |                     |
-           |     [DISCUSS]             [DISCUSS]
-           |          |                     |
-       MAP-PLAN   MAP-PLAN             MAP -> PLAN
-           |          |                     |
-           |     CONTRACT* / PLAN-CHECK  CONTRACT / PLAN-CHECK
-           |          |                     |
-        PATCH      PATCH                 PATCH
-           |          |                     |
-      PROVE-lite   PROVE                 PROVE
+                  +-------+--------+
+                  | Classify Tier  |
+                  +-------+--------+
+              +-----+-----+-----+
+              v           v     v
+          TRIVIAL       SIMPLE  COMPLEX
+              |           |       |
+         [reject;        |  [DISCUSS]
+          tell user      |       |
+          to use     [DISCUSS] MAP -> PLAN
+          /quick]        |       |
+                     MAP-PLAN  CONTRACT* / PLAN-CHECK
+                         |       |
+                     CONTRACT* PATCH
+                         |       |
+                       PATCH   PROVE
+                         |
+                       PROVE
 ```
 
 ## Artifact Chains and Validation
@@ -70,20 +86,36 @@ Each agent produces a named artifact following the pattern `{agent}-{issue}-{mmd
 | PLAN | MAP artifact | Yes |
 | TEST-PLANNER | MAP or MAP-PLAN | Yes |
 | CONTRACT | PLAN or MAP-PLAN | Yes |
-| PLAN-CHECK | PLAN or MAP-PLAN; CONTRACT if fullstack | Yes |
-| PATCH | PLAN or MAP-PLAN; CONTRACT if fullstack; PLAN-CHECK | Yes |
+| PLAN-CHECK | PLAN; CONTRACT if fullstack (COMPLEX only) | Yes |
+| PATCH | PLAN or MAP-PLAN; CONTRACT if fullstack; PLAN-CHECK if COMPLEX | Yes |
 | PROVE | PATCH artifact | Yes |
+
+SIMPLE artifact chain:
 
 ```
 map-plan-184-030826.md
     |
     +-- contract-184-030826.md (if fullstack)
-    |
-    +-- plan-check-184-030826.md
             |
             +-- patch-184-030826.md
                     |
                     +-- prove-184-030826.md
+```
+
+COMPLEX artifact chain:
+
+```
+map-184-030826.md
+    |
+    +-- plan-184-030826.md
+            |
+            +-- contract-184-030826.md (if fullstack)
+                    |
+                    +-- plan-check-184-030826.md
+                            |
+                            +-- patch-184-030826.md
+                                    |
+                                    +-- prove-184-030826.md
 ```
 
 !!! note "Blocking on Missing Artifacts"
@@ -93,15 +125,15 @@ map-plan-184-030826.md
 
     ## Shared Behaviors from _base.md
 
-    All agents inherit from `_base.md` (v3.0), which provides:
+    All agents inherit from `_base.md` (v4.1, 265 lines — trimmed from 399 in PR #97). It provides:
 
-    **Pre-flight checks** -- Before any work begins, agents load learned failure patterns (via MCP `failure_patterns()` or file fallback), search for similar past artifacts, and verify project constraints.
+    **Pre-flight checks** -- Before any work begins, agents load learned failure patterns (via MCP `failure_patterns_v1()` or file fallback), search for similar past artifacts, and verify project constraints.
 
     **Artifact naming** -- `{agent}-{issue}-{mmddyy}.md` in `.agents/outputs/`.
 
     **Size compliance** -- Each agent has target and max line counts. Artifacts over max must be compressed before submission using a priority checklist: replace code quotes with line references, remove restated acceptance criteria, consolidate duplicates, remove appendices.
 
-    **Verification commands** -- Standardized gates for backend (`ruff check . && pytest -q`) and frontend (`npm run lint && npm run build`).
+    **Verification commands** -- Standardized gates for backend (`ruff check . && pytest -q`) and frontend (`npm run lint && npm run build`). The full command catalog now lives in `claude-config/snippets/verify-commands.md`; `_base.md` references the snippet rather than enumerating commands inline.
 
     **AGENT_RETURN directive** -- Every agent must end output with `AGENT_RETURN: {filename}` to signal completion to the orchestrator.
 
@@ -121,7 +153,7 @@ All agents include `version: X.Y` in their YAML frontmatter.
 Versions are recorded in `metrics.jsonl` via the `agent_versions` field, enabling correlation between agent versions and success rates through the `/metrics` command.
 
 ```json
-"agent_versions": {"map-plan": "1.0", "patch": "1.2", "prove": "1.3"}
+"agent_versions": {"map-plan": "1.1", "patch": "1.5", "prove": "1.5"}
 ```
 
 ??? info "Root cause classification codes"

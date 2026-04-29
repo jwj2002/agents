@@ -13,7 +13,7 @@ All slash commands are defined in `claude-config/commands/` and available global
 
 ### /orchestrate
 
-Runs the multi-agent pipeline for a GitHub issue. Used for MODERATE, COMPLEX, FULLSTACK, and PRIOR FAIL routing tiers. Internally selects a pipeline tier (TRIVIAL, SIMPLE, or COMPLEX) to determine which agents run.
+Runs the multi-agent pipeline for a GitHub issue. Used for MODERATE, COMPLEX, FULLSTACK, and PRIOR FAIL routing tiers. Internally selects a pipeline tier (SIMPLE or COMPLEX) to determine which agents run. TRIVIAL classifications are rejected and redirected to `/quick` (per PR #94).
 
 ```bash
 /orchestrate 184                      # Standard
@@ -28,7 +28,7 @@ Runs the multi-agent pipeline for a GitHub issue. Used for MODERATE, COMPLEX, FU
     ```
     You: /orchestrate 42
     Claude: Issue #42 classified as: SIMPLE (backend)
-            Using workflow: MAP-PLAN → PLAN-CHECK → PATCH → PROVE
+            Using workflow: MAP-PLAN → PATCH → PROVE
             ... [agents run] ...
             Workflow complete. Next: /pr 42
     ```
@@ -230,19 +230,34 @@ Adds a domain module to an existing project with all layers.
 
 Generates: `models.py`, `schemas.py`, `repository.py`, `services.py`, `deps.py`, `router.py`.
 
-## External Agent Commands
+### /frontend-design
+
+Generates production-grade frontend interfaces with high design quality, avoiding generic AI aesthetics.
+
+```bash
+/frontend-design "Settings page with tabs for profile, billing, notifications"
+```
+
+## Codex Plugin Commands
+
+These commands are provided by the installed Codex plugin (not by `claude-config/commands/`). They enable cross-model review and delegation to OpenAI's GPT-5.4 family.
 
 | Command | Usage | Purpose |
 |---------|-------|---------|
-| `/obsidian` | `/obsidian [--dry-run]` | Capture session to Obsidian vault |
-| `/standup` | `/standup` | Generate daily standup from vault |
-| `/changelog` | `/changelog` | Update changelog from merged PRs |
-| `/codex-review` | `/codex-review` | Second opinion from OpenAI Codex |
+| `/codex:setup` | `/codex:setup` | Verify the local Codex CLI is ready; toggle review gate |
+| `/codex:review` | `/codex:review [--background]` | Standard cross-model review of staged or recent changes |
+| `/codex:adversarial-review` | `/codex:adversarial-review [--background]` | Adversarial review focused on contract / access-control / data drift |
+| `/codex:rescue` | `/codex:rescue [--background] [--write]` | Delegate investigation, a fix, or a follow-up task to Codex |
+| `/codex:status` | `/codex:status` | Check the status of background Codex jobs |
+| `/codex:result` | `/codex:result <id>` | Retrieve the output of a completed Codex job |
+| `/codex:cancel` | `/codex:cancel <id>` | Cancel an in-flight Codex job |
 
-!!! note "External commands require additional setup"
-    `/obsidian` requires the obsidian-agent module. `/codex-review` requires an OpenAI API key and the Codex plugin.
+!!! note "Codex commands require the plugin"
+    The `/codex:*` commands are provided by the Codex plugin and require an OpenAI API key plus the local Codex CLI. See [Codex Plugin](../integrations/codex-plugin.md) for setup and the full delegation playbook.
 
 ## All Commands at a Glance
+
+The 16 slash commands shipped from `claude-config/commands/`:
 
 | Command | Category | Requires Issue | Creates Files |
 |---------|----------|---------------|---------------|
@@ -261,7 +276,6 @@ Generates: `models.py`, `schemas.py`, `repository.py`, `services.py`, `deps.py`,
 | `/metrics` | Learning | No | None (read-only) |
 | `/scaffold-project` | Scaffolding | No | 30+ project files |
 | `/scaffold-module` | Scaffolding | No | 6 module files |
-| `/obsidian` | External | No | Vault entries |
-| `/standup` | External | No | Report output |
-| `/changelog` | External | No | CHANGELOG.md |
-| `/codex-review` | External | No | None |
+| `/frontend-design` | Design | No | Frontend source files |
+
+The `/codex:*` family lives in the Codex plugin, not in this repo — see the table above.
