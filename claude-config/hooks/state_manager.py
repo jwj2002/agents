@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -327,3 +328,76 @@ def record_failure(
         _append_jsonl(target, record)
     except OSError as e:
         logging.warning(f"record_failure: could not append to {target}: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Derive agents_run from artifact directory (issue #107)
+# ---------------------------------------------------------------------------
+#
+# The orchestrator's Step 4 needs the ordered list of phase names that
+# actually ran for an issue. Tracking that across phase dispatches is
+# error-prone (the orchestrator command is stateless between agent calls),
+# so we derive it after the fact from `.agents/outputs/`. Every agent that
+# ran wrote a `<phase>-<issue>-<mmddyy>.md` artifact — the directory IS the
+# ground truth for what ran.
+
+# Compiled per-call (issue number is variable). Match `<phase>-<issue>-NNNNNN.md`
+# where phase is lowercase letters with optional hyphens (map, map-plan,
+# plan-check, test-plan, etc.) and the date is exactly 6 digits.
+_PHASE_RE_TEMPLATE = r"^([a-z\-]+)-{issue}-\d{{6}}\.md$"
+
+
+def derive_agents_run(project_dir: Path, issue: int) -> list[str]:
+    """Scan ``.agents/outputs/`` for this issue's artifact files; return phase
+    names in mtime order.
+
+    Each agent that ran wrote a ``<phase>-<issue>-<mmddyy>.md`` artifact.
+    Reading the directory is the ground truth for what actually ran — more
+    reliable than tracking state across phase dispatches in the orchestrator
+    command (which is stateless between Task() calls).
+
+    Phase name mapping: filename stem → uppercase canonical name.
+    Examples::
+
+        map-184-042926.md          → MAP
+        map-plan-184-042926.md     → MAP-PLAN
+        plan-check-184-042926.md   → PLAN-CHECK
+        test-plan-184-042926.md    → TEST-PLAN
+
+    Args:
+        project_dir: Project root. Artifacts live under
+            ``<project_dir>/.agents/outputs/``.
+        issue: GitHub issue number.
+
+    Returns:
+        Ordered list of uppercase phase names. Empty list if the
+        ``.agents/outputs/`` directory doesn't exist or no matching
+        artifacts are found.
+    """
+    out_dir = project_dir / ".agents" / "outputs"
+    if not out_dir.is_dir():
+        return []
+
+    pattern = re.compile(_PHASE_RE_TEMPLATE.format(issue=issue))
+
+    # Glob first (fast directory scan), then regex-validate each name.
+    # The glob is permissive — it catches anything matching the issue stem;
+    # the regex enforces the actual `<phase>-<issue>-NNNNNN.md` shape and
+    # rejects oddities like `random-1234-thing.md`.
+    matches: list[tuple[float, str]] = []
+    for p in out_dir.glob(f"*-{issue}-*.md"):
+        m = pattern.match(p.name)
+        if not m:
+            continue
+        try:
+            mtime = p.stat().st_mtime
+        except OSError:
+            # Fail open: if we can't stat the file, skip rather than raise.
+            continue
+        matches.append((mtime, m.group(1).upper()))
+
+    # Sort by mtime to preserve actual execution order. Alphabetical sort
+    # would put `map` after `map-plan`; mtime is more honest about what
+    # ran when.
+    matches.sort()
+    return [phase for _, phase in matches]

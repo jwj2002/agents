@@ -296,6 +296,13 @@ this step performs the deterministic write. PROVE does NOT write to
 `.claude/memory/` directly (see issue #104 — embedding the write in PROVE's
 prompt was unreliable).
 
+`agents_run` is **derived from `.agents/outputs/`** by scanning for
+`<phase>-<issue>-<mmddyy>.md` artifacts and sorting by mtime — the
+artifact directory IS the ground truth for what ran, not state tracked
+across phase dispatches (the orchestrator command is stateless between
+Task() calls; see issue #107). The `$AGENTS_RUN_JSON` env var is no
+longer used.
+
 After PROVE returns, parse its artifact frontmatter and call the
 `state_manager` helpers:
 
@@ -305,10 +312,10 @@ if [ -z "$PROVE_ART" ] || [ ! -f "$PROVE_ART" ]; then
   echo "WARNING: no PROVE artifact found for issue ${ISSUE}; skipping outcome recording"
 else
   python3 - <<PYEOF
-import sys, re, json
+import sys, re
 sys.path.insert(0, '$HOME/.claude/hooks')
 from pathlib import Path
-from state_manager import record_metrics, record_failure
+from state_manager import record_metrics, record_failure, derive_agents_run
 
 art = Path("$PROVE_ART").read_text(encoding="utf-8")
 fm_match = re.search(r"^---\n(.*?)\n---", art, re.DOTALL | re.MULTILINE)
@@ -321,7 +328,10 @@ def field(name, default=None):
 status     = field("status", "PASS")
 complexity = "$COMPLEXITY" or field("complexity", "SIMPLE")
 stack      = "$STACK"      or field("stack", "backend")
-agents_run = json.loads('$AGENTS_RUN_JSON' or '["MAP-PLAN","PATCH","PROVE"]')
+agents_run = derive_agents_run(Path("."), int("$ISSUE"))
+if not agents_run:
+    print(f"Warning: no artifacts found for issue $ISSUE; recording with empty agents_run")
+    agents_run = []
 root_cause = field("root_cause") if status == "BLOCKED" else None
 
 record_metrics(
@@ -350,8 +360,11 @@ fi
 
 If PROVE's frontmatter is malformed, `record_metrics` still writes a minimal
 record with sensible defaults (`status=PASS`, `complexity=SIMPLE`,
-`stack=backend`) — partial data > no data. The helpers fail open on IOError;
-losing one metric line never fails the orchestrate run.
+`stack=backend`) — partial data > no data. If no artifacts are found for
+the issue, `agents_run` is recorded as `[]` (clearly wrong, easy to filter
+out later) rather than a hardcoded but plausible default that would lie
+about what actually ran. The helpers fail open on IOError; losing one
+metric line never fails the orchestrate run.
 
 ### Step 5: Report Status
 
