@@ -186,30 +186,46 @@ Reference PLAN/MAP-PLAN acceptance criteria:
 
 ---
 
-## Outcome Recording (MANDATORY)
+## Outcome Data (MANDATORY in artifact frontmatter)
 
-### If PASS
+**You do NOT write to `.claude/memory/` yourself.** The orchestrator records
+the outcome deterministically (see `commands/orchestrate.md` Step 4 — the
+canonical recording site). Your job is to populate the data the orchestrator
+will record, by setting these fields in your artifact's YAML frontmatter:
 
-```bash
-# Append to metrics
-echo '{"issue":'$ISSUE',"date":"'$(date +%Y-%m-%d)'","status":"PASS","complexity":"'$COMPLEXITY'","stack":"'$STACK'","agents_run":["MAP-PLAN","PATCH","PROVE"]}' >> .claude/memory/metrics.jsonl
+```yaml
+---
+issue: {issue_number}
+agent: PROVE
+date: {YYYY-MM-DD}
+status: PASS            # or BLOCKED
+complexity: SIMPLE      # TRIVIAL | SIMPLE | COMPLEX
+stack: backend          # backend | frontend | fullstack
+root_cause: null        # MANDATORY if status=BLOCKED — use a code from _base.md §10
+blocking_agent: null    # MANDATORY if status=BLOCKED — usually "PROVE"
+---
 ```
 
-### If BLOCKED
+If `status: BLOCKED`, also include a `## Failure Details` block in the
+artifact body so the orchestrator can populate `failures.jsonl`. Use simple
+`key: value` lines (one per line) — the orchestrator parses them with a
+basic regex:
 
-**Step 1**: Classify root cause using canonical enum from `_base.md` section 10.
-
-Common codes: `ENUM_VALUE`, `COMPONENT_API`, `MULTI_MODEL`, `API_MISMATCH`, `ACCESS_CONTROL`, `MISSING_TEST`, `SQLITE_COMPAT`, `STRUCTURE_VIOLATION`, `SCOPE_CREEP`, `VERIFICATION_GAP`, `OTHER`
-
-**Step 2**: Record failure using canonical schemas from `_base.md` sections 11-12.
-
-```bash
-# Append to failures (canonical schema)
-echo '{"issue":'$ISSUE',"date":"'$(date +%Y-%m-%d)'","agent":"PATCH","root_cause":"'$CAUSE'","details":"'$DETAILS'","fix":"'$FIX'","prevention":"'$PREVENTION'","files":['$FILES']}' >> .claude/memory/failures.jsonl
-
-# Append to metrics (canonical schema)
-echo '{"issue":'$ISSUE',"date":"'$(date +%Y-%m-%d)'","status":"BLOCKED","complexity":"'$COMPLEXITY'","stack":"'$STACK'","agents_run":['$AGENTS'],"agent_versions":{'$VERSIONS'},"root_cause":"'$CAUSE'","blocking_agent":"PROVE"}' >> .claude/memory/metrics.jsonl
+```markdown
+## Failure Details
+details: Frontend used CO_OWNER instead of CO-OWNER
+fix: Changed string literal to match backend enum VALUE
+prevention: MAP should document enum VALUES explicitly
 ```
+
+(Files involved are extracted from `git diff --name-only origin/main` by
+PROVE during verification — surface them in your "Issues Found" section
+prose; they are not required in the failure record.)
+
+**Why this changed (issue #104)**: Embedding the JSONL append in PROVE's
+prompt as an `echo >> file` step at the end of a long verification flow
+proved unreliable — recording was elided in production. Moving the write
+into the orchestrator (a deterministic Python call) closes the gap.
 
 ---
 
@@ -220,7 +236,11 @@ echo '{"issue":'$ISSUE',"date":"'$(date +%Y-%m-%d)'","status":"BLOCKED","complex
 issue: {issue_number}
 agent: PROVE
 date: {YYYY-MM-DD}
-status: PASS | BLOCKED
+status: PASS              # or BLOCKED
+complexity: SIMPLE        # required — orchestrator records this
+stack: backend            # required — orchestrator records this
+root_cause: null          # required if status=BLOCKED (use _base.md §10 codes)
+blocking_agent: null      # required if status=BLOCKED (usually "PROVE")
 ---
 
 # PROVE - Issue #{issue_number}
@@ -251,9 +271,11 @@ $ cd backend && ruff check .
 ## Issues Found
 [None | List with root cause classification]
 
-## Outcome Recorded
-- metrics.jsonl: ✅ Appended
-- failures.jsonl: ✅ Appended (if BLOCKED)
+## Failure Details
+(Include only if status=BLOCKED. Orchestrator parses these key:value lines.)
+details: <what went wrong>
+fix: <what unblocks>
+prevention: <how to avoid next time>
 
 ---
 AGENT_RETURN: prove-{issue_number}-{mmddyy}.md
@@ -289,7 +311,9 @@ Levels:
 - [ ] Level 3: Enum VALUES correct (if fullstack)
 - [ ] Level 3: Component APIs correct (if reusing)
 
-Recording:
-- [ ] Appended to metrics.jsonl
-- [ ] Appended to failures.jsonl (if BLOCKED)
+Outcome data (orchestrator records these — you populate the frontmatter):
+- [ ] Frontmatter has `status: PASS|BLOCKED`
+- [ ] Frontmatter has `complexity` and `stack`
+- [ ] If BLOCKED: frontmatter has `root_cause` (from _base.md §10) and `blocking_agent`
+- [ ] If BLOCKED: artifact body has a `## Failure Details` section with `details`/`fix`/`prevention`
 ```

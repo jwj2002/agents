@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 """
-Centralized state manager for PERSISTENT_STATE.yaml.
+Centralized state manager for PERSISTENT_STATE.yaml + outcome recording.
 
 Used by: orchestrate command (inline), precompact hook, sessionstart hook.
-Single source of truth for reading/writing orchestrate workflow state.
+
+Two responsibilities:
+1. PERSISTENT_STATE.yaml read/write (active_work tracking)
+2. Outcome recording — append to .claude/memory/{metrics,failures}.jsonl
+   after PROVE returns. Recording is the orchestrator's job, NOT PROVE's,
+   so the write is deterministic across runs (see issue #104).
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -154,3 +161,169 @@ def update_from_extracted(project_dir: Path, extracted: dict) -> None:
     data["meta"]["updated"] = datetime.now().strftime("%Y-%m-%d")
 
     _write_state(project_dir, data)
+
+
+# ---------------------------------------------------------------------------
+# Outcome recording (issue #104)
+# ---------------------------------------------------------------------------
+#
+# Recording is the orchestrator's job, not PROVE's. PROVE produces the data
+# (status / complexity / stack / agents_run / root_cause via its artifact
+# frontmatter); the orchestrator calls these helpers to perform the write.
+# This makes recording deterministic — a long PROVE prompt can no longer
+# elide the tail-end echo command (the failure pattern documented in #104).
+#
+# Idempotency: callers should invoke each function exactly once per outcome.
+# These helpers do NOT dedupe internally — appending two records for the
+# same issue (e.g., a re-run that produces a second BLOCKED record) is
+# meaningful history, not a duplicate.
+#
+# Failure mode: fail-open. If the JSONL file can't be written (permissions,
+# read-only filesystem, etc.) we log a warning to ~/.claude/hooks.log and
+# return None. Losing one metric line is acceptable; failing a successful
+# orchestrate run because we couldn't write a metric is not.
+
+def _memory_dir(project_dir: Path) -> Path:
+    return project_dir / ".claude" / "memory"
+
+
+def _append_jsonl(target: Path, record: dict) -> None:
+    """Append one JSON line to ``target``, creating parent dirs if needed.
+
+    Uses append mode so concurrent ``--parallel`` orchestrate runs don't
+    clobber each other. ``fsync`` after write so a crash doesn't lose the
+    line. Single-line JSON writes ≤ PIPE_BUF are atomic on POSIX.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(record, separators=(",", ":")) + "\n"
+    with open(target, "a", encoding="utf-8") as f:
+        f.write(line)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except OSError:
+            # fsync can fail on some filesystems (e.g. /tmp on macOS,
+            # NFS mounts). The write itself succeeded; safe to ignore.
+            pass
+
+
+def record_metrics(
+    project_dir: Path,
+    issue: int,
+    status: str,
+    complexity: str,
+    stack: str,
+    agents_run: list[str],
+    duration_seconds: int | None = None,
+    root_cause: str | None = None,
+    blocking_agent: str | None = None,
+    agent_versions: dict[str, str] | None = None,
+) -> None:
+    """Append a single record to ``.claude/memory/metrics.jsonl``.
+
+    Schema matches the existing 2 records (subset of _base.md §11):
+        {"issue":N,"date":"YYYY-MM-DD","status":"PASS|BLOCKED",
+         "complexity":"...","stack":"...","agents_run":[...]}
+
+    Optional fields (root_cause, blocking_agent, duration_seconds,
+    agent_versions) are included only when supplied — keeps a PASS
+    record compact and parseable by /learn's existing jq filters.
+
+    Args:
+        project_dir: Project root. The file lives at
+            ``<project_dir>/.claude/memory/metrics.jsonl``.
+        issue: GitHub issue number.
+        status: "PASS" or "BLOCKED".
+        complexity: "TRIVIAL", "SIMPLE", or "COMPLEX".
+        stack: "backend", "frontend", or "fullstack".
+        agents_run: Ordered list of phase names (e.g.
+            ["MAP-PLAN", "PATCH", "PROVE"]).
+        duration_seconds: Optional total wall-clock duration.
+        root_cause: Required if ``status == "BLOCKED"``. One of the
+            codes from ``_base.md`` §10.
+        blocking_agent: Which agent surfaced the BLOCKED outcome
+            (usually "PROVE"). Recorded only when status is BLOCKED.
+        agent_versions: Optional version map, e.g. {"prove": "1.5"}.
+
+    Returns: None. Errors are logged to ``~/.claude/hooks.log``; the
+    function never raises into the orchestrator.
+    """
+    record: dict = {
+        "issue": int(issue),
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "status": status,
+        "complexity": complexity,
+        "stack": stack,
+        "agents_run": list(agents_run),
+    }
+    if duration_seconds is not None:
+        record["duration_seconds"] = int(duration_seconds)
+    if root_cause:
+        record["root_cause"] = root_cause
+    if blocking_agent:
+        record["blocking_agent"] = blocking_agent
+    if agent_versions:
+        record["agent_versions"] = dict(agent_versions)
+
+    target = _memory_dir(project_dir) / "metrics.jsonl"
+    try:
+        _append_jsonl(target, record)
+    except OSError as e:
+        logging.warning(f"record_metrics: could not append to {target}: {e}")
+
+
+def record_failure(
+    project_dir: Path,
+    issue: int,
+    root_cause: str,
+    files: list[str] | None = None,
+    agent: str | None = None,
+    prevention: str | None = None,
+    details: str | None = None,
+    fix: str | None = None,
+) -> None:
+    """Append a single record to ``.claude/memory/failures.jsonl``.
+
+    Schema follows ``_base.md`` §12:
+        {"issue":N,"date":"YYYY-MM-DD","root_cause":"...",
+         "files":[...],"agent":"...","prevention":"...",
+         "details":"...","fix":"..."}
+
+    Only ``issue``, ``date``, and ``root_cause`` are mandatory; everything
+    else is included only if supplied. /learn's clustering reads
+    ``root_cause`` and (optionally) ``files``.
+
+    Args:
+        project_dir: Project root.
+        issue: GitHub issue number.
+        root_cause: One of the codes from ``_base.md`` §10
+            (ENUM_VALUE, COMPONENT_API, MULTI_MODEL, ...).
+        files: Files involved in the failure.
+        agent: Which agent's work failed (usually "PATCH").
+        prevention: Brief prevention recommendation for next time.
+        details: Free-form description of what went wrong.
+        fix: What was done (or needs to be done) to unblock.
+
+    Returns: None. Fails open with a logged warning on IOError.
+    """
+    record: dict = {
+        "issue": int(issue),
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "root_cause": root_cause,
+    }
+    if files:
+        record["files"] = list(files)
+    if agent:
+        record["agent"] = agent
+    if prevention:
+        record["prevention"] = prevention
+    if details:
+        record["details"] = details
+    if fix:
+        record["fix"] = fix
+
+    target = _memory_dir(project_dir) / "failures.jsonl"
+    try:
+        _append_jsonl(target, record)
+    except OSError as e:
+        logging.warning(f"record_failure: could not append to {target}: {e}")

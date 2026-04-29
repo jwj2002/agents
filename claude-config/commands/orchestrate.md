@@ -287,7 +287,73 @@ For per-agent dispatch tables, validation gates, and failure-context injection,
 For parallel patterns (MAP fan-out, speculative PATCH, parallel fullstack PATCH,
 worktree setup, resume mode), **read `templates/orchestrate-parallel.md`**.
 
-### Step 4: Report Status
+### Step 4: Record Outcome (MANDATORY)
+
+**This is the canonical outcome-recording site.** PROVE specifies the data
+via its artifact frontmatter (`status`, `complexity`, `stack`, `agents_run`,
+and — if BLOCKED — `root_cause`, `blocking_agent`, `files`, `prevention`);
+this step performs the deterministic write. PROVE does NOT write to
+`.claude/memory/` directly (see issue #104 — embedding the write in PROVE's
+prompt was unreliable).
+
+After PROVE returns, parse its artifact frontmatter and call the
+`state_manager` helpers:
+
+```bash
+PROVE_ART=$(ls .agents/outputs/prove-${ISSUE}-*.md 2>/dev/null | tail -1)
+if [ -z "$PROVE_ART" ] || [ ! -f "$PROVE_ART" ]; then
+  echo "WARNING: no PROVE artifact found for issue ${ISSUE}; skipping outcome recording"
+else
+  python3 - <<PYEOF
+import sys, re, json
+sys.path.insert(0, '$HOME/.claude/hooks')
+from pathlib import Path
+from state_manager import record_metrics, record_failure
+
+art = Path("$PROVE_ART").read_text(encoding="utf-8")
+fm_match = re.search(r"^---\n(.*?)\n---", art, re.DOTALL | re.MULTILINE)
+fm = fm_match.group(1) if fm_match else ""
+
+def field(name, default=None):
+    m = re.search(rf"^{name}:\s*(.+)$", fm, re.MULTILINE)
+    return m.group(1).strip() if m else default
+
+status     = field("status", "PASS")
+complexity = "$COMPLEXITY" or field("complexity", "SIMPLE")
+stack      = "$STACK"      or field("stack", "backend")
+agents_run = json.loads('$AGENTS_RUN_JSON' or '["MAP-PLAN","PATCH","PROVE"]')
+root_cause = field("root_cause") if status == "BLOCKED" else None
+
+record_metrics(
+    Path("."), int("$ISSUE"), status, complexity, stack, agents_run,
+    root_cause=root_cause,
+    blocking_agent=("PROVE" if status == "BLOCKED" else None),
+)
+
+if status == "BLOCKED" and root_cause:
+    # PROVE artifact may include a "## Failure Details" section with files /
+    # prevention / details / fix. Best-effort extraction; missing fields are OK.
+    def section(name):
+        m = re.search(rf"^{name}:\s*(.+)$", art, re.MULTILINE)
+        return m.group(1).strip() if m else None
+    record_failure(
+        Path("."), int("$ISSUE"), root_cause,
+        files=None, agent="PATCH",
+        prevention=section("prevention"),
+        details=section("details"),
+        fix=section("fix"),
+    )
+print(f"Recorded outcome for issue {sys.argv[0] or '$ISSUE'}: {status}")
+PYEOF
+fi
+```
+
+If PROVE's frontmatter is malformed, `record_metrics` still writes a minimal
+record with sensible defaults (`status=PASS`, `complexity=SIMPLE`,
+`stack=backend`) — partial data > no data. The helpers fail open on IOError;
+losing one metric line never fails the orchestrate run.
+
+### Step 5: Report Status
 
 ```
 ✓ Workflow complete for issue #184
@@ -298,6 +364,7 @@ Artifacts:
 - prove-184-010325.md
 
 PROVE status: PASS ✅
+Outcome recorded: ✅ metrics.jsonl (+1 line)
 Codex review: skipped | recommended | complete
 
 Next: /pr 184 to create pull request
@@ -314,7 +381,10 @@ If any agent fails:
 3. Show expected artifact path
 4. Do NOT proceed
 
-If PROVE returns BLOCKED, the failure is recorded to `.claude/memory/failures.jsonl`. Subsequent runs of `/orchestrate $ISSUE` automatically inject failure context into the PATCH prompt.
+If PROVE returns BLOCKED, **Step 4 records** the failure to
+`.claude/memory/failures.jsonl` (orchestrator-driven write — not PROVE).
+Subsequent runs of `/orchestrate $ISSUE` automatically inject failure
+context into the PATCH prompt by reading from that file.
 
 ---
 

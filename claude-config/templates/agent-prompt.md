@@ -92,10 +92,18 @@ When `{SCOPE}` is set, add this line to "Inherited Context":
 Use `subagent_type='orchestrate-patch'` for both backend and frontend halves;
 the SCOPE line tells the agent which side to implement.
 
-## PROVE-lite Variant (TRIVIAL issues)
+## PROVE-lite Variant (TRIVIAL issues — currently unused)
 
-For TRIVIAL issues, use the same `subagent_type='orchestrate-prove'` but a
-minimal prompt — gates only, no Level 2-3 checks:
+> **Note (issue #94)**: `/orchestrate` rejects TRIVIAL issues at Step 1.0.1
+> and redirects to `/quick`. PROVE-lite is therefore dead code in the active
+> pipeline; the variant is kept here only so the template stays consistent
+> if TRIVIAL handling is ever reintroduced.
+
+If reactivated, use the same `subagent_type='orchestrate-prove'` but a
+minimal prompt — gates only, no Level 2-3 checks. As with full PROVE, the
+agent does NOT write to `.claude/memory/`; the orchestrator records via
+`state_manager` from the artifact's frontmatter (see
+`commands/orchestrate.md` Step 4).
 
 ```markdown
 ## Inherited Context
@@ -108,7 +116,8 @@ Run verification gates only (skip Level 2 SUBSTANTIVE and Level 3 WIRED):
 - If backend touched: `cd backend && ruff check . && pytest -q`
 - If frontend touched: `cd frontend && npm run lint && npm run build`
 
-Record outcome to `.claude/memory/metrics.jsonl`.
+Populate artifact frontmatter (status / complexity / stack) — orchestrator
+records the outcome from there. Do NOT write to `.claude/memory/` yourself.
 Write artifact to `.agents/outputs/{ARTIFACT_NAME}`.
 End with `AGENT_RETURN: {ARTIFACT_NAME}`.
 ```

@@ -187,14 +187,25 @@ Optional: `severity`, `recovery_minutes`.
 
 ---
 
-## 13. Outcome Recording (PROVE Agent Only)
+## 13. Outcome Recording (Orchestrator-Driven)
 
-After verification, append a JSON record matching the schemas in §11 and §12.
+PROVE no longer writes outcome records directly. Recording is the
+orchestrator's job — see `commands/orchestrate.md` Step 4 (the canonical
+recording site, calling `state_manager.record_metrics` /
+`state_manager.record_failure`).
 
-- **PASS**: append metrics record (status:`PASS`, root_cause:`null`) to `.claude/memory/metrics.jsonl`
-- **BLOCKED**: append failure record to `.claude/memory/failures.jsonl` AND metrics record (status:`BLOCKED`, root_cause:`<code>`, blocking_agent:`PROVE`) to `.claude/memory/metrics.jsonl`
+PROVE's responsibility is to **specify the data via artifact frontmatter**:
 
-Use shell `echo '<json>' >> <file>` with substituted variables. See PROVE agent for full append commands.
+- `status: PASS | BLOCKED`
+- `complexity: TRIVIAL | SIMPLE | COMPLEX`
+- `stack: backend | frontend | fullstack`
+- `root_cause: <code from §10>` (mandatory if BLOCKED)
+- `blocking_agent: PROVE` (mandatory if BLOCKED)
+
+The schemas in §11 and §12 remain authoritative — they define what the
+orchestrator's helpers write. Why this changed: embedding `echo >> file`
+in PROVE's prompt at the end of a long verification flow proved unreliable
+(see issue #104). The deterministic Python call closes the gap.
 
 ---
 
