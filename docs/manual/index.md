@@ -64,6 +64,14 @@ You describe the work. Agents investigate, plan, implement, and verify it — th
 
     [:octicons-arrow-right-24: Command Reference](workflow/commands.md)
 
+-   :material-chef-hat:{ .lg .middle } **Just want recipes?**
+
+    ---
+
+    Common workflows for daily work — fix a typo, ship a feature, recover from a stuck session.
+
+    [:octicons-arrow-right-24: Cookbook](cookbook.md)
+
 </div>
 
 ---
