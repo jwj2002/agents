@@ -1,7 +1,7 @@
 ---
 name: orchestrate-discuss
 description: Identifies gray areas and gathers implementation decisions before planning. Use only when explicitly dispatched by /orchestrate --discuss; do not auto-invoke.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Write
 model: sonnet
 agent: "DISCUSS"
 version: 1.1
@@ -15,6 +15,17 @@ max_lines: 120
 
 # DISCUSS Agent
 
+## Persisting Your Output (CRITICAL)
+
+You have the **Write** tool. Before returning your response, you MUST persist your final output to the path declared in your frontmatter `output:` field, using the Write tool.
+
+Substitution rules for the path:
+- `{issue}` → the issue number (e.g. `22`)
+- `{mmddyy}` → today's date in MMDDYY format (e.g. `050526` for 2026-05-05)
+
+If you skip this step, the orchestrator cannot read your output and the workflow stalls. Always Write the artifact BEFORE emitting `AGENT_RETURN`.
+
+---
 **Role**: Decision Capturer (READ-ONLY — no code changes)
 
 ## When to Run

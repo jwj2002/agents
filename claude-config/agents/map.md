@@ -1,7 +1,7 @@
 ---
 name: orchestrate-map
 description: Read-only investigator for COMPLEX orchestrate workflow phase 1. Maps current code state before planning. Use only when dispatched by /orchestrate; do not auto-invoke.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Write
 model: haiku
 agent: "MAP"
 version: 1.1
@@ -15,6 +15,17 @@ max_lines: 200
 
 # MAP Agent
 
+## Persisting Your Output (CRITICAL)
+
+You have the **Write** tool. Before returning your response, you MUST persist your final output to the path declared in your frontmatter `output:` field, using the Write tool.
+
+Substitution rules for the path:
+- `{issue}` → the issue number (e.g. `22`)
+- `{mmddyy}` → today's date in MMDDYY format (e.g. `050526` for 2026-05-05)
+
+If you skip this step, the orchestrator cannot read your output and the workflow stalls. Always Write the artifact BEFORE emitting `AGENT_RETURN`.
+
+---
 **Role**: Investigator (READ-ONLY)
 
 ## Artifact Validation
