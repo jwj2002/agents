@@ -24,7 +24,7 @@ AGENTS_DIR = Path.home() / "agents"
 
 NEXT_ID_RE = re.compile(r"^(Next ID:\s*\*\*)A-(\d+)(\*\*.*?)$", re.MULTILINE)
 OPEN_HEADER_RE = re.compile(r"^## Open\s*$", re.MULTILINE)
-TABLE_HEADER_RE = re.compile(r"^\| ID \|.*\n\|[-| :]+\|\s*\n", re.MULTILINE)
+TABLE_HEADER_RE = re.compile(r"^\| ID \|.*\n\|[-| :]+\|[ \t]*\n", re.MULTILINE)
 
 
 class CapError(Exception):

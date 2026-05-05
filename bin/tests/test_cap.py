@@ -138,6 +138,24 @@ def test_capture_creates_file_when_missing(tmp_path: Path):
     assert "Next ID: **A-002**" in content
 
 
+def test_capture_empty_template_layout_is_correct(tmp_path: Path):
+    """Regression for #110: blank line must sit between last row and `## Recently Closed`,
+    NOT between the separator and the first row."""
+    project_dir = tmp_path / "myproj"
+    project_dir.mkdir()
+
+    cap.capture(["first", "second"], project_dir, "Jason", "", today="2026-05-04")
+    content = (project_dir / "ACTIONS.md").read_text()
+
+    separator = "|----|-------|--------|-------|--------|--------|-----|-------|"
+    assert f"{separator}\n| A-001 |" in content
+    assert (
+        "| A-002 |  | second | Jason | open | 2026-05-04 |  |  |\n\n## Recently Closed"
+        in content
+    )
+    assert f"{separator}\n\n| A-001" not in content
+
+
 def test_capture_preserves_sections(tmp_path: Path):
     actions_path = tmp_path / "ACTIONS.md"
     _seed_actions_md(actions_path, next_id=1)
