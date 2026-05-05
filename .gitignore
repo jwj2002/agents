@@ -35,3 +35,10 @@ site/
 
 # Local-only settings (not symlinked)
 claude-config/settings.local.json
+
+# Per-machine recipient lists (contain external email addresses)
+claude-config/skills/email-digest/recipients.json
+
+# M365 credentials (defense in depth — should never be in repo anyway)
+m365/*.json
+m365/*-cache.bin
