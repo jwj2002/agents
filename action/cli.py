@@ -17,8 +17,13 @@ HOME = Path.home()
 ALLOWED_STATUS = ("open", "wip", "blocked", "done", "cancelled")
 TERMINAL_STATUS = ("done", "cancelled")
 ID_RE = re.compile(r"^A-\d+$")
-OPEN_COLS = ["ID", "Issue", "Action", "Owner", "Status", "Opened", "Src", "Notes"]
-CLOSED_COLS = ["ID", "Issue", "Action", "Owner", "Closed", "Notes"]
+
+# Current schema (v2): Files column inserted between Src/Closed and Notes.
+OPEN_COLS = ["ID", "Issue", "Action", "Owner", "Status", "Opened", "Src", "Files", "Notes"]
+CLOSED_COLS = ["ID", "Issue", "Action", "Owner", "Closed", "Files", "Notes"]
+# Legacy schema (v1): no Files column. Tolerated on read; auto-migrated on next write.
+OPEN_COLS_V1 = ["ID", "Issue", "Action", "Owner", "Status", "Opened", "Src", "Notes"]
+CLOSED_COLS_V1 = ["ID", "Issue", "Action", "Owner", "Closed", "Notes"]
 
 HELP_TEXT = """\
 /action — manage entries in a project's ACTIONS.md
@@ -38,11 +43,19 @@ Update:
   action A-NNN --owner <name>         Reassign owner
   action A-NNN --reopen               Move closed row back to Open with status=open
 
+Attachments (used by /email-digest to attach files to outgoing mail):
+  action A-NNN --attach <path>        Attach a file. Path may be Linux absolute,
+                                      ~/..., or \\\\wsl.localhost\\<distro>\\... — all
+                                      normalized to a Linux absolute path.
+                                      Repeat --attach to add multiple files.
+  action A-NNN --unattach <name>      Remove attachment by basename or full path
+
 Create:
   action --new "..." --owner <name>   Add a new action (auto-bumps Next ID)
                        [--status <s>]  Default: open
                        [--note "..."]
                        [--src "..."]
+                       [--attach <path>]
 
 Project resolution:
   --project <name>                     Override; otherwise inferred from cwd
@@ -89,7 +102,60 @@ def append_note(existing: str, text: str) -> str:
     return f"{existing} | {fragment}" if existing else fragment
 
 
+def normalize_attachment_path(raw: str) -> Path:
+    """Translate WSL UNC, ~/..., or Linux absolute → resolved Path that exists.
+
+    Accepted inputs (whitespace and surrounding quotes are stripped):
+      \\\\wsl.localhost\\Ubuntu-24.04\\home\\jjob\\...    (WSL UNC, modern)
+      \\\\wsl$\\Ubuntu\\home\\jjob\\...                   (WSL UNC, legacy)
+      ~/projects/...                                       (home-relative)
+      /home/jjob/projects/...                              (Linux absolute)
+    """
+    s = raw.strip().strip('"').strip("'").replace("\\", "/")
+    lowered = s.lower()
+    for prefix in ("//wsl.localhost/", "//wsl$/"):
+        if lowered.startswith(prefix):
+            tail = s[len(prefix):]
+            parts = tail.split("/", 1)
+            s = "/" + (parts[1] if len(parts) > 1 else "")
+            break
+    if s.startswith("~"):
+        s = str(Path(s).expanduser())
+    if not s.startswith("/"):
+        raise ActionError(
+            f'cannot resolve attachment path "{raw}" — pass a Linux absolute, '
+            r"~/..., or \\wsl.localhost\<distro>\... path"
+        )
+    p = Path(s).resolve()
+    if not p.is_file():
+        raise ActionError(f"attachment file not found: {p}")
+    return p
+
+
+def parse_files_cell(s: str) -> list[str]:
+    s = s.strip()
+    if not s:
+        return []
+    return [p.strip().replace(r"\|", "|") for p in s.split(",") if p.strip()]
+
+
+def render_files_cell(paths: list[str]) -> str:
+    return ", ".join(escape_pipes(p) for p in paths)
+
+
 # ---------- file model ----------
+
+def _row_cells(line: str, schema: list[str], legacy: list[str]) -> dict[str, str]:
+    """Parse a markdown table row into a dict, tolerating the legacy (no-Files) schema."""
+    cells = split_row(line)
+    if len(cells) == len(schema):
+        return dict(zip(schema, cells))
+    if len(cells) == len(legacy):
+        d = dict(zip(legacy, cells))
+        d["Files"] = ""  # synthesize missing column
+        return d
+    return {}  # malformed; treat as no row
+
 
 @dataclass
 class FileModel:
@@ -103,24 +169,58 @@ class FileModel:
     next_id_num: int            # integer for the next-to-create id
 
     def open_rows(self) -> list[dict[str, str]]:
-        return [dict(zip(OPEN_COLS, split_row(self.lines[i]))) for i in self.open_row_indices]
+        return [_row_cells(self.lines[i], OPEN_COLS, OPEN_COLS_V1) for i in self.open_row_indices]
 
     def closed_rows(self) -> list[dict[str, str]]:
-        return [dict(zip(CLOSED_COLS, split_row(self.lines[i]))) for i in self.closed_row_indices]
+        return [_row_cells(self.lines[i], CLOSED_COLS, CLOSED_COLS_V1) for i in self.closed_row_indices]
 
     def find_row(self, action_id: str) -> tuple[str, int]:
         """Return (table, line_index) where table ∈ {'open', 'closed'}."""
         for i in self.open_row_indices:
-            cells = split_row(self.lines[i])
-            if cells and cells[0] == action_id:
+            cells = _row_cells(self.lines[i], OPEN_COLS, OPEN_COLS_V1)
+            if cells.get("ID") == action_id:
                 return ("open", i)
         for i in self.closed_row_indices:
-            cells = split_row(self.lines[i])
-            if cells and cells[0] == action_id:
+            cells = _row_cells(self.lines[i], CLOSED_COLS, CLOSED_COLS_V1)
+            if cells.get("ID") == action_id:
                 return ("closed", i)
         raise ActionError(f"{action_id} not found in {self.path.parent.name}")
 
+    def cells_at(self, line_idx: int, table: str) -> dict[str, str]:
+        """Read a row at line_idx, normalized to current schema."""
+        if table == "open":
+            return _row_cells(self.lines[line_idx], OPEN_COLS, OPEN_COLS_V1)
+        return _row_cells(self.lines[line_idx], CLOSED_COLS, CLOSED_COLS_V1)
+
+    def migrate_schema_in_place(self) -> None:
+        """Rewrite header + separator + every data row to current schema.
+
+        Idempotent: rows already in current schema are reformatted but
+        unchanged; rows in legacy v1 schema gain an empty Files cell.
+        """
+        # Open header lives one line above the separator.
+        if self.open_sep_idx > 0:
+            self.lines[self.open_sep_idx - 1] = render_row(OPEN_COLS, {c: c for c in OPEN_COLS})
+            self.lines[self.open_sep_idx] = (
+                "|" + "|".join(["----"] * len(OPEN_COLS)) + "|"
+            )
+        for i in self.open_row_indices:
+            cells = _row_cells(self.lines[i], OPEN_COLS, OPEN_COLS_V1)
+            if cells:
+                self.lines[i] = render_row(OPEN_COLS, cells)
+
+        if self.closed_sep_idx > 0:
+            self.lines[self.closed_sep_idx - 1] = render_row(CLOSED_COLS, {c: c for c in CLOSED_COLS})
+            self.lines[self.closed_sep_idx] = (
+                "|" + "|".join(["----"] * len(CLOSED_COLS)) + "|"
+            )
+        for i in self.closed_row_indices:
+            cells = _row_cells(self.lines[i], CLOSED_COLS, CLOSED_COLS_V1)
+            if cells:
+                self.lines[i] = render_row(CLOSED_COLS, cells)
+
     def write(self) -> None:
+        self.migrate_schema_in_place()
         self.path.write_text("\n".join(self.lines))
 
 
@@ -274,6 +374,9 @@ def cmd_new(args: argparse.Namespace, path: Path) -> int:
     model = parse_file(path)
     aid = f"A-{model.next_id_num:03d}"
     notes = f"{today()}: {escape_pipes(args.note)}" if args.note else ""
+    files: list[str] = []
+    for raw in collect_attach_args(args):
+        files.append(str(normalize_attachment_path(raw)))
     cells = {
         "ID": aid,
         "Issue": "",
@@ -282,16 +385,17 @@ def cmd_new(args: argparse.Namespace, path: Path) -> int:
         "Status": status,
         "Opened": today(),
         "Src": escape_pipes(args.src) if args.src else "",
+        "Files": render_files_cell(files),
         "Notes": notes,
     }
     if status in TERMINAL_STATUS:
-        # rare but supported: create directly into Recently Closed
         closed_cells = {
             "ID": aid,
             "Issue": "",
             "Action": escape_pipes(args.new),
             "Owner": args.owner,
             "Closed": today(),
+            "Files": render_files_cell(files),
             "Notes": notes,
         }
         insert_closed_row(model, closed_cells)
@@ -299,8 +403,48 @@ def cmd_new(args: argparse.Namespace, path: Path) -> int:
         insert_open_row(model, cells)
     bump_next_id(model, model.next_id_num + 1)
     model.write()
-    print(f"created {aid}: {args.new} [Owner: {args.owner}]")
+    suffix = f" [+{len(files)} file{'s' if len(files) != 1 else ''}]" if files else ""
+    print(f"created {aid}: {args.new} [Owner: {args.owner}]{suffix}")
     return 0
+
+
+def collect_attach_args(args: argparse.Namespace) -> list[str]:
+    """Flatten --attach values (each may itself be comma-separated)."""
+    out: list[str] = []
+    for value in (args.attach or []):
+        for piece in value.split(","):
+            piece = piece.strip()
+            if piece:
+                out.append(piece)
+    return out
+
+
+def collect_unattach_args(args: argparse.Namespace) -> list[str]:
+    out: list[str] = []
+    for value in (args.unattach or []):
+        for piece in value.split(","):
+            piece = piece.strip()
+            if piece:
+                out.append(piece)
+    return out
+
+
+def remove_attachment(files: list[str], query: str) -> tuple[list[str], str]:
+    """Remove a file from the list by full path or basename. Returns (new_list, removed_path)."""
+    # exact path match first
+    for f in files:
+        if f == query:
+            return ([x for x in files if x != f], f)
+    # basename match
+    matches = [f for f in files if Path(f).name == Path(query).name]
+    if len(matches) == 1:
+        return ([x for x in files if x != matches[0]], matches[0])
+    if len(matches) > 1:
+        raise ActionError(
+            f'attachment "{query}" matches multiple files; pass the full path: '
+            + ", ".join(matches)
+        )
+    raise ActionError(f'no attachment matches "{query}"')
 
 
 def cmd_list(args: argparse.Namespace, path: Path) -> int:
@@ -347,11 +491,21 @@ def cmd_list(args: argparse.Namespace, path: Path) -> int:
 def cmd_show(args: argparse.Namespace, path: Path) -> int:
     model = parse_file(path)
     table, idx = model.find_row(args.id)
-    cells = split_row(model.lines[idx])
+    cells = model.cells_at(idx, table)
     cols = OPEN_COLS if table == "open" else CLOSED_COLS
     print(f"[{table}] {args.id}")
-    for col, val in zip(cols, cells):
-        print(f"  {col:<8} {val}")
+    for col in cols:
+        val = cells.get(col, "")
+        if col == "Files":
+            files = parse_files_cell(val)
+            if not files:
+                print(f"  {col:<8} (none)")
+            else:
+                print(f"  {col:<8} {len(files)} file{'s' if len(files) != 1 else ''}")
+                for f in files:
+                    print(f"           - {f}")
+        else:
+            print(f"  {col:<8} {val}")
     return 0
 
 
@@ -363,7 +517,7 @@ def cmd_update(args: argparse.Namespace, path: Path) -> int:
 
     model = parse_file(path)
     table, idx = model.find_row(args.id)
-    cells = dict(zip(OPEN_COLS if table == "open" else CLOSED_COLS, split_row(model.lines[idx])))
+    cells = model.cells_at(idx, table)
     prior_status = cells.get("Status", "")
     msgs: list[str] = []
 
@@ -374,6 +528,26 @@ def cmd_update(args: argparse.Namespace, path: Path) -> int:
     if args.note:
         cells["Notes"] = append_note(cells.get("Notes", ""), args.note)
         msgs.append("note appended")
+    attach_args = collect_attach_args(args)
+    if attach_args:
+        files = parse_files_cell(cells.get("Files", ""))
+        added = 0
+        for raw in attach_args:
+            resolved = str(normalize_attachment_path(raw))
+            if resolved not in files:
+                files.append(resolved)
+                added += 1
+        cells["Files"] = render_files_cell(files)
+        msgs.append(f"+{added} file{'s' if added != 1 else ''}")
+    unattach_args = collect_unattach_args(args)
+    if unattach_args:
+        files = parse_files_cell(cells.get("Files", ""))
+        removed = 0
+        for query in unattach_args:
+            files, _ = remove_attachment(files, query)
+            removed += 1
+        cells["Files"] = render_files_cell(files)
+        msgs.append(f"-{removed} file{'s' if removed != 1 else ''}")
 
     # status / reopen transition
     if args.reopen:
@@ -388,6 +562,7 @@ def cmd_update(args: argparse.Namespace, path: Path) -> int:
             "Status": "open",
             "Opened": today(),
             "Src": "",
+            "Files": cells.get("Files", ""),
             "Notes": cells.get("Notes", ""),
         }
         remove_row(model, idx, "closed")
@@ -401,6 +576,7 @@ def cmd_update(args: argparse.Namespace, path: Path) -> int:
                 "Action": cells.get("Action", ""),
                 "Owner": cells.get("Owner", ""),
                 "Closed": today(),
+                "Files": cells.get("Files", ""),
                 "Notes": cells.get("Notes", ""),
             }
             remove_row(model, idx, "open")
@@ -424,7 +600,9 @@ def cmd_update(args: argparse.Namespace, path: Path) -> int:
         replace_row(model, idx, cells, OPEN_COLS if table == "open" else CLOSED_COLS)
 
     if not msgs:
-        raise ActionError("no changes specified — pass --status, --note, --owner, or --reopen")
+        raise ActionError(
+            "no changes specified — pass --status, --note, --owner, --attach, --unattach, or --reopen"
+        )
 
     model.write()
     print(f"{args.id}: {'; '.join(msgs)}")
@@ -446,6 +624,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--src")
     p.add_argument("--reopen", action="store_true")
     p.add_argument("--new")
+    p.add_argument("--attach", action="append", default=[])
+    p.add_argument("--unattach", action="append", default=[])
     p.add_argument("--project")
     args = p.parse_args(argv)
 
@@ -479,7 +659,9 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_new(args, path)
         if args.list:
             return cmd_list(args, path)
-        if args.id and not any([args.status, args.note, args.owner, args.reopen]):
+        if args.id and not any([
+            args.status, args.note, args.owner, args.reopen, args.attach, args.unattach,
+        ]):
             return cmd_show(args, path)
         if args.id:
             return cmd_update(args, path)
