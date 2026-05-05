@@ -10,11 +10,15 @@ Usage:
         --body "Hello" [--content-type Text|HTML|Markdown] [--cc a@b.com,c@d.com]
     python3 send_mail.py --to ... --subject ... --body-file path.md \
         --content-type Markdown
+    python3 send_mail.py --to ... --subject ... --body "..." \
+        --attach /path/to/file.html [--attach /path/to/another.pdf]
 """
 from __future__ import annotations
 
 import argparse
+import base64
 import json
+import mimetypes
 import os
 import sys
 from pathlib import Path
@@ -23,7 +27,12 @@ import msal
 import requests
 
 
-CREDS_PATH = Path.home() / ".claude" / "m365" / "jason-agent.json"
+# Microsoft Graph sendMail caps inline attachments at ~4 MB total. We refuse
+# anything past 3 MB to leave headroom for the JSON envelope and base64 bloat.
+INLINE_ATTACHMENT_MAX_BYTES = 3 * 1024 * 1024
+
+
+CREDS_PATH = Path.home() / ".claude" / "m365" / "agent.json"
 CACHE_PATH = Path.home() / ".claude" / "m365" / "token-cache.bin"
 GRAPH_SCOPE = ["https://graph.microsoft.com/.default"]
 
@@ -35,8 +44,9 @@ class SendMailError(Exception):
 def load_creds() -> dict:
     if not CREDS_PATH.exists():
         raise SendMailError(
-            f"Missing credentials at {CREDS_PATH}. See "
-            "~/projects/paul-jason/docs/jason-agent-setup.md step 6."
+            f"Missing credentials at {CREDS_PATH}. Drop the JSON with "
+            "tenant_id / client_id / client_secret / sender_upn fields "
+            "and chmod 600. See ~/.claude/CLAUDE.md for the M365 section."
         )
     if (CREDS_PATH.stat().st_mode & 0o077) != 0:
         raise SendMailError(
@@ -73,6 +83,29 @@ def get_token(creds: dict) -> str:
     return result["access_token"]
 
 
+def build_attachments(paths: list[Path]) -> list[dict]:
+    out: list[dict] = []
+    total = 0
+    for path in paths:
+        if not path.is_file():
+            raise SendMailError(f"attachment not found: {path}")
+        data = path.read_bytes()
+        total += len(data)
+        if total > INLINE_ATTACHMENT_MAX_BYTES:
+            raise SendMailError(
+                f"total attachment size exceeds {INLINE_ATTACHMENT_MAX_BYTES // (1024*1024)} MB; "
+                "use a Graph upload session for large files (not yet wired)"
+            )
+        ctype, _ = mimetypes.guess_type(path.name)
+        out.append({
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "name": path.name,
+            "contentType": ctype or "application/octet-stream",
+            "contentBytes": base64.b64encode(data).decode("ascii"),
+        })
+    return out
+
+
 def build_message(
     *,
     subject: str,
@@ -80,20 +113,21 @@ def build_message(
     content_type: str,
     to: list[str],
     cc: list[str],
+    attachments: list[dict],
 ) -> dict:
     # Graph only knows Text and HTML. For Markdown we send as Text — the
     # recipient agent parses raw markdown; this preserves the digest header
     # comment and tables verbatim.
     graph_content_type = "HTML" if content_type.lower() == "html" else "Text"
-    return {
-        "message": {
-            "subject": subject,
-            "body": {"contentType": graph_content_type, "content": body},
-            "toRecipients": [{"emailAddress": {"address": a}} for a in to],
-            "ccRecipients": [{"emailAddress": {"address": a}} for a in cc],
-        },
-        "saveToSentItems": True,
+    message: dict = {
+        "subject": subject,
+        "body": {"contentType": graph_content_type, "content": body},
+        "toRecipients": [{"emailAddress": {"address": a}} for a in to],
+        "ccRecipients": [{"emailAddress": {"address": a}} for a in cc],
     }
+    if attachments:
+        message["attachments"] = attachments
+    return {"message": message, "saveToSentItems": True}
 
 
 def send_mail(
@@ -103,22 +137,25 @@ def send_mail(
     to: list[str],
     cc: list[str] | None = None,
     content_type: str = "Text",
+    attach: list[Path] | None = None,
 ) -> None:
     creds = load_creds()
     token = get_token(creds)
+    attachments = build_attachments(attach or [])
     payload = build_message(
         subject=subject,
         body=body,
         content_type=content_type,
         to=to,
         cc=cc or [],
+        attachments=attachments,
     )
     url = f"https://graph.microsoft.com/v1.0/users/{creds['sender_upn']}/sendMail"
     response = requests.post(
         url,
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         json=payload,
-        timeout=30,
+        timeout=60,
     )
     if response.status_code != 202:
         raise SendMailError(
@@ -140,6 +177,12 @@ def parse_args() -> argparse.Namespace:
         choices=["Text", "HTML", "Markdown"],
         help="Markdown is sent as Text (Graph has no Markdown type)",
     )
+    p.add_argument(
+        "--attach",
+        action="append",
+        default=[],
+        help="Path to a file to attach (repeatable). Inline attachments only — total ≤ 3 MB.",
+    )
     return p.parse_args()
 
 
@@ -148,6 +191,7 @@ def main() -> int:
     body = args.body if args.body is not None else Path(args.body_file).read_text()
     to = [a.strip() for a in args.to.split(",") if a.strip()]
     cc = [a.strip() for a in args.cc.split(",") if a.strip()]
+    attach = [Path(p) for p in args.attach if p]
     try:
         send_mail(
             subject=args.subject,
@@ -155,11 +199,13 @@ def main() -> int:
             to=to,
             cc=cc,
             content_type=args.content_type,
+            attach=attach,
         )
     except SendMailError as e:
         print(f"send_mail: {e}", file=sys.stderr)
         return 1
-    print(f"sent: {args.subject} -> {', '.join(to)}")
+    suffix = f" [+{len(attach)} attachment{'s' if len(attach) != 1 else ''}]" if attach else ""
+    print(f"sent: {args.subject} -> {', '.join(to)}{suffix}")
     return 0
 
 

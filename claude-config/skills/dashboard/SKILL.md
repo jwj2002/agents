@@ -168,13 +168,18 @@ For each project, look for an `ACTIONS.md` at the resolved repo path
 
 **`## Open`** — open work:
 ```
-| ID | Issue | Action | Owner | Status | Opened | Src | Notes |
+| ID | Issue | Action | Owner | Status | Opened | Src | Files | Notes |
 ```
 
 **`## Recently Closed`** — closed within ~30d:
 ```
-| ID | Issue | Action | Owner | Closed | Notes |
+| ID | Issue | Action | Owner | Closed | Files | Notes |
 ```
+
+The `Files` column (added in v2 of the schema) holds comma-separated
+absolute paths managed by `/action --attach`. Older files without the
+`Files` column (8-col Open / 6-col Closed) still parse — treat the
+column as empty. The `/action` script auto-migrates on first write.
 
 **`## Archive`** — closed beyond Recently Closed window. Only read for
 `--window full`.
