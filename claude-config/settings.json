@@ -29,7 +29,9 @@
       "Bash(glab:*)",
       "Bash(curl -s -H PRIVATE-TOKEN:*)",
       "Bash(curl -s -X POST -H PRIVATE-TOKEN:*)",
-      "Bash(curl -s -X PUT -H PRIVATE-TOKEN:*)"
+      "Bash(curl -s -X PUT -H PRIVATE-TOKEN:*)",
+      "Write(/home/jjob/.claude/projects/*/memory/**)",
+      "Edit(/home/jjob/.claude/projects/*/memory/**)"
     ],
     "deny": [
       "Read(./.env)",
@@ -139,5 +141,6 @@
       }
     }
   },
-  "skipDangerousModePermissionPrompt": true
+  "skipDangerousModePermissionPrompt": true,
+  "theme": "dark"
 }
