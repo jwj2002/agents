@@ -31,6 +31,11 @@ import requests
 # anything past 3 MB to leave headroom for the JSON envelope and base64 bloat.
 INLINE_ATTACHMENT_MAX_BYTES = 3 * 1024 * 1024
 
+# Recipients that are blocked by default. To send to one, the caller must
+# pass `--unblock-recipient <addr>` explicitly for that address. Prevents
+# accidentally cc'ing personal accounts on work/client mail.
+BLOCKED_RECIPIENTS = frozenset({"jasonwadejob@gmail.com"})
+
 
 CREDS_PATH = Path.home() / ".claude" / "m365" / "agent.json"
 CACHE_PATH = Path.home() / ".claude" / "m365" / "token-cache.bin"
@@ -81,6 +86,24 @@ def get_token(creds: dict) -> str:
         CACHE_PATH.write_text(cache.serialize())
         os.chmod(CACHE_PATH, 0o600)
     return result["access_token"]
+
+
+def check_blocked_recipients(
+    *,
+    to: list[str],
+    cc: list[str],
+    unblocked: list[str],
+) -> None:
+    addrs = {a.lower() for a in (*to, *cc)}
+    blocked = addrs & BLOCKED_RECIPIENTS
+    allowed = {u.lower() for u in unblocked}
+    unauthorized = blocked - allowed
+    if unauthorized:
+        raise SendMailError(
+            "refusing to send: recipient(s) blocked by default: "
+            f"{sorted(unauthorized)}. If this is intentional, pass "
+            "`--unblock-recipient <addr>` once per blocked address."
+        )
 
 
 def build_attachments(paths: list[Path]) -> list[dict]:
@@ -138,7 +161,9 @@ def send_mail(
     cc: list[str] | None = None,
     content_type: str = "Text",
     attach: list[Path] | None = None,
+    unblock_recipient: list[str] | None = None,
 ) -> None:
+    check_blocked_recipients(to=to, cc=cc or [], unblocked=unblock_recipient or [])
     creds = load_creds()
     token = get_token(creds)
     attachments = build_attachments(attach or [])
@@ -183,6 +208,16 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Path to a file to attach (repeatable). Inline attachments only — total ≤ 3 MB.",
     )
+    p.add_argument(
+        "--unblock-recipient",
+        action="append",
+        default=[],
+        help=(
+            "Allow sending to a recipient that is blocked by default "
+            "(repeatable, one per address). Blocked: "
+            f"{sorted(BLOCKED_RECIPIENTS)}."
+        ),
+    )
     return p.parse_args()
 
 
@@ -200,6 +235,7 @@ def main() -> int:
             cc=cc,
             content_type=args.content_type,
             attach=attach,
+            unblock_recipient=args.unblock_recipient,
         )
     except SendMailError as e:
         print(f"send_mail: {e}", file=sys.stderr)
