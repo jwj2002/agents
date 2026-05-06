@@ -36,12 +36,10 @@ Codex delegation, content-brain-style phase discipline).
                        │  Codex delegation  │  parallel work,
                        │  (rescue/review)   │  reviews, rescue
                        └────────────────────┘
-
-                       ┌────────────────────┐
-                       │  Channel MCP       │  inter-agent comms
-                       │  (TBD — see Phase 2)│  awaiting decision
-                       └────────────────────┘
 ```
+
+Multi-agent channels were dropped in Phase 2 (Option B). Codex delegation
+is the converged multi-agent pattern.
 
 Reference specs:
 - `specs/phase0-usage-report.md` — what got measured, what didn't, why Phase 3 was deferred
@@ -90,21 +88,32 @@ exists.
 
 ---
 
-## Phase 2 — Channels decision ⏸ BLOCKED (awaits user input)
+## Phase 2 — Channels decision ✅ DONE (2026-05-06) — Option B
 
-**Issue:** `channel-mcp/index.ts` requires `CENTRAL_SERVER_URL` and is a
-client of the Flotilla central server. Archiving Flotilla also kills
-inter-agent channel communication.
+**Decision:** Drop multi-agent channels. Archive Flotilla.
 
-**Options on the table:**
-- **A. Slim Flotilla to transport-only** (~8k → ~1.5k lines). Keep
-  channels working. Strip dashboard.py, captures*, daily_summary,
-  planned_work, project_metrics, devices, terminal, scaffold,
-  github_sync, health_monitor, tech_stack, migration, React UI.
-- **B. Drop multi-agent channels entirely.** Archive Flotilla wholesale.
-- **C. Defer.** Leave Flotilla as-is. /dashboard already unhooked.
+**Rationale:**
+- 90 days of session history shows **0 real `channel-mcp` tool invocations**
+  (`send_message`, `check_messages`, `report_status`).
+- Flotilla central server was not running; `channel-mcp` was not registered
+  in any `settings.json`. The infrastructure was effectively cold.
+- Codex delegation (`/codex:rescue`, `/codex:adversarial-review`) — 1,379
+  invocations over 90d per Phase 0 — is the converged multi-agent pattern.
+  Channels was the speculative design that lost to it.
+- Option A (slim Flotilla to transport-only) would have been ~1–2 days of
+  cuts to keep a capability nothing was using. Net negative.
 
-**Decision needed:** A vs B vs C — see "Open Decisions" below.
+**What shipped:**
+- `~/projects/flotilla` archived (moved to `~/projects/_archived/flotilla`).
+- `channel-mcp` archived with the Flotilla repo (lived inside it).
+- Knowledge MCP: `flotilla` project flipped to `done`; `agents` project
+  blockers + channels-related open questions cleared.
+
+**Exit criteria:**
+- [x] Decision recorded with usage data.
+- [x] Flotilla local clone archived (GitHub repo retained as history).
+- [x] PLAN.md target architecture diagram updated (Channel MCP box dropped).
+- [x] `/dashboard` continues to function — Phase 1 already unwired Flotilla.
 
 ---
 
@@ -171,17 +180,15 @@ agent dispatch), let it accumulate, then revisit cuts with real data.
 
 ## Open Decisions
 
-- [ ] **Channels: A vs B vs C** (Phase 2 blocker). User input required.
 - [ ] **Usage logger design** (Phase 3 prerequisite). When/how to add.
 - [ ] **Per-project PLAN.md rollout cadence.** Adopt as projects come up
       in active rotation, or seed all at once?
 
 ## Sequencing Discipline
 
-Phases 0, 1, 4, 5 shipped this session. Phase 2 awaits user decision on
-channels. Phase 3 explicitly deferred to give measurement infrastructure
-time to mature.
+Phases 0, 1, 2, 4, 5 shipped. Phase 3 explicitly deferred to give
+measurement infrastructure time to mature.
 
 Pre-consolidation rollback SHAs (per `specs/phase0-usage-report.md`):
 - `~/agents` HEAD pre-Phase 1: `fec005d`
-- `~/projects/flotilla` HEAD: `e786eac`
+- `~/projects/flotilla` HEAD pre-archival: `e786eac`

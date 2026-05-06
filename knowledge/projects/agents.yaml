@@ -1,25 +1,16 @@
 project: agents
-status: blocked
-focus: Stack consolidation — Phase 1, 4, 5 shipped 2026-04-19; Phase 2 awaits
-  channels decision
+status: active
+focus: Stack consolidation complete (Phases 0, 1, 2, 4, 5 shipped). Phase 3
+  (artifact pruning) deferred until usage logger lands.
 next_steps:
-  - Phase 2a — extract channel-mcp to ~/agents/channel-mcp (depends on A/B/C
-    choice)
-  - Phase 2b — archive or slim Flotilla repo (depends on A/B/C choice)
   - Phase 3 — add usage logger to orchestrate (one JSONL line per agent
     dispatch), run 30d, then revisit artifact pruning
-  - "Per-project PLAN.md adoption: flotilla, buddy, mymoney-dev, temper — opt-in
-    as each comes back into rotation"
-blockers:
-  - "Phase 2 channels: pick A (slim Flotilla to transport-only ~8k→~1.5k LOC), B
-    (drop multi-agent channels, archive Flotilla), or C (defer entirely).
-    channel-mcp depends on Flotilla central server — see ~/agents/PLAN.md"
+  - "Per-project PLAN.md adoption: buddy, mymoney-dev, temper — opt-in as
+    each comes back into rotation"
+blockers: []
 open_questions:
-  - Which option (A/B/C) for Phase 2 channels?
-  - Do you actively use inter-agent channel communication in current daily
-    workflow, or is it a leftover from the strategic-agents experiment?
   - Should Phase 3 usage logger live in orchestrate skill or in a separate hook?
 specs: []
 dependencies: []
-updated_at: 2026-04-20
+updated_at: 2026-05-06
 updated_by: jason
