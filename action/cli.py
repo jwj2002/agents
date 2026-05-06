@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -40,7 +41,9 @@ HELP_TEXT = """\
 
 Read:
   action --help                       Show this help
-  action --list                       List open actions in current project
+  action --list                       List open actions (wide table with metadata)
+  action --list --short               Compact format: ID Owner Status Action
+  action --list --no-trunc            Don't truncate the Action column
   action --list --status <s>          Filter by status (open|wip|blocked|done|cancelled|closed)
   action --list --owner <name>        Filter by owner (case-insensitive)
   action --list --closed              Show Recently Closed table
@@ -766,12 +769,60 @@ def cmd_list(args: argparse.Namespace, path: Path) -> int:
         print("(no matching actions)")
         return 0
 
-    for lbl, c in rows:
+    if args.short:
+        for lbl, c in rows:
+            if lbl == "closed":
+                status_col = f"closed:{c.get('Closed', '?')}"
+            else:
+                status_col = c.get("Status", "?")
+            print(f"{c.get('ID', '?'):<6} {c.get('Owner', '?'):<8} {status_col:<14} {c.get('Action', '')}")
+        return 0
+
+    def _cell(c: dict[str, str], key: str, default: str = "-") -> str:
+        val = (c.get(key, "") or "").strip()
+        return val if val else default
+
+    def _status(lbl: str, c: dict[str, str]) -> str:
         if lbl == "closed":
-            status_col = f"closed:{c.get('Closed', '?')}"
-        else:
-            status_col = c.get("Status", "?")
-        print(f"{c.get('ID', '?'):<6} {c.get('Owner', '?'):<8} {status_col:<14} {c.get('Action', '')}")
+            return f"closed:{c.get('Closed', '?')}"
+        return _cell(c, "Status")
+
+    def _files_count(c: dict[str, str]) -> str:
+        files = parse_files_cell(c.get("Files", ""))
+        return str(len(files)) if files else "-"
+
+    rendered = [
+        {
+            "ID":     _cell(c, "ID", "?"),
+            "Owner":  _cell(c, "Owner"),
+            "Status": _status(lbl, c),
+            "Opened": _cell(c, "Opened"),
+            "Src":    _cell(c, "Src"),
+            "Issue":  _cell(c, "Issue"),
+            "Files":  _files_count(c),
+            "Action": _cell(c, "Action", ""),
+        }
+        for lbl, c in rows
+    ]
+
+    fixed_cols = ["ID", "Owner", "Status", "Opened", "Src", "Issue", "Files"]
+    widths = {col: max(len(col), max(len(r[col]) for r in rendered)) for col in fixed_cols}
+
+    term_width = shutil.get_terminal_size((120, 24)).columns
+    fixed_width = sum(widths.values()) + 2 * len(fixed_cols)  # 2-space gutter after each fixed col
+    action_budget = max(20, term_width - fixed_width)
+
+    def _join(values: list[str]) -> str:
+        parts = [v.ljust(widths[col]) for col, v in zip(fixed_cols, values[:-1])]
+        parts.append(values[-1])
+        return "  ".join(parts)
+
+    print(_join([*fixed_cols, "Action"]))
+    for r in rendered:
+        action = r["Action"]
+        if not args.no_trunc and len(action) > action_budget:
+            action = action[: action_budget - 1] + "…"
+        print(_join([r[c] for c in fixed_cols] + [action]))
     return 0
 
 
@@ -917,6 +968,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--no-prompt", action="store_true", default=False)
     p.add_argument("--no-commit", action="store_true", default=False)
     p.add_argument("--strict", action="store_true", default=False)
+    p.add_argument("--short", action="store_true", default=False)
+    p.add_argument("--no-trunc", action="store_true", default=False)
     args = p.parse_args(argv)
 
     # validation

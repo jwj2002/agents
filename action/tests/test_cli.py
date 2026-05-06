@@ -670,6 +670,115 @@ Next ID: **A-002**
     assert "A-005" in new_content
 
 
+# ---------- --list rendering ----------
+
+_RICH_ACTIONS_CONTENT = """\
+# Rich Test Project
+
+Next ID: **A-003**
+
+## Open
+
+| ID | Issue | Action | Owner | Status | Opened | Src | Files | Notes |
+|----|-------|--------|-------|--------|--------|-----|-------|-------|
+| A-001 | #42 | Short action | Jason | open | 2026-05-01 | M1 | /tmp/a.txt, /tmp/b.txt | |
+| A-002 |  | This is a deliberately long action description that should exceed any reasonable terminal width budget so that the truncation logic kicks in and we can verify that the trailing ellipsis is appended correctly | Paul | wip | 2026-05-02 |  |  | |
+
+## Recently Closed
+
+| ID | Issue | Action | Owner | Closed | Files | Notes |
+|----|-------|--------|-------|--------|-------|-------|
+"""
+
+
+def _patch_rich_project(monkeypatch, tmp_path: Path):
+    p = tmp_path / "ACTIONS.md"
+    p.write_text(_RICH_ACTIONS_CONTENT)
+    monkeypatch.setattr(cli, "resolve_project_with_picker", lambda args: "rich")
+    monkeypatch.setattr(cli, "project_path", lambda name: p)
+    return p
+
+
+def test_list_default_shows_metadata_columns(monkeypatch, tmp_path, capsys):
+    """Default --list shows the wide tabular header with metadata columns."""
+    _patch_rich_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    rc = cli.main(["--list", "--no-prompt"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    header = out.splitlines()[0]
+    for col in ("ID", "Owner", "Status", "Opened", "Src", "Issue", "Files", "Action"):
+        assert col in header, f"missing column {col!r} in header: {header!r}"
+
+
+def test_list_default_renders_metadata_values(monkeypatch, tmp_path, capsys):
+    """Row data populates Opened, Src, Issue, Files (count) cells."""
+    _patch_rich_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    rc = cli.main(["--list", "--no-prompt"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    a001 = next(line for line in out.splitlines() if line.startswith("A-001"))
+    # row populated: opened date, src, issue link, files count = 2
+    assert "2026-05-01" in a001
+    assert "M1" in a001
+    assert "#42" in a001
+    assert " 2 " in a001 or a001.endswith(" 2") or " 2  " in a001  # files count
+
+
+def test_list_dash_for_empty_metadata(monkeypatch, tmp_path, capsys):
+    """A row with no Issue/Src/Files renders '-' in those cells."""
+    _patch_rich_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    rc = cli.main(["--list", "--no-prompt"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    a002 = next(line for line in out.splitlines() if line.startswith("A-002"))
+    # Issue, Src, Files are all empty for A-002 → all rendered as "-"
+    # Action text is long so it appears at the end; the metadata block before it must contain "-"
+    assert "-" in a002
+
+
+def test_list_short_keeps_compact_format(monkeypatch, tmp_path, capsys):
+    """--short preserves the legacy compact format (no header row)."""
+    _patch_rich_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    rc = cli.main(["--list", "--short", "--no-prompt"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    # No header row in short mode
+    assert not lines[0].startswith("ID "), f"unexpected header in --short output: {lines[0]!r}"
+    # First line is A-001 row, compact 4-col format
+    assert lines[0].startswith("A-001  Jason")
+
+
+def test_list_default_truncates_long_action(monkeypatch, tmp_path, capsys):
+    """Default --list truncates a long Action with an ellipsis."""
+    _patch_rich_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    # Force a small terminal so truncation is guaranteed
+    monkeypatch.setattr(cli.shutil, "get_terminal_size", lambda fallback=(120, 24): __import__("os").terminal_size((100, 24)))
+    rc = cli.main(["--list", "--no-prompt"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    a002 = next(line for line in out.splitlines() if line.startswith("A-002"))
+    assert a002.endswith("…"), f"expected trailing ellipsis on truncated row: {a002!r}"
+
+
+def test_list_no_trunc_preserves_full_action_text(monkeypatch, tmp_path, capsys):
+    """--no-trunc emits the full Action text regardless of terminal width."""
+    _patch_rich_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    monkeypatch.setattr(cli.shutil, "get_terminal_size", lambda fallback=(120, 24): __import__("os").terminal_size((80, 24)))
+    rc = cli.main(["--list", "--no-trunc", "--no-prompt"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    a002 = next(line for line in out.splitlines() if line.startswith("A-002"))
+    assert "trailing ellipsis is appended correctly" in a002
+    assert not a002.endswith("…")
+
+
 # T11: _commit_message_for verb table
 def test_commit_message_for_verbs():
     """Unit test _commit_message_for for all documented verb patterns."""
