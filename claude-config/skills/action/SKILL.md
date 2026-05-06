@@ -14,7 +14,7 @@ the single source of truth for behavior; this skill just dispatches.
 When invoked, run:
 
 ```bash
-python3 /home/jjob/agents/action/cli.py "$@"
+python3 /home/jjob/agents/action/cli.py --no-prompt "$@"
 ```
 
 Pass through every argument unchanged (including the positional ID, the

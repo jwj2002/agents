@@ -14,6 +14,7 @@ from datetime import date
 from pathlib import Path
 
 HOME = Path.home()
+KNOWLEDGE_PROJECTS_DIR = HOME / "agents" / "knowledge" / "projects"
 ALLOWED_STATUS = ("open", "wip", "blocked", "done", "cancelled")
 TERMINAL_STATUS = ("done", "cancelled")
 ID_RE = re.compile(r"^A-\d+$")
@@ -60,6 +61,10 @@ Create:
 Project resolution:
   --project <name>                     Override; otherwise inferred from cwd
                                        (~/agents → agents, ~/projects/X → X)
+  --no-prompt                          Skip interactive picker; error instead
+                                       (set automatically by non-TTY callers)
+Picker: when project is unresolved or unknown and stdin is a TTY, a numbered
+list of known projects is shown. Ctrl-C, EOF, or blank input aborts.
 
 Status values: open · wip · blocked · done · cancelled
 """
@@ -357,6 +362,82 @@ def resolve_project(args: argparse.Namespace) -> str:
     )
 
 
+def list_known_projects() -> list[str]:
+    """Return sorted list of project name stems from knowledge/projects/*.yaml."""
+    return sorted(p.stem for p in KNOWLEDGE_PROJECTS_DIR.glob("*.yaml"))
+
+
+def _interactive_pick(candidates: list[str], header: str) -> str:
+    """Print numbered menu, prompt for 1-based selection.
+
+    Reprompts up to 3 times on out-of-range or non-numeric input.
+    Raises ActionError on Ctrl-C, EOF, blank input, or exhausted retries.
+    """
+    print(header)
+    for i, name in enumerate(candidates, 1):
+        print(f"  {i}) {name}")
+    for attempt in range(3):
+        try:
+            raw = input(f"Enter number (1-{len(candidates)}): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            raise ActionError("project selection cancelled")
+        if not raw:
+            raise ActionError("project selection cancelled")
+        try:
+            choice = int(raw)
+        except ValueError:
+            if attempt < 2:
+                print(f"  invalid input — enter a number between 1 and {len(candidates)}")
+                continue
+            raise ActionError("too many invalid inputs — project selection aborted")
+        if 1 <= choice <= len(candidates):
+            return candidates[choice - 1]
+        if attempt < 2:
+            print(f"  out of range — enter a number between 1 and {len(candidates)}")
+        else:
+            raise ActionError("too many invalid inputs — project selection aborted")
+    raise ActionError("too many invalid inputs — project selection aborted")
+
+
+def resolve_project_with_picker(args: argparse.Namespace) -> str:
+    """Wrap resolve_project(); apply validation + interactive picker where appropriate.
+
+    Validation order:
+      1. cwd inference (via resolve_project) — if resolved, return immediately.
+      2. --project <name>: if supplied AND in known list, return it.
+      3. --project <name>: if supplied BUT NOT in known list, picker with
+         header 'unknown project "<name>". Pick one:'.
+      4. No project resolved: picker with header 'no project resolved. Pick one:'.
+      5. Picker only fires when sys.stdin.isatty() AND NOT args.no_prompt.
+         Otherwise raises ActionError with existing message.
+    """
+    # If --project not supplied, try cwd inference first.
+    if not args.project:
+        try:
+            return resolve_project(args)
+        except ActionError:
+            pass
+        # cwd inference failed — offer picker or hard error
+        if sys.stdin.isatty() and not args.no_prompt:
+            candidates = list_known_projects()
+            return _interactive_pick(candidates, "no project resolved. Pick one:")
+        raise ActionError(
+            "no project resolved — pass --project <name> or run from inside the project directory"
+        )
+
+    # --project was supplied — validate against known list
+    known = list_known_projects()
+    if args.project in known:
+        return args.project
+
+    # Unknown project name
+    if sys.stdin.isatty() and not args.no_prompt:
+        return _interactive_pick(known, f'unknown project "{args.project}". Pick one:')
+    raise ActionError(
+        f'unknown project "{args.project}" — known projects: {", ".join(known)}'
+    )
+
+
 def project_path(name: str) -> Path:
     if name == "agents":
         return HOME / "agents" / "ACTIONS.md"
@@ -627,6 +708,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--attach", action="append", default=[])
     p.add_argument("--unattach", action="append", default=[])
     p.add_argument("--project")
+    p.add_argument("--no-prompt", action="store_true", default=False)
     args = p.parse_args(argv)
 
     # validation
@@ -653,7 +735,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        project = resolve_project(args)
+        project = resolve_project_with_picker(args)
         path = project_path(project)
         if args.new:
             return cmd_new(args, path)
