@@ -7,6 +7,7 @@ For shell use directly: alias action='python3 ~/agents/action/cli.py'.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from pathlib import Path
 
 HOME = Path.home()
 KNOWLEDGE_PROJECTS_DIR = HOME / "agents" / "knowledge" / "projects"
+SUBSCRIPTIONS_PATH = Path.home() / ".claude" / "dashboard-subscriptions.json"
 ALLOWED_STATUS = ("open", "wip", "blocked", "done", "cancelled")
 TERMINAL_STATUS = ("done", "cancelled")
 ID_RE = re.compile(r"^A-\d+$")
@@ -363,8 +365,16 @@ def resolve_project(args: argparse.Namespace) -> str:
 
 
 def list_known_projects() -> list[str]:
-    """Return sorted list of project name stems from knowledge/projects/*.yaml."""
-    return sorted(p.stem for p in KNOWLEDGE_PROJECTS_DIR.glob("*.yaml"))
+    """Return sorted list of project names, filtered by this machine's subscriptions.
+
+    Falls back to all registered yamls if subscriptions file is missing or empty.
+    """
+    all_registered = sorted(p.stem for p in KNOWLEDGE_PROJECTS_DIR.glob("*.yaml"))
+    subs = read_subscriptions()
+    if not subs:
+        return all_registered
+    filtered = [p for p in all_registered if p in subs]
+    return filtered if filtered else all_registered
 
 
 def _interactive_pick(candidates: list[str], header: str) -> str:
@@ -430,11 +440,24 @@ def resolve_project_with_picker(args: argparse.Namespace) -> str:
     if args.project in known:
         return args.project
 
-    # Unknown project name
+    # Unknown project name — check if disk dir exists → auto-register
+    if project_dir_exists(args.project):
+        register_project(args.project)
+        print(f'registered new project "{args.project}" on this machine')
+        return args.project
+
+    # No disk dir — picker or error (Rule 3)
     if sys.stdin.isatty() and not args.no_prompt:
         return _interactive_pick(known, f'unknown project "{args.project}". Pick one:')
+    subs = read_subscriptions()
+    subscribed_str = ", ".join(subs) if subs else "(none)"
     raise ActionError(
-        f'unknown project "{args.project}" — known projects: {", ".join(known)}'
+        f'unknown project "{args.project}"\n'
+        f"  - not registered (knowledge/projects/{args.project}.yaml missing)\n"
+        f"  - no repo at ~/projects/{args.project}/\n"
+        f"  To add: clone the repo to ~/projects/{args.project}, "
+        f'or register manually.\n'
+        f"  Subscribed on this machine: {subscribed_str}"
     )
 
 
@@ -442,6 +465,66 @@ def project_path(name: str) -> Path:
     if name == "agents":
         return HOME / "agents" / "ACTIONS.md"
     return HOME / "projects" / name / "ACTIONS.md"
+
+
+def project_dir_exists(name: str) -> bool:
+    """Return True if a local repo directory exists for this project name."""
+    if name == "agents":
+        return (HOME / "agents").is_dir()
+    return (HOME / "projects" / name).is_dir()
+
+
+def read_subscriptions() -> list[str]:
+    """Read subscribed project names from dashboard-subscriptions.json.
+
+    Returns [] on missing file, malformed JSON, or absent/empty subscribed key.
+    """
+    try:
+        data = json.loads(SUBSCRIPTIONS_PATH.read_text())
+        subs = data.get("subscribed", [])
+        return [s for s in subs if isinstance(s, str)]
+    except (FileNotFoundError, json.JSONDecodeError, AttributeError):
+        return []
+
+
+def add_subscription(name: str) -> None:
+    """Append name to dashboard-subscriptions.json, creating the file if absent."""
+    try:
+        data = json.loads(SUBSCRIPTIONS_PATH.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {}
+    subs: list[str] = data.get("subscribed", [])
+    if name not in subs:
+        subs.append(name)
+    data["subscribed"] = subs
+    SUBSCRIPTIONS_PATH.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def register_project(name: str) -> Path:
+    """Write a default yaml to knowledge/projects/<name>.yaml and subscribe this machine.
+
+    Raises FileExistsError if yaml already exists (prevents double-registration).
+    Returns the path to the created yaml.
+    """
+    yaml_path = KNOWLEDGE_PROJECTS_DIR / f"{name}.yaml"
+    if yaml_path.exists():
+        raise FileExistsError(f"project yaml already exists: {yaml_path}")
+    today_str = date.today().isoformat()
+    content = (
+        f"project: {name}\n"
+        f"status: active\n"
+        f'focus: ""\n'
+        f"next_steps: []\n"
+        f"blockers: []\n"
+        f"open_questions: []\n"
+        f"specs: []\n"
+        f"dependencies: []\n"
+        f'updated_at: "{today_str}"\n'
+        f"updated_by: jason\n"
+    )
+    yaml_path.write_text(content)
+    add_subscription(name)
+    return yaml_path
 
 
 # ---------- commands ----------
