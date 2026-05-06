@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import date
@@ -17,6 +18,12 @@ from pathlib import Path
 HOME = Path.home()
 KNOWLEDGE_PROJECTS_DIR = HOME / "agents" / "knowledge" / "projects"
 SUBSCRIPTIONS_PATH = Path.home() / ".claude" / "dashboard-subscriptions.json"
+GIT_OK            = "ok"
+GIT_NETWORK_ERROR = "network_error"
+GIT_CONFLICT      = "conflict"
+GIT_NOT_A_REPO    = "not_a_git_repo"
+GIT_PUSH_REJECTED = "push_rejected"
+
 ALLOWED_STATUS = ("open", "wip", "blocked", "done", "cancelled")
 TERMINAL_STATUS = ("done", "cancelled")
 ID_RE = re.compile(r"^A-\d+$")
@@ -65,6 +72,9 @@ Project resolution:
                                        (~/agents → agents, ~/projects/X → X)
   --no-prompt                          Skip interactive picker; error instead
                                        (set automatically by non-TTY callers)
+  --no-commit                          Skip all git ops (pull + push); write file locally
+  --strict                             Abort if git pull fails (network down); default
+                                       is warn-and-continue
 Picker: when project is unresolved or unknown and stdin is a TTY, a numbered
 list of known projects is shown. Ctrl-C, EOF, or blank input aborts.
 
@@ -302,6 +312,21 @@ def parse_file(path: Path) -> FileModel:
     )
 
 
+def parse_next_id_from_data(content: str) -> int:
+    """Scan all table rows in content; return max(IDs) + 1 or 1 if none found.
+
+    This is the authoritative ID-derivation path. The marker line is kept for
+    human readability but the data always wins on mutation.
+    """
+    lines = content.split("\n")
+    ids: list[int] = []
+    for line in lines:
+        cells = split_row(line)
+        if cells and ID_RE.match(cells[0]):
+            ids.append(int(cells[0].split("-")[1]))
+    return (max(ids) + 1) if ids else 1
+
+
 # ---------- mutations ----------
 
 def replace_row(model: FileModel, line_idx: int, cells: dict[str, str], cols: list[str]) -> None:
@@ -536,7 +561,8 @@ def cmd_new(args: argparse.Namespace, path: Path) -> int:
     if status not in ALLOWED_STATUS:
         raise ActionError(f'invalid status "{status}" — must be one of {", ".join(ALLOWED_STATUS)}')
     model = parse_file(path)
-    aid = f"A-{model.next_id_num:03d}"
+    current_max = parse_next_id_from_data("\n".join(model.lines))
+    aid = f"A-{current_max:03d}"
     notes = f"{today()}: {escape_pipes(args.note)}" if args.note else ""
     files: list[str] = []
     for raw in collect_attach_args(args):
@@ -565,7 +591,7 @@ def cmd_new(args: argparse.Namespace, path: Path) -> int:
         insert_closed_row(model, closed_cells)
     else:
         insert_open_row(model, cells)
-    bump_next_id(model, model.next_id_num + 1)
+    bump_next_id(model, current_max + 1)
     model.write()
     suffix = f" [+{len(files)} file{'s' if len(files) != 1 else ''}]" if files else ""
     print(f"created {aid}: {args.new} [Owner: {args.owner}]{suffix}")
@@ -609,6 +635,103 @@ def remove_attachment(files: list[str], query: str) -> tuple[list[str], str]:
             + ", ".join(matches)
         )
     raise ActionError(f'no attachment matches "{query}"')
+
+
+# ---------- git helpers ----------
+
+def _git_detect_repo(repo_path: Path) -> bool:
+    """Return True if repo_path is inside a git repo."""
+    r = subprocess.run(
+        ["git", "-C", str(repo_path), "rev-parse", "--show-toplevel"],
+        capture_output=True, timeout=10,
+    )
+    return r.returncode == 0
+
+
+def _git_current_branch(repo_path: Path) -> str:
+    """Return current branch name, or 'main' as fallback."""
+    r = subprocess.run(
+        ["git", "-C", str(repo_path), "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True, text=True, timeout=10,
+    )
+    return r.stdout.strip() if r.returncode == 0 else "main"
+
+
+def _git_pull_rebase(repo_path: Path) -> str:
+    """Pull with --rebase. Returns GIT_OK, GIT_NETWORK_ERROR, GIT_CONFLICT, or GIT_NOT_A_REPO."""
+    if not _git_detect_repo(repo_path):
+        return GIT_NOT_A_REPO
+    branch = _git_current_branch(repo_path)
+    r = subprocess.run(
+        ["git", "-C", str(repo_path), "pull", "--rebase", "origin", branch],
+        capture_output=True, text=True, timeout=10,
+    )
+    if r.returncode == 0:
+        return GIT_OK
+    combined = (r.stdout + r.stderr).lower()
+    if "conflict" in combined:
+        return GIT_CONFLICT
+    if any(phrase in combined for phrase in (
+        "could not resolve host", "unable to access", "network is unreachable", "timed out"
+    )):
+        return GIT_NETWORK_ERROR
+    # fail-open: treat any other non-zero as a network error
+    return GIT_NETWORK_ERROR
+
+
+def _git_commit_and_push(repo_path: Path, actions_md: Path, message: str) -> str:
+    """Stage, commit, and push ACTIONS.md. Returns GIT_OK, GIT_PUSH_REJECTED, or GIT_NETWORK_ERROR."""
+    branch = _git_current_branch(repo_path)
+
+    # Stage
+    r = subprocess.run(
+        ["git", "-C", str(repo_path), "add", str(actions_md)],
+        capture_output=True, timeout=10,
+    )
+    if r.returncode != 0:
+        return GIT_NETWORK_ERROR
+
+    # Commit
+    r = subprocess.run(
+        ["git", "-C", str(repo_path), "commit", "-m", message],
+        capture_output=True, text=True, timeout=10,
+    )
+    if r.returncode != 0:
+        if "nothing to commit" in (r.stdout + r.stderr).lower():
+            return GIT_OK  # idempotent
+        return GIT_NETWORK_ERROR
+
+    # Push
+    r = subprocess.run(
+        ["git", "-C", str(repo_path), "push", "--force-with-lease", "origin", branch],
+        capture_output=True, text=True, timeout=10,
+    )
+    if r.returncode == 0:
+        return GIT_OK
+    combined = (r.stdout + r.stderr).lower()
+    if "rejected" in combined or "non-fast-forward" in combined:
+        return GIT_PUSH_REJECTED
+    return GIT_NETWORK_ERROR
+
+
+def _commit_message_for(
+    verb: str,
+    action_id: str,
+    owner: str | None = None,
+    status: str | None = None,
+) -> str:
+    """Build a conventional commit message for an ACTIONS.md mutation."""
+    if verb == "add":
+        tail = f"add {action_id} ({owner})" if owner else f"add {action_id}"
+    elif verb == "close":
+        tail = f"close {action_id} → {status}" if status else f"close {action_id}"
+    elif verb == "reopen":
+        tail = f"reopen {action_id}"
+    elif verb == "note":
+        tail = f"note on {action_id}"
+    else:
+        tail = f"update {action_id}"
+    return f"chore(action): {tail}"
 
 
 def cmd_list(args: argparse.Namespace, path: Path) -> int:
@@ -792,6 +915,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--unattach", action="append", default=[])
     p.add_argument("--project")
     p.add_argument("--no-prompt", action="store_true", default=False)
+    p.add_argument("--no-commit", action="store_true", default=False)
+    p.add_argument("--strict", action="store_true", default=False)
     args = p.parse_args(argv)
 
     # validation
@@ -820,17 +945,102 @@ def main(argv: list[str] | None = None) -> int:
     try:
         project = resolve_project_with_picker(args)
         path = project_path(project)
-        if args.new:
-            return cmd_new(args, path)
+
+        # Read-only operations: no git
         if args.list:
             return cmd_list(args, path)
         if args.id and not any([
             args.status, args.note, args.owner, args.reopen, args.attach, args.unattach,
         ]):
             return cmd_show(args, path)
-        if args.id:
-            return cmd_update(args, path)
-        raise ActionError("no operation specified — use --help for usage")
+
+        # Mutation operations: wrap with git pull/push unless --no-commit
+        is_mutation = args.new or args.id
+        if not is_mutation:
+            raise ActionError("no operation specified — use --help for usage")
+
+        repo_path = path.parent
+        # _do_push: True when a post-write commit+push should happen
+        _do_push = True
+
+        if not args.no_commit:
+            pull_result = _git_pull_rebase(repo_path)
+            if pull_result == GIT_CONFLICT:
+                print(
+                    f"error: cannot sync ACTIONS.md — pull conflict on this file.\n"
+                    f"  Resolve manually:\n"
+                    f"    cd {repo_path}\n"
+                    f"    git status\n"
+                    f"    # edit ACTIONS.md, then:\n"
+                    f"    git add ACTIONS.md && git rebase --continue\n"
+                    f"  Then retry the action.",
+                    file=sys.stderr,
+                )
+                return 1
+            elif pull_result == GIT_NETWORK_ERROR:
+                if args.strict:
+                    print(
+                        "error: cannot sync — offline. Pass --no-commit to write locally without git.",
+                        file=sys.stderr,
+                    )
+                    return 1
+                print(
+                    "WARNING: offline — could not pull latest. Writing locally.\n"
+                    "  Sync manually with `git push` when network returns."
+                )
+                _do_push = False
+            elif pull_result == GIT_NOT_A_REPO:
+                _do_push = False
+            # GIT_OK: proceed normally (push will run)
+
+        # Dispatch mutation
+        if args.new:
+            verb = "add"
+            rc = cmd_new(args, path)
+            commit_msg = _commit_message_for(verb, "", owner=args.owner)
+            # Re-derive the ID that was just written for the commit message
+            # (we need to read what cmd_new wrote; parse back from file)
+            try:
+                _m = parse_file(path)
+                # The new ID is current_max - 1 (the one we just wrote)
+                _written_num = parse_next_id_from_data(path.read_text()) - 1
+                written_id = f"A-{_written_num:03d}"
+                commit_msg = _commit_message_for("add", written_id, owner=args.owner)
+            except Exception:
+                pass
+        else:
+            rc = cmd_update(args, path)
+            # Determine verb from args
+            if args.reopen:
+                verb = "reopen"
+            elif args.status in TERMINAL_STATUS if args.status else False:
+                verb = "close"
+            elif args.note and not args.status and not args.owner:
+                verb = "note"
+            else:
+                verb = "update"
+            commit_msg = _commit_message_for(verb, args.id, status=args.status)
+
+        if rc != 0:
+            return rc
+
+        if not args.no_commit and _do_push:
+            push_result = _git_commit_and_push(repo_path, path, commit_msg)
+            if push_result == GIT_PUSH_REJECTED:
+                print(
+                    "error: push rejected — another device wrote between rebase and commit.\n"
+                    "  Run the same command again to retry.",
+                    file=sys.stderr,
+                )
+                return 1
+            elif push_result == GIT_NETWORK_ERROR:
+                # Non-fatal: file already written locally
+                print(
+                    "WARNING: could not push — network error. File written locally.\n"
+                    "  Sync manually with `git push` when network returns."
+                )
+
+        return 0
     except ActionError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
