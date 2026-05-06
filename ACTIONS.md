@@ -18,7 +18,6 @@ _(none yet)_
 
 | ID | Issue | Action | Owner | Status | Opened | Src | Files | Notes |
 |----|----|----|----|----|----|----|----|----|
-| A-001 |  | v2: MCP tool exposing ACTIONS.md to /dashboard at query time | Jason | open | 2026-05-04 |  |  |  |
 | A-002 |  | v2.5: cap-sync — GH issue create/mirror per A-NNN row | Jason | open | 2026-05-04 |  |  |  |
 | A-003 |  | v3: -e editor mode (open $EDITOR with template, parse rows) | Jason | open | 2026-05-04 |  |  |  |
 | A-004 |  | v3: TODO comment scanner pulls TODO: markers into ACTIONS.md | Jason | open | 2026-05-04 |  |  |  |
@@ -28,6 +27,7 @@ _(none yet)_
 
 | ID | Issue | Action | Owner | Closed | Files | Notes |
 |----|----|----|----|----|----|----|
+| A-001 |  | v2: MCP tool exposing ACTIONS.md to /dashboard at query time | Jason | 2026-05-06 |  | 2026-05-06: Obsolete: dashboard skill v6.0 reads ACTIONS.md directly per project (SKILL.md:163-203). No MCP tool needed. |
 
 ## Archive
 
