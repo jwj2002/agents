@@ -779,6 +779,186 @@ def test_list_no_trunc_preserves_full_action_text(monkeypatch, tmp_path, capsys)
     assert not a002.endswith("…")
 
 
+# ---------- --new capture parity (cap → action consolidation) ----------
+
+def _patch_empty_project(monkeypatch, tmp_path: Path) -> Path:
+    """Project dir exists but ACTIONS.md is missing (auto-template creation case)."""
+    project_dir = tmp_path / "newproj"
+    project_dir.mkdir()
+    actions_file = project_dir / "ACTIONS.md"
+    monkeypatch.setattr(cli, "resolve_project_with_picker", lambda args: "newproj")
+    monkeypatch.setattr(cli, "project_path", lambda name: actions_file)
+    return actions_file
+
+
+def test_new_default_owner_is_jason(monkeypatch, tmp_path):
+    """--new without --owner defaults to 'Jason' (cap parity)."""
+    actions_file = _patch_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    rc = cli.main(["--new", "owner-default", "--no-prompt", "--no-commit"])
+    assert rc == 0
+    assert "owner-default" in actions_file.read_text()
+    # Owner cell holds "Jason"
+    assert "| Jason |" in actions_file.read_text()
+
+
+def test_new_multi_row_positional(monkeypatch, tmp_path):
+    """--new with multiple positionals creates one row per text in a single batch."""
+    actions_file = _patch_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    rc = cli.main(["--new", "alpha", "beta", "gamma", "--no-prompt", "--no-commit"])
+    assert rc == 0
+    text = actions_file.read_text()
+    assert "alpha" in text and "beta" in text and "gamma" in text
+    # 3 new rows + 1 existing fixture row = 4 lines starting with `| A-`
+    open_rows = [ln for ln in text.splitlines() if ln.startswith("| A-")]
+    assert len(open_rows) == 4
+
+
+def test_new_stdin_when_flag_takes_no_value(monkeypatch, tmp_path):
+    """`echo ... | action --new` reads from stdin (one row per line)."""
+    actions_file = _patch_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    import io
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO("piped one\npiped two\n"))
+    # Force isatty=False on the patched stdin (StringIO has no isatty by default)
+    cli.sys.stdin.isatty = lambda: False
+    rc = cli.main(["--new", "--no-prompt", "--no-commit"])
+    assert rc == 0
+    text = actions_file.read_text()
+    assert "piped one" in text and "piped two" in text
+
+
+def test_new_auto_creates_actions_md_from_template(monkeypatch, tmp_path):
+    """When ACTIONS.md is missing, --new bootstraps it from the v2 template (cap parity)."""
+    actions_file = _patch_empty_project(monkeypatch, tmp_path)
+    assert not actions_file.exists()
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    rc = cli.main(["--new", "first ever action", "--no-prompt", "--no-commit"])
+    assert rc == 0
+    text = actions_file.read_text()
+    assert "## Open" in text
+    assert "## Recently Closed" in text
+    assert "## Archive" in text
+    assert "Files" in text  # v2 schema (Files column present)
+    assert "first ever action" in text
+    assert "A-001" in text
+
+
+def test_new_short_p_flag_resolves_project(monkeypatch, tmp_path):
+    """`-p NAME` works as a short form of `--project NAME`."""
+    actions_file = _patch_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    rc = cli.main(["--new", "p-short", "-p", "testproject", "--no-prompt", "--no-commit"])
+    assert rc == 0
+    assert "p-short" in actions_file.read_text()
+
+
+def test_new_editor_requires_tty(monkeypatch, tmp_path, capsys):
+    """--editor errors clearly when stdin is not a TTY."""
+    _patch_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False, raising=False)
+    rc = cli.main(["--new", "--editor", "--no-prompt", "--no-commit"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "TTY" in err or "tty" in err
+
+
+def test_new_interactive_requires_tty(monkeypatch, tmp_path, capsys):
+    """--interactive errors clearly when stdin is not a TTY."""
+    _patch_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False, raising=False)
+    rc = cli.main(["--new", "--interactive", "--no-prompt", "--no-commit"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "TTY" in err or "tty" in err
+
+
+def test_new_editor_and_interactive_mutex(monkeypatch, tmp_path, capsys):
+    """--editor and --interactive together is rejected."""
+    _patch_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    rc = cli.main(["--new", "--editor", "--interactive", "--no-prompt", "--no-commit"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "mutually exclusive" in err
+
+
+def test_new_editor_writes_rows_from_temp_file(monkeypatch, tmp_path):
+    """Happy path: editor template + parsed rows become ACTIONS.md entries."""
+    actions_file = _patch_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True, raising=False)
+
+    def _fake_editor(argv, *a, **kw):
+        # argv[1] is the temp file path. Append two action lines to it.
+        editor_tmp = Path(argv[1])
+        editor_tmp.write_text(
+            "# This is the template comment\n"
+            "from editor one\n"
+            "from editor two\n"
+            "# Another comment\n"
+        )
+        import subprocess as _sp
+        return _sp.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(cli.subprocess, "run", _fake_editor)
+
+    rc = cli.main(["--new", "--editor", "--no-prompt", "--no-commit"])
+    assert rc == 0
+    text = actions_file.read_text()
+    assert "from editor one" in text
+    assert "from editor two" in text
+    # Comment lines must be skipped
+    assert "This is the template comment" not in text
+
+
+def test_new_interactive_loop_writes_until_blank(monkeypatch, tmp_path):
+    """--interactive prompts until a blank Action and writes all collected rows."""
+    actions_file = _patch_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True, raising=False)
+
+    inputs = iter(["repl one", "repl two", ""])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(inputs))
+
+    rc = cli.main(["--new", "--interactive", "--no-prompt", "--no-commit"])
+    assert rc == 0
+    text = actions_file.read_text()
+    assert "repl one" in text
+    assert "repl two" in text
+
+
+def test_new_no_input_raises(monkeypatch, tmp_path, capsys):
+    """--new with no positionals, no stdin, no editor/interactive errors."""
+    _patch_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True, raising=False)
+    rc = cli.main(["--new", "--no-prompt", "--no-commit"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "no actions" in err.lower()
+
+
+def test_commit_message_for_add_list_of_ids():
+    """_commit_message_for handles list[str] for multi-row adds."""
+    # single-element list renders as the bare ID
+    assert cli._commit_message_for("add", ["A-008"], owner="Jason") == "chore(action): add A-008 (Jason)"
+    # ≤3 IDs joined with commas
+    assert (
+        cli._commit_message_for("add", ["A-008", "A-009", "A-010"], owner="Jason")
+        == "chore(action): add A-008, A-009, A-010 (Jason)"
+    )
+    # >3 IDs collapsed to range + count
+    assert (
+        cli._commit_message_for("add", ["A-008", "A-009", "A-010", "A-011"], owner="Jason")
+        == "chore(action): add A-008..A-011 (4 actions) (Jason)"
+    )
+    # Backwards-compat: bare string still works
+    assert cli._commit_message_for("add", "A-001") == "chore(action): add A-001"
+
+
 # T11: _commit_message_for verb table
 def test_commit_message_for_verbs():
     """Unit test _commit_message_for for all documented verb patterns."""
