@@ -18,7 +18,6 @@ _(none yet)_
 
 | ID | Issue | Action | Owner | Status | Opened | Src | Files | Notes |
 |----|----|----|----|----|----|----|----|----|
-| A-005 |  | v3: alternate capture surfaces (iOS Shortcut, voice, email) | Jason | open | 2026-05-04 |  |  |  |
 
 ## Recently Closed
 
@@ -28,6 +27,7 @@ _(none yet)_
 | A-002 |  | v2.5: cap-sync — GH issue create/mirror per A-NNN row | Jason | 2026-05-06 |  | 2026-05-06: Cancelled as scoped. Bidirectional ACTIONS.md<->GH issue sync is duplication for a single-user surface; precedent (Linear/Jira/org-mode) only justifies it when multiple humans live in different surfaces. Current design (Issue col blank, opt in to gh issue create when collaboration/CI matters) is correct. Multi-host (GH jwj2002 + jjob-spec + GitLab on jbox06) makes sync cost worse. |
 | A-003 |  | v3: -e editor mode (open $EDITOR with template, parse rows) | Jason | 2026-05-06 |  | 2026-05-06: Cancelled as scoped under cap (v3 roadmap). README bin/README.md:86-99 remains the durable pointer. May be re-filed under the action CLI — see notes on A-004. |
 | A-004 |  | v3: TODO comment scanner pulls TODO: markers into ACTIONS.md | Jason | 2026-05-06 |  | 2026-05-06: Cancelled as scoped under cap (v3 roadmap). TODO scanner has its own duplication tension (code TODO vs ACTIONS row); README bin/README.md:86-99 remains the pointer. |
+| A-005 |  | v3: alternate capture surfaces (iOS Shortcut, voice, email) | Jason | 2026-05-06 |  | 2026-05-06: Cancelled as scoped under cap (v3 roadmap). Alt surfaces (iOS/voice/email) are infrastructure, not CLI features — the CLI can be a target but the interfaces live elsewhere. README bin/README.md:86-99 remains the pointer. |
 
 ## Archive
 
