@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -64,14 +66,18 @@ Attachments (used by /email-digest to attach files to outgoing mail):
   action A-NNN --unattach <name>      Remove attachment by basename or full path
 
 Create:
-  action --new "..." --owner <name>   Add a new action (auto-bumps Next ID)
-                       [--status <s>]  Default: open
-                       [--note "..."]
-                       [--src "..."]
-                       [--attach <path>]
+  action --new "..."                  Add one new action (defaults: owner=Jason, status=open)
+  action --new "x" "y" "z"            Add multiple actions in one batch
+  action --new < file.txt             Read action texts from stdin (one per line)
+  action --new -e                     Open $EDITOR with a template; one row per non-comment line
+  action --new -i                     Interactive prompt loop until a blank line
+                                      Optional: [--owner <name>] [--status <s>]
+                                                [--note "..."] [--src "..."]
+                                                [--attach <path>]
+  Auto-creates ACTIONS.md from template if missing in the resolved project.
 
 Project resolution:
-  --project <name>                     Override; otherwise inferred from cwd
+  --project, -p <name>                 Override; otherwise inferred from cwd
                                        (~/agents → agents, ~/projects/X → X)
   --no-prompt                          Skip interactive picker; error instead
                                        (set automatically by non-TTY callers)
@@ -557,47 +563,171 @@ def register_project(name: str) -> Path:
 
 # ---------- commands ----------
 
+DEFAULT_OWNER = "Jason"
+
+
+def _actions_template(project_name: str) -> str:
+    """Initial ACTIONS.md content (v2 schema with Files column)."""
+    return (
+        f"# Actions — {project_name}\n"
+        "\n"
+        "Open and recently closed actions for this project.\n"
+        "\n"
+        "**How to use**\n"
+        "- Add: append a row, next ID, status=open, fill owner/opened/source\n"
+        "- Update: edit in place (status, notes, closed date)\n"
+        "- Closed >30 days: move to Archive\n"
+        "- Refer as `A-NNN` in commits, PRs, chat, other docs\n"
+        "\n"
+        "**Status:** `open` · `wip` · `blocked` · `done` · `cancelled`\n"
+        "\n"
+        "## Sources\n"
+        "\n"
+        "_(none yet)_\n"
+        "\n"
+        "## Open\n"
+        "\n"
+        "| ID | Issue | Action | Owner | Status | Opened | Src | Files | Notes |\n"
+        "|----|-------|--------|-------|--------|--------|-----|-------|-------|\n"
+        "\n"
+        "## Recently Closed\n"
+        "\n"
+        "| ID | Issue | Action | Owner | Closed | Files | Notes |\n"
+        "|----|-------|--------|-------|--------|-------|-------|\n"
+        "\n"
+        "## Archive\n"
+        "\n"
+        "_(none yet)_\n"
+        "\n"
+        "---\n"
+        "Next ID: **A-001**\n"
+    )
+
+
+def _collect_from_editor() -> list[str]:
+    """Open $EDITOR with a template; return non-comment, non-empty lines."""
+    if not sys.stdin.isatty():
+        raise ActionError("--editor requires a TTY (cannot launch $EDITOR from a pipe)")
+    editor = os.environ.get("EDITOR") or os.environ.get("VISUAL") or "vim"
+    template = (
+        "# Enter one action per line. Lines starting with '#' are ignored.\n"
+        "# Save and exit when done. Empty file = no actions created.\n"
+        "\n"
+    )
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".md", prefix="action-", delete=False, encoding="utf-8"
+    ) as f:
+        f.write(template)
+        tmp_path = f.name
+    try:
+        result = subprocess.run([editor, tmp_path])
+        if result.returncode != 0:
+            raise ActionError(f"editor '{editor}' exited with status {result.returncode}")
+        with open(tmp_path, encoding="utf-8") as f:
+            content = f.read()
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+    return [
+        line.strip()
+        for line in content.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
+def _collect_from_repl(owner: str, src: str) -> list[str]:
+    """Prompt-loop for action text. Blank line ends the batch. Ctrl-C/D aborts."""
+    if not sys.stdin.isatty():
+        raise ActionError("--interactive requires a TTY")
+    src_label = src or "(none)"
+    print(f"Owner: {owner}   Src: {src_label}   (blank Action to finish, Ctrl-C to abort)")
+    texts: list[str] = []
+    while True:
+        try:
+            line = input("Action: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            raise ActionError("interactive capture aborted — no rows written")
+        if not line:
+            return texts
+        texts.append(line)
+
+
+def _collect_new_texts(args: argparse.Namespace, owner: str) -> list[str]:
+    """Resolve action texts from --editor / --interactive / --new args / stdin."""
+    if args.editor:
+        return _collect_from_editor()
+    if args.interactive:
+        return _collect_from_repl(owner, args.src or "")
+    if args.new is None:
+        return []
+    if args.new:
+        return [t.strip() for t in args.new if t.strip()]
+    # --new flag with no positional args → read stdin if piped
+    if not sys.stdin.isatty():
+        return [line.rstrip() for line in sys.stdin if line.strip()]
+    return []
+
+
 def cmd_new(args: argparse.Namespace, path: Path) -> int:
-    if not args.owner:
-        raise ActionError("--new requires --owner")
+    owner = args.owner or DEFAULT_OWNER
     status = args.status or "open"
     if status not in ALLOWED_STATUS:
         raise ActionError(f'invalid status "{status}" — must be one of {", ".join(ALLOWED_STATUS)}')
+
+    texts = _collect_new_texts(args, owner)
+    if not texts:
+        raise ActionError(
+            "no actions to create — pass text after --new, pipe via stdin, "
+            "or use --editor / --interactive"
+        )
+
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_actions_template(path.parent.name))
+
     model = parse_file(path)
     current_max = parse_next_id_from_data("\n".join(model.lines))
-    aid = f"A-{current_max:03d}"
     notes = f"{today()}: {escape_pipes(args.note)}" if args.note else ""
-    files: list[str] = []
-    for raw in collect_attach_args(args):
-        files.append(str(normalize_attachment_path(raw)))
-    cells = {
-        "ID": aid,
-        "Issue": "",
-        "Action": escape_pipes(args.new),
-        "Owner": args.owner,
-        "Status": status,
-        "Opened": today(),
-        "Src": escape_pipes(args.src) if args.src else "",
-        "Files": render_files_cell(files),
-        "Notes": notes,
-    }
-    if status in TERMINAL_STATUS:
-        closed_cells = {
-            "ID": aid,
-            "Issue": "",
-            "Action": escape_pipes(args.new),
-            "Owner": args.owner,
-            "Closed": today(),
-            "Files": render_files_cell(files),
-            "Notes": notes,
-        }
-        insert_closed_row(model, closed_cells)
-    else:
-        insert_open_row(model, cells)
-    bump_next_id(model, current_max + 1)
+    files: list[str] = [str(normalize_attachment_path(raw)) for raw in collect_attach_args(args)]
+    files_cell = render_files_cell(files)
+
+    written_ids: list[str] = []
+    for i, text in enumerate(texts):
+        aid = f"A-{current_max + i:03d}"
+        if status in TERMINAL_STATUS:
+            insert_closed_row(model, {
+                "ID": aid, "Issue": "",
+                "Action": escape_pipes(text),
+                "Owner": owner,
+                "Closed": today(),
+                "Files": files_cell, "Notes": notes,
+            })
+        else:
+            insert_open_row(model, {
+                "ID": aid, "Issue": "",
+                "Action": escape_pipes(text),
+                "Owner": owner, "Status": status,
+                "Opened": today(),
+                "Src": escape_pipes(args.src) if args.src else "",
+                "Files": files_cell, "Notes": notes,
+            })
+        written_ids.append(aid)
+
+    bump_next_id(model, current_max + len(texts))
     model.write()
+
+    args._written_ids = written_ids  # main() reads this for the commit message
+
     suffix = f" [+{len(files)} file{'s' if len(files) != 1 else ''}]" if files else ""
-    print(f"created {aid}: {args.new} [Owner: {args.owner}]{suffix}")
+    if len(written_ids) == 1:
+        print(f"created {written_ids[0]}: {texts[0]} [Owner: {owner}]{suffix}")
+    else:
+        print(f"created {len(written_ids)} actions [Owner: {owner}]{suffix}:")
+        for aid, text in zip(written_ids, texts):
+            print(f"  {aid}: {text}")
     return 0
 
 
@@ -719,21 +849,36 @@ def _git_commit_and_push(repo_path: Path, actions_md: Path, message: str) -> str
 
 def _commit_message_for(
     verb: str,
-    action_id: str,
+    action_id: str | list[str],
     owner: str | None = None,
     status: str | None = None,
 ) -> str:
-    """Build a conventional commit message for an ACTIONS.md mutation."""
-    if verb == "add":
-        tail = f"add {action_id} ({owner})" if owner else f"add {action_id}"
-    elif verb == "close":
-        tail = f"close {action_id} → {status}" if status else f"close {action_id}"
-    elif verb == "reopen":
-        tail = f"reopen {action_id}"
-    elif verb == "note":
-        tail = f"note on {action_id}"
+    """Build a conventional commit message for an ACTIONS.md mutation.
+
+    `action_id` may be a single ID string or a list of IDs (multi-row add).
+    """
+    if isinstance(action_id, list):
+        if not action_id:
+            ids_str = ""
+        elif len(action_id) == 1:
+            ids_str = action_id[0]
+        elif len(action_id) <= 3:
+            ids_str = ", ".join(action_id)
+        else:
+            ids_str = f"{action_id[0]}..{action_id[-1]} ({len(action_id)} actions)"
     else:
-        tail = f"update {action_id}"
+        ids_str = action_id
+
+    if verb == "add":
+        tail = f"add {ids_str} ({owner})" if owner else f"add {ids_str}"
+    elif verb == "close":
+        tail = f"close {ids_str} → {status}" if status else f"close {ids_str}"
+    elif verb == "reopen":
+        tail = f"reopen {ids_str}"
+    elif verb == "note":
+        tail = f"note on {ids_str}"
+    else:
+        tail = f"update {ids_str}"
     return f"chore(action): {tail}"
 
 
@@ -961,10 +1106,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--note")
     p.add_argument("--src")
     p.add_argument("--reopen", action="store_true")
-    p.add_argument("--new")
+    p.add_argument("--new", nargs="*", default=None)
+    p.add_argument("-e", "--editor", action="store_true", default=False)
+    p.add_argument("-i", "--interactive", action="store_true", default=False)
     p.add_argument("--attach", action="append", default=[])
     p.add_argument("--unattach", action="append", default=[])
-    p.add_argument("--project")
+    p.add_argument("-p", "--project")
     p.add_argument("--no-prompt", action="store_true", default=False)
     p.add_argument("--no-commit", action="store_true", default=False)
     p.add_argument("--strict", action="store_true", default=False)
@@ -972,13 +1119,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--no-trunc", action="store_true", default=False)
     args = p.parse_args(argv)
 
+    # --editor and --interactive imply a capture session even without --new.
+    if (args.editor or args.interactive) and args.new is None:
+        args.new = []
+
     # validation
     if args.id is not None and not ID_RE.match(args.id):
         raise ActionError(
             f'invalid action id "{args.id}" — expected format A-NNN (e.g. A-002)'
         )
-    if args.new and args.id:
+    if args.new is not None and args.id:
         raise ActionError("cannot combine --new with an action id")
+    if args.editor and args.interactive:
+        raise ActionError("--editor and --interactive are mutually exclusive")
     return args
 
 
@@ -1008,7 +1161,7 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_show(args, path)
 
         # Mutation operations: wrap with git pull/push unless --no-commit
-        is_mutation = args.new or args.id
+        is_mutation = (args.new is not None) or args.id
         if not is_mutation:
             raise ActionError("no operation specified — use --help for usage")
 
@@ -1047,20 +1200,12 @@ def main(argv: list[str] | None = None) -> int:
             # GIT_OK: proceed normally (push will run)
 
         # Dispatch mutation
-        if args.new:
+        if args.new is not None:
             verb = "add"
             rc = cmd_new(args, path)
-            commit_msg = _commit_message_for(verb, "", owner=args.owner)
-            # Re-derive the ID that was just written for the commit message
-            # (we need to read what cmd_new wrote; parse back from file)
-            try:
-                _m = parse_file(path)
-                # The new ID is current_max - 1 (the one we just wrote)
-                _written_num = parse_next_id_from_data(path.read_text()) - 1
-                written_id = f"A-{_written_num:03d}"
-                commit_msg = _commit_message_for("add", written_id, owner=args.owner)
-            except Exception:
-                pass
+            written_ids = getattr(args, "_written_ids", []) or []
+            owner_for_msg = args.owner or DEFAULT_OWNER
+            commit_msg = _commit_message_for("add", written_ids, owner=owner_for_msg)
         else:
             rc = cmd_update(args, path)
             # Determine verb from args
