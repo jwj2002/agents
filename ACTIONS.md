@@ -18,7 +18,6 @@ _(none yet)_
 
 | ID | Issue | Action | Owner | Status | Opened | Src | Files | Notes |
 |----|----|----|----|----|----|----|----|----|
-| A-007 | #124 | action --list: show metadata columns (Opened, Src, Issue, attachment count) by default; add --short for compact and --no-trunc for full Action text | Jason | open | 2026-05-06 | review-2026-05-06 |  |  |
 
 ## Recently Closed
 
@@ -30,6 +29,7 @@ _(none yet)_
 | A-004 |  | v3: TODO comment scanner pulls TODO: markers into ACTIONS.md | Jason | 2026-05-06 |  | 2026-05-06: Cancelled as scoped under cap (v3 roadmap). TODO scanner has its own duplication tension (code TODO vs ACTIONS row); README bin/README.md:86-99 remains the pointer. |
 | A-005 |  | v3: alternate capture surfaces (iOS Shortcut, voice, email) | Jason | 2026-05-06 |  | 2026-05-06: Cancelled as scoped under cap (v3 roadmap). Alt surfaces (iOS/voice/email) are infrastructure, not CLI features — the CLI can be a target but the interfaces live elsewhere. README bin/README.md:86-99 remains the pointer. |
 | A-006 | #123 | Consolidate cap into action CLI: multi-row args, stdin, -e (editor template), -i (interactive loop); deprecate bin/cap to thin shim | Jason | 2026-05-06 |  | 2026-05-06: Shipped in #126 (commit 137fd62). cap consolidated into action --new with multi-row, stdin, -e, -i; bin/cap deleted. |
+| A-007 | #124 | action --list: show metadata columns (Opened, Src, Issue, attachment count) by default; add --short for compact and --no-trunc for full Action text | Jason | 2026-05-06 |  | 2026-05-06: Shipped in #125 (commit 6cacbbb). action --list now wide tabular by default; --short and --no-trunc added. |
 
 ## Archive
 
