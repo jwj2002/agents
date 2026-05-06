@@ -18,8 +18,8 @@ _(none yet)_
 
 | ID | Issue | Action | Owner | Status | Opened | Src | Files | Notes |
 |----|----|----|----|----|----|----|----|----|
-| A-006 |  | Consolidate cap into action CLI: multi-row args, stdin, -e (editor template), -i (interactive loop); deprecate bin/cap to thin shim | Jason | open | 2026-05-06 | review-2026-05-06 |  |  |
-| A-007 |  | action --list: show metadata columns (Opened, Src, Issue, attachment count) by default; add --short for compact and --no-trunc for full Action text | Jason | open | 2026-05-06 | review-2026-05-06 |  |  |
+| A-006 | #123 | Consolidate cap into action CLI: multi-row args, stdin, -e (editor template), -i (interactive loop); deprecate bin/cap to thin shim | Jason | open | 2026-05-06 | review-2026-05-06 |  |  |
+| A-007 | #124 | action --list: show metadata columns (Opened, Src, Issue, attachment count) by default; add --short for compact and --no-trunc for full Action text | Jason | open | 2026-05-06 | review-2026-05-06 |  |  |
 
 ## Recently Closed
 
