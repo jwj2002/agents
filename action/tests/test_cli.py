@@ -369,3 +369,314 @@ def test_no_disk_dir_no_tty_error_message(monkeypatch, tmp_path):
         assert "not registered" in msg
         assert "no repo at" in msg
         assert "Subscribed on this machine:" in msg
+
+
+# ---------- git helpers (unit tests) ----------
+
+def _make_subprocess_mock(outcomes: list[tuple[int, str, str]]):
+    """
+    outcomes: list of (returncode, stdout, stderr) tuples consumed in order.
+    Returns a callable suitable for monkeypatching subprocess.run.
+    """
+    import subprocess as _subprocess
+    calls = list(outcomes)
+    def _mock(*args, **kwargs):
+        rc, out, err = calls.pop(0)
+        return _subprocess.CompletedProcess(args[0] if args else [], rc, out, err)
+    return _mock
+
+
+_ACTIONS_CONTENT = """\
+# Test Project ACTIONS
+
+Next ID: **A-002**
+
+## Open
+
+| ID | Issue | Action | Owner | Status | Opened | Src | Files | Notes |
+|----|-------|--------|-------|--------|--------|-----|-------|-------|
+| A-001 | | Test action | Jason | open | 2026-01-01 | | | |
+
+## Recently Closed
+
+| ID | Issue | Action | Owner | Closed | Files | Notes |
+|----|-------|--------|-------|--------|-------|-------|
+"""
+
+
+def _make_actions_file(tmp_path: Path) -> Path:
+    """Write a minimal ACTIONS.md with one open row A-001 and marker A-002."""
+    p = tmp_path / "ACTIONS.md"
+    p.write_text(_ACTIONS_CONTENT)
+    return p
+
+
+def _patch_project(monkeypatch, tmp_path: Path):
+    """Wire resolve_project_with_picker and project_path to use tmp_path."""
+    actions_file = _make_actions_file(tmp_path)
+    monkeypatch.setattr(cli, "resolve_project_with_picker", lambda args: "testproject")
+    monkeypatch.setattr(cli, "project_path", lambda name: actions_file)
+    return actions_file
+
+
+# T1: --new triggers subprocess in the right order (detect, branch, pull, branch, add, commit, push)
+def test_new_calls_git_pull_commit_push(monkeypatch, tmp_path):
+    """main() with --new calls subprocess for detect, pull, add, commit, push; exit 0."""
+    actions_file = _patch_project(monkeypatch, tmp_path)
+    original_content = actions_file.read_text()
+
+    # Outcomes in call order:
+    # 1. rev-parse --show-toplevel (detect_repo → success)
+    # 2. rev-parse --abbrev-ref HEAD (current_branch for pull → "main")
+    # 3. pull --rebase (→ success)
+    # 4. rev-parse --abbrev-ref HEAD (current_branch for commit_and_push → "main")
+    # 5. git add (→ success)
+    # 6. git commit (→ success)
+    # 7. git push --force-with-lease (→ success)
+    outcomes = [
+        (0, "", ""),   # rev-parse --show-toplevel
+        (0, "main\n", ""),  # rev-parse --abbrev-ref HEAD (pull)
+        (0, "", ""),   # pull --rebase
+        (0, "main\n", ""),  # rev-parse --abbrev-ref HEAD (push)
+        (0, "", ""),   # git add
+        (0, "1 file changed", ""),  # git commit
+        (0, "", ""),   # git push
+    ]
+    mock_called = []
+    import subprocess as _subprocess
+
+    def _recording_mock(*args, **kwargs):
+        rc, out, err = outcomes[len(mock_called)]
+        mock_called.append(args[0] if args else [])
+        return _subprocess.CompletedProcess(args[0] if args else [], rc, out, err)
+
+    monkeypatch.setattr(cli.subprocess, "run", _recording_mock)
+
+    rc = cli.main(["--new", "Test new action", "--owner", "Jason", "--no-prompt"])
+    assert rc == 0
+    # File must have been written (new row added)
+    new_content = actions_file.read_text()
+    assert "A-002" in new_content
+    assert "Test new action" in new_content
+    # subprocess must have been called (pull + push path)
+    assert len(mock_called) > 0
+    # push with --force-with-lease must appear
+    all_args = [str(a) for call in mock_called for a in call]
+    assert "--force-with-lease" in all_args
+
+
+# T2: --no-commit skips all git, file still written
+def test_no_commit_skips_all_git(monkeypatch, tmp_path):
+    """--no-commit: subprocess never called; file written; exit 0."""
+    actions_file = _patch_project(monkeypatch, tmp_path)
+    called = []
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: called.append(a) or (_ for _ in ()).throw(AssertionError("subprocess.run called with --no-commit")))
+
+    # Use a lambda that records and raises so we detect any call
+    def no_git(*args, **kwargs):
+        called.append(args)
+        raise AssertionError(f"subprocess.run should not be called, got: {args}")
+
+    monkeypatch.setattr(cli.subprocess, "run", no_git)
+
+    rc = cli.main(["--new", "No-commit action", "--owner", "Jason", "--no-prompt", "--no-commit"])
+    assert rc == 0
+    assert "No-commit action" in actions_file.read_text()
+    assert called == []
+
+
+# T3: pull conflict → abort before write
+def test_pull_conflict_aborts_write(monkeypatch, tmp_path, capsys):
+    """pull returns conflict → file unchanged; stderr contains 'cannot sync ACTIONS.md'; exit 1."""
+    actions_file = _patch_project(monkeypatch, tmp_path)
+    original_content = actions_file.read_text()
+
+    import subprocess as _subprocess
+    outcomes = [
+        (0, "", ""),           # rev-parse --show-toplevel (detect)
+        (0, "main\n", ""),     # rev-parse --abbrev-ref HEAD (branch)
+        (1, "CONFLICT (content): Merge conflict in ACTIONS.md", "CONFLICT"),  # pull
+    ]
+    monkeypatch.setattr(cli.subprocess, "run", _make_subprocess_mock(outcomes))
+
+    rc = cli.main(["--new", "Conflict action", "--owner", "Jason", "--no-prompt"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "cannot sync ACTIONS.md" in captured.err
+    assert actions_file.read_text() == original_content  # file unchanged
+
+
+# T4: pull network failure → warning printed, file written, push skipped
+def test_pull_network_failure_warns_and_writes(monkeypatch, tmp_path, capsys):
+    """pull returns network error → warning to stdout; file IS written; push NOT attempted; exit 0."""
+    actions_file = _patch_project(monkeypatch, tmp_path)
+
+    import subprocess as _subprocess
+    call_count = [0]
+
+    def _mock(*args, **kwargs):
+        n = call_count[0]
+        call_count[0] += 1
+        if n == 0:
+            return _subprocess.CompletedProcess(args[0], 0, "", "")   # detect
+        if n == 1:
+            return _subprocess.CompletedProcess(args[0], 0, "main\n", "")  # branch
+        if n == 2:
+            return _subprocess.CompletedProcess(args[0], 1, "", "Could not resolve host: github.com")  # pull fails
+        raise AssertionError(f"unexpected subprocess call #{n}: {args[0]}")
+
+    monkeypatch.setattr(cli.subprocess, "run", _mock)
+
+    rc = cli.main(["--new", "Network action", "--owner", "Jason", "--no-prompt"])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "offline" in captured.out or "WARNING" in captured.out
+    assert "Network action" in actions_file.read_text()
+    # Only 3 subprocess calls (detect + branch + pull); no push
+    assert call_count[0] == 3
+
+
+# T5: push rejected → abort with retry message, exit 1
+def test_push_rejected_aborts_with_retry_message(monkeypatch, tmp_path, capsys):
+    """pull succeeds; commit succeeds; push rejected → stderr 'push rejected'; exit 1."""
+    actions_file = _patch_project(monkeypatch, tmp_path)
+
+    import subprocess as _subprocess
+    outcomes = [
+        (0, "", ""),           # detect
+        (0, "main\n", ""),     # branch (pull)
+        (0, "", ""),           # pull
+        (0, "main\n", ""),     # branch (push)
+        (0, "", ""),           # git add
+        (0, "1 file", ""),     # git commit
+        (1, "", "rejected: non-fast-forward"),  # push rejected
+    ]
+    monkeypatch.setattr(cli.subprocess, "run", _make_subprocess_mock(outcomes))
+
+    rc = cli.main(["--new", "Rejected action", "--owner", "Jason", "--no-prompt"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "push rejected" in captured.err
+
+
+# T6: --strict + network failure → abort before write, exit 1
+def test_strict_network_failure_aborts(monkeypatch, tmp_path, capsys):
+    """--strict + pull network error: file unchanged; stderr 'cannot sync — offline'; exit 1."""
+    actions_file = _patch_project(monkeypatch, tmp_path)
+    original_content = actions_file.read_text()
+
+    import subprocess as _subprocess
+    outcomes = [
+        (0, "", ""),           # detect
+        (0, "main\n", ""),     # branch
+        (1, "", "Could not resolve host: github.com"),  # pull fails
+    ]
+    monkeypatch.setattr(cli.subprocess, "run", _make_subprocess_mock(outcomes))
+
+    rc = cli.main(["--new", "Strict action", "--owner", "Jason", "--no-prompt", "--strict"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "cannot sync — offline" in captured.err
+    assert actions_file.read_text() == original_content  # file must be unchanged
+
+
+# T7: --list does NOT call subprocess
+def test_list_does_not_call_git(monkeypatch, tmp_path):
+    """main() with --list: subprocess never called; exit 0."""
+    actions_file = _patch_project(monkeypatch, tmp_path)
+
+    def no_git(*args, **kwargs):
+        raise AssertionError(f"subprocess.run should not be called on --list, got: {args}")
+
+    monkeypatch.setattr(cli.subprocess, "run", no_git)
+    rc = cli.main(["--list", "--no-prompt"])
+    assert rc == 0
+
+
+# T8: show (A-001) does NOT call subprocess
+def test_show_does_not_call_git(monkeypatch, tmp_path):
+    """main() with A-001 (show): subprocess never called; exit 0."""
+    actions_file = _patch_project(monkeypatch, tmp_path)
+
+    def no_git(*args, **kwargs):
+        raise AssertionError(f"subprocess.run should not be called on show, got: {args}")
+
+    monkeypatch.setattr(cli.subprocess, "run", no_git)
+    rc = cli.main(["A-001", "--no-prompt"])
+    assert rc == 0
+
+
+# T9: non-git directory → detect returns NOT_A_REPO → write succeeds, no further git calls
+def test_non_git_dir_write_succeeds(monkeypatch, tmp_path):
+    """rev-parse returns non-zero (not a git repo) → file still written; no further git calls."""
+    actions_file = _patch_project(monkeypatch, tmp_path)
+
+    import subprocess as _subprocess
+    call_count = [0]
+
+    def _mock(*args, **kwargs):
+        n = call_count[0]
+        call_count[0] += 1
+        if n == 0:
+            # rev-parse --show-toplevel → non-zero = not a git repo
+            return _subprocess.CompletedProcess(args[0], 128, "", "not a git repository")
+        raise AssertionError(f"unexpected subprocess call #{n} after non-git detect")
+
+    monkeypatch.setattr(cli.subprocess, "run", _mock)
+
+    rc = cli.main(["--new", "Non-git action", "--owner", "Jason", "--no-prompt"])
+    assert rc == 0
+    assert "Non-git action" in actions_file.read_text()
+    # Only 1 call (the detect)
+    assert call_count[0] == 1
+
+
+# T10: stale marker → data wins → new item is A-004
+def test_stale_marker_uses_data_id(monkeypatch, tmp_path):
+    """ACTIONS.md has rows A-001, A-002, A-003 but marker says A-002; --new creates A-004."""
+    stale_content = """\
+# Stale Project
+
+Next ID: **A-002**
+
+## Open
+
+| ID | Issue | Action | Owner | Status | Opened | Src | Files | Notes |
+|----|-------|--------|-------|--------|--------|-----|-------|-------|
+| A-001 | | Action one | Jason | open | 2026-01-01 | | | |
+| A-002 | | Action two | Jason | open | 2026-01-02 | | | |
+| A-003 | | Action three | Jason | open | 2026-01-03 | | | |
+
+## Recently Closed
+
+| ID | Issue | Action | Owner | Closed | Files | Notes |
+|----|-------|--------|-------|--------|-------|-------|
+"""
+    actions_file = tmp_path / "ACTIONS.md"
+    actions_file.write_text(stale_content)
+    monkeypatch.setattr(cli, "resolve_project_with_picker", lambda args: "testproject")
+    monkeypatch.setattr(cli, "project_path", lambda name: actions_file)
+
+    # parse_next_id_from_data inline assertion
+    assert cli.parse_next_id_from_data(stale_content) == 4  # max(1,2,3) + 1
+
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: __import__("subprocess").CompletedProcess(a[0] if a else [], 128, "", "not a repo"))
+
+    rc = cli.main(["--new", "Fourth action", "--owner", "Jason", "--no-prompt"])
+    assert rc == 0
+    new_content = actions_file.read_text()
+    assert "A-004" in new_content
+    # Marker must have been updated to A-005
+    assert "A-005" in new_content
+
+
+# T11: _commit_message_for verb table
+def test_commit_message_for_verbs():
+    """Unit test _commit_message_for for all documented verb patterns."""
+    assert cli._commit_message_for("add", "A-008", owner="Jason") == "chore(action): add A-008 (Jason)"
+    assert cli._commit_message_for("close", "A-005", status="done") == "chore(action): close A-005 → done"
+    assert cli._commit_message_for("reopen", "A-003") == "chore(action): reopen A-003"
+    assert cli._commit_message_for("note", "A-002") == "chore(action): note on A-002"
+    assert cli._commit_message_for("update", "A-005") == "chore(action): update A-005"
+    # owner-only add (no owner)
+    assert cli._commit_message_for("add", "A-001") == "chore(action): add A-001"
