@@ -21,6 +21,10 @@ _(none yet)_
 | A-011 |  | Phase 6B — audit all knowledge-mcp consumers (skills, plugins, anything in ~/agents/); per-tool decide port-to-CLI / keep / kill; output a follow-up plan | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
 | A-012 |  | Phase 6C — archive ~/agents/knowledge-mcp/, drop MCP registration from settings.json, update PLAN.md target architecture (gated on 6B) | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
 | A-013 |  | Phase 7 — investigate cross-device project state; evaluate git-as-sync vs SSH-based remote read vs centralized store; output decision doc at specs/cross-device-state.md (gated on 6A complete) | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
+| A-015 |  | Phase 6B P-1 — port /capture skill to Python CLI at ~/agents/capture/cli.py; SKILL.md becomes thin wrapper | Jason | open | 2026-05-07 | spec-phase6b-mcp-audit |  |  |
+| A-016 |  | Phase 6B P-2 — port /inbox skill to Python CLI at ~/agents/inbox/cli.py; SKILL.md becomes thin wrapper (gates on P-1 if shared lib/inbox_db.py) | Jason | open | 2026-05-07 | spec-phase6b-mcp-audit |  |  |
+| A-017 |  | Phase 6B P-3 — port /project skill to Python CLI at ~/agents/project/cli.py; SKILL.md becomes thin wrapper | Jason | open | 2026-05-07 | spec-phase6b-mcp-audit |  |  |
+| A-018 |  | Phase 6B P-4 — port /review-session skill to Python CLI at ~/agents/review-session/cli.py; SKILL.md becomes thin wrapper (gates on P-3) | Jason | open | 2026-05-07 | spec-phase6b-mcp-audit |  |  |
 
 ## Recently Closed
 
@@ -43,4 +47,4 @@ _(none yet)_
 _(none yet)_
 
 ---
-Next ID: **A-015**
+Next ID: **A-019**
