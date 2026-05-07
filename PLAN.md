@@ -163,6 +163,8 @@ Decision: collapse to one canonical interface — Python CLIs over the
 filesystem YAMLs that already are the source of truth. Knowledge MCP
 server (TypeScript) retires once every caller has a CLI counterpart.
 
+**Phase 6 is single-machine.** Cross-device project state is Phase 7.
+
 Full decision record: `specs/toolchain-consolidation.md`.
 
 **Three sub-phases (each independently shippable):**
@@ -173,6 +175,47 @@ Full decision record: `specs/toolchain-consolidation.md`.
 Sequencing: 6A first (prototype + parallel-period validation); 6B only
 after 6A is in real use ≥1 week; 6C once 6B's inventory shows zero
 programmatic callers.
+
+---
+
+## Phase 7 — Cross-device project state ⏳ INVESTIGATION
+
+The dashboard CLI ported in Phase 6A is **local-only** — it reads files
+on the machine it runs on. Cross-device visibility (e.g., seeing jbox06
+project state from the laptop) needs separate design work; the MCP→CLI
+swap by itself does not address it.
+
+**What partially works today (via git sync of the agents repo):**
+- `knowledge/projects/*.yaml` — focus, blockers, next-steps, status —
+  syncs across machines that pull `~/agents/`. Already cross-device
+  visible from any machine that pulled.
+
+**What does NOT work today and Phase 6A won't add:**
+- Per-project `ACTIONS.md` from a project repo cloned only on the other
+  machine (e.g., laptop wanting to see jbox06's `~/app-repos/<name>/ACTIONS.md`).
+- `git log` / open-issue counts from the remote project repo.
+- A subscription model that distinguishes which-host a project lives on.
+
+**Solution shapes to evaluate (in A-013):**
+- **A. Git-as-sync** — extend the "agents repo carries state" pattern;
+  cheapest, partially already in place; doesn't cover ACTIONS.md when
+  the project repo isn't cloned locally.
+- **B. SSH-based remote read** — `dashboard --host jbox06`; CLI
+  installed on both machines; subscriptions take host qualification
+  (`jbox06:agents`); medium effort.
+- **C. Centralized store** — each machine writes state to a shared
+  location; heaviest; only justifies for ≥3 devices or web-aggregation
+  needs.
+
+**Tracked as:** A-013 (investigation). **Gated on:** Phase 6A complete
+(need a clean local CLI to extend before introducing remote concerns).
+
+**Exit criteria:**
+- [ ] Cross-device requirements articulated (which projects, which
+      direction, which fields).
+- [ ] Decision recorded at `specs/cross-device-state.md` (modeled on
+      `specs/toolchain-consolidation.md`).
+- [ ] Implementation actions filed for the chosen option.
 
 ---
 
@@ -213,7 +256,8 @@ programmatic callers.
 
 Phases 0, 1, 2, 4, 5 shipped. Phase 3 explicitly deferred to give
 measurement infrastructure time to mature. Phase 6 planned —
-implementation begins with 6A (dashboard CLI).
+implementation begins with 6A (dashboard CLI). Phase 7 (cross-device
+project state) is investigation-only until Phase 6A completes.
 
 Pre-consolidation rollback SHAs (per `specs/phase0-usage-report.md`):
 - `~/agents` HEAD pre-Phase 1: `fec005d`

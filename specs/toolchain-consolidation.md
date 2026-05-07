@@ -73,6 +73,13 @@ talks MCP.
 
 The `~/agents/knowledge-mcp/` server is **not** in the target state.
 
+**Scope note — Phase 6 is single-machine.** The CLIs above read files
+from the local filesystem of the machine they're run on. Cross-device
+project state (e.g., laptop pulling jbox06's project data) is **out of
+scope for Phase 6** and tracked as Phase 7 in `PLAN.md`. Swapping MCP
+for a Python CLI does not, by itself, change cross-device behavior —
+both implementations are local-only readers of local files.
+
 ---
 
 ## Options considered
@@ -140,6 +147,8 @@ prior phase.
 - [ ] Side-by-side comparison run for ≥1 week against real projects;
       no behavior regressions noted.
 - [ ] `knowledge.db` decision pinned (see Open Decisions).
+- [ ] **Local-only reaffirmed.** No `--host` flag, no remote-read
+      capability. Cross-device is Phase 7's problem, not 6A's.
 
 ### Phase 6B — Audit & port remaining MCP consumers
 
@@ -220,6 +229,13 @@ prior phase.
   Refactor for shared helpers only.
 - **Replacing Knowledge MCP with a different MCP server.** The point is
   to drop the MCP layer, not swap implementations.
+- **Cross-device project state.** Phase 6A is local-only — the dashboard
+  CLI reads files from the local filesystem of the machine it runs on.
+  Cross-device reading (e.g., laptop pulling jbox06's project state)
+  has its own design concerns (host qualification, transport, auth,
+  network failure modes) and is tracked separately as Phase 7 in
+  `PLAN.md`. The MCP→CLI swap on its own does not change cross-device
+  behavior.
 - **Touching the obsidian-agent.** `~/agents/obsidian-agent/` reads the
   vault, not the knowledge YAMLs. Out of scope.
 - **Auto-archiving the Knowledge MCP GitHub repo (if any).** If it's a
