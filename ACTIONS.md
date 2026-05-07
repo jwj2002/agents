@@ -20,8 +20,6 @@ _(none yet)_
 |----|----|----|----|----|----|----|----|----|
 | A-012 |  | Phase 6C — archive ~/agents/knowledge-mcp/, drop MCP registration from settings.json, update PLAN.md target architecture (gated on 6B) | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
 | A-013 |  | Phase 7 — investigate cross-device project state; evaluate git-as-sync vs SSH-based remote read vs centralized store; output decision doc at specs/cross-device-state.md (gated on 6A complete) | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
-| A-015 |  | Phase 6B P-1 — port /capture skill to Python CLI at ~/agents/capture/cli.py; SKILL.md becomes thin wrapper | Jason | open | 2026-05-07 | spec-phase6b-mcp-audit |  |  |
-| A-016 |  | Phase 6B P-2 — port /inbox skill to Python CLI at ~/agents/inbox/cli.py; SKILL.md becomes thin wrapper (gates on P-1 if shared lib/inbox_db.py) | Jason | open | 2026-05-07 | spec-phase6b-mcp-audit |  |  |
 | A-017 |  | Phase 6B P-3 — port /project skill to Python CLI at ~/agents/project/cli.py; SKILL.md becomes thin wrapper | Jason | open | 2026-05-07 | spec-phase6b-mcp-audit |  |  |
 | A-018 |  | Phase 6B P-4 — port /review-session skill to Python CLI at ~/agents/review-session/cli.py; SKILL.md becomes thin wrapper (gates on P-3) | Jason | open | 2026-05-07 | spec-phase6b-mcp-audit |  |  |
 
@@ -41,6 +39,8 @@ _(none yet)_
 | A-010 | #133 | Phase 6A — port /dashboard to Python CLI at ~/agents/dashboard/cli.py; /dashboard skill becomes thin wrapper; share ACTIONS.md parser with action CLI | Jason | 2026-05-07 |  | 2026-05-07: CLI shipped in #134 (commit 423aacc). Skill-becomes-wrapper portion split out as A-014; not waiting for the spec's ≥1-week parallel-period gate per user direction. |
 | A-014 |  | Phase 6A.2 — replace claude-config/skills/dashboard/SKILL.md with thin shell-out wrapper that invokes ~/agents/dashboard/cli.py (the /action skill is the model) | Jason | 2026-05-07 |  | 2026-05-07: Shipped in #136 (replaces SKILL.md with thin wrapper). Phase 6A complete. A-011 (Phase 6B audit) now unblocked. |
 | A-011 |  | Phase 6B — audit all knowledge-mcp consumers (skills, plugins, anything in ~/agents/); per-tool decide port-to-CLI / keep / kill; output a follow-up plan | Jason | 2026-05-07 |  | 2026-05-07: Audit shipped in #138 (specs/phase6b-mcp-audit.md). 5 PORT, 15 KILL, 0 KEEP. Sub-actions A-015..A-018 filed for the per-skill migrations. |
+| A-015 |  | Phase 6B P-1 — port /capture skill to Python CLI at ~/agents/capture/cli.py; SKILL.md becomes thin wrapper | Jason | 2026-05-07 |  | 2026-05-07: Cancelled per critical re-eval 2026-05-07. Inbox usage data: 2 captures in 3 weeks, 0 triaged, 1 was a literal 'Test capture'. User's revealed workflow: action --new with later cancellation, NOT capture-then-promote. /capture is dead surface; deleting the skill rather than porting. |
+| A-016 |  | Phase 6B P-2 — port /inbox skill to Python CLI at ~/agents/inbox/cli.py; SKILL.md becomes thin wrapper (gates on P-1 if shared lib/inbox_db.py) | Jason | 2026-05-07 |  | 2026-05-07: Cancelled per critical re-eval 2026-05-07. With /capture killed (A-015), there are no captures to triage. /inbox skill is dead surface; deleting rather than porting. inbox SQLite table left to die naturally when knowledge-mcp/ is archived in Phase 6C. |
 
 ## Archive
 

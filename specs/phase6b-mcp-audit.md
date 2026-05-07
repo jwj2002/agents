@@ -4,9 +4,9 @@
 > `mcp__knowledge__*` and decides per tool: **PORT** (to CLI),
 > **KEEP** (on MCP), or **KILL** (no callers, drop).
 
-**Status:** Complete 2026-05-07.
-**Result:** 5 of 20 tools have real callers; 15 are dead surface.
-**Implication:** Phase 6C archival is small once 4 sub-PRs land.
+**Status:** Complete 2026-05-07. Revised same day (see "Revision: capture/inbox demoted to KILL" below).
+**Result:** 2 of 20 tools have real callers; 18 are dead surface.
+**Implication:** Phase 6C archival is small once **2 sub-PRs** land (down from 4 after the capture/inbox revision).
 
 ---
 
@@ -55,9 +55,9 @@ get_project_summary             get_all_project_summaries
 
 | Tool | Real callers | Doc mentions | Decision |
 |------|--------------|--------------|----------|
-| **`get_inbox`** | `/inbox` SKILL.md | — | **PORT** |
-| **`triage_inbox`** | `/inbox` SKILL.md | — | **PORT** |
-| **`capture`** | `/capture` SKILL.md | dashboard SKILL.md (post-wrapper, doc only) | **PORT** |
+| `get_inbox` | (was) `/inbox` SKILL.md | — | **KILL** (revised — see below) |
+| `triage_inbox` | (was) `/inbox` SKILL.md | — | **KILL** (revised — see below) |
+| `capture` | (was) `/capture` SKILL.md | (was) dashboard SKILL.md (now removed) | **KILL** (revised — see below) |
 | **`get_project_context`** | `/project` SKILL.md | — | **PORT** |
 | **`update_project_context`** | `/project` + `/review-session` SKILL.md | — | **PORT** |
 | `get_dashboard` | none (dashboard CLI bypasses) | — | **KILL** |
@@ -76,10 +76,16 @@ get_project_summary             get_all_project_summaries
 | `get_recent` | none | — | **KILL** |
 | `get_journal` | none | — | **KILL** |
 
-**Summary:** 5 PORT, 15 KILL, 0 KEEP. No tool has a property that
-genuinely justifies the MCP layer (no long-running streams, no
-structured responses Claude needs as objects rather than text — every
-real caller passes the result back to the user as text).
+**Original summary:** 5 PORT, 15 KILL, 0 KEEP.
+**Revised summary (2026-05-07):** 2 PORT, 18 KILL, 0 KEEP. See revision
+note below — `capture`, `get_inbox`, `triage_inbox` were moved from PORT
+to KILL after empirical-usage data showed the inbox/capture system was
+functionally unused.
+
+No tool has a property that genuinely justifies the MCP layer (no
+long-running streams, no structured responses Claude needs as objects
+rather than text — every real caller passes the result back to the user
+as text).
 
 ### Notes on the doc-mentions
 
@@ -109,31 +115,51 @@ These are already in the right shape. No work for them in Phase 6B/C.
 
 ---
 
-## Migration plan (4 sub-PRs)
+## Revision: capture/inbox demoted to KILL (2026-05-07)
+
+The original audit listed `capture`, `get_inbox`, `triage_inbox` as PORT
+candidates. Empirical-usage check on the same day showed:
+
+| Period | Inbox captures created | Action commits |
+|---|---|---|
+| 2026-04-18 → 2026-05-07 (3 weeks) | **2 created, 0 triaged** | 20 commits |
+
+One of the two captures has the literal content `"Test capture"`; the
+other is for the now-archived flotilla project. **Effective real
+captures: zero.** Effective real actions: dozens.
+
+The user's revealed workflow is **commit-then-cancel** (`action --new`
+followed by `action A-NNN --status cancelled` if it doesn't pan out),
+not **capture-then-promote**. The funnel-to-commitment lifecycle the
+inbox was designed to support is functionally dead.
+
+Therefore:
+- `claude-config/skills/capture/SKILL.md` — **deleted** (this PR)
+- `claude-config/skills/inbox/SKILL.md` — **deleted** (this PR)
+- A-015 (port `/capture`) — **cancelled** (this PR)
+- A-016 (port `/inbox`) — **cancelled** (this PR)
+- `dashboard/cli.py` captures section — **removed** (this PR; nothing was writing new captures, so reading the inbox table was dead rendering)
+- `inbox` table in `knowledge.db` — left in place; goes away naturally when `knowledge-mcp/` is archived in Phase 6C
+- 2 existing inbox rows — left as historical artifact; dropped with the rest of the MCP server in Phase 6C
+
+If a real capture/inbox use case ever emerges, it can be rebuilt then.
+The cap README's v3 plan (iOS Shortcut, voice, email surfaces) was
+already cancelled as A-005; no incoming pipeline is planned.
+
+## Migration plan (2 sub-PRs)
 
 Each sub-PR ports one skill to a new Python CLI + thin wrapper, matching
-the `dashboard` (#134/#136) and `action` patterns. After all four land,
-the only programmatic callers of `mcp__knowledge__*` are gone and Phase 6C
+the `dashboard` (#134/#136) and `action` patterns. After both land, the
+only programmatic callers of `mcp__knowledge__*` are gone and Phase 6C
 can archive the server.
 
-### Sub-action P-1: port `/capture`
+### Sub-action P-1: port `/capture` — **CANCELLED**
+### Sub-action P-2: port `/inbox` — **CANCELLED**
 
-**Scope:**
-- New `~/agents/capture/cli.py` — `capture <text> [--project P] [--type T]`. Writes a row directly into `knowledge/knowledge.db`'s `inbox` table (the source of truth — see Phase 6A's revised pinned decision). Or writes a JSON sidecar if we're moving inbox to filesystem-native; pick one before writing code.
-- New `~/agents/capture/tests/test_cli.py`.
-- Replace `claude-config/skills/capture/SKILL.md` (39 lines) with a thin shell-out wrapper.
-
-**Sizing:** SIMPLE — ~150 LOC + tests. One ACID-ish operation (append a row).
-
-### Sub-action P-2: port `/inbox`
-
-**Scope:**
-- New `~/agents/inbox/cli.py` — `inbox` (list open), `inbox <id> --action done|dismiss|assign --project P`. Reads/writes `knowledge.db` inbox table.
-- New tests.
-- Replace `claude-config/skills/inbox/SKILL.md` (60 lines) with a thin shell-out wrapper.
-- Probably extracts a small `lib/inbox_db.py` shared with `/capture` so the two CLIs use the same row I/O.
-
-**Sizing:** SIMPLE — ~250 LOC + tests.
+Both cancelled in the same PR as the demotion-to-KILL revision above
+(actions A-015 and A-016, cancelled 2026-05-07). Skill files deleted;
+`inbox` table left in `knowledge.db` to die with the rest of the MCP
+infrastructure in Phase 6C.
 
 ### Sub-action P-3: port `/project`
 
@@ -156,17 +182,14 @@ can archive the server.
 ### Sequencing
 
 ```
-P-1 (capture) ─┐
-               ├─ both touch inbox table; P-1 first lays down lib/inbox_db.py
-P-2 (inbox)  ──┘
-              \
-               P-3 (project) — independent, but extracts lib/project_resolver.py
-                             from action/cli.py; can run in parallel with P-1/P-2
-                             \
-                              P-4 (review-session) — gates on P-3
+P-3 (project) — extracts lib/project_resolver.py from action/cli.py
+        \
+         P-4 (review-session) — gates on P-3 (delegates apply-step to
+                                the new project CLI)
 ```
 
-Reasonable shipping order: **P-1, then P-3 in parallel, then P-2, then P-4.**
+Reasonable shipping order: **P-3, then P-4.** No parallelism opportunity
+remaining after P-1/P-2 cancellation.
 
 ---
 
@@ -227,10 +250,10 @@ After the 4 sub-PRs above:
 
 ## Action breakdown
 
-After this audit lands, file:
-- **A-015**: P-1 — port `/capture` to Python CLI
-- **A-016**: P-2 — port `/inbox` to Python CLI (gates on A-015 if shared `lib/inbox_db.py`)
+Filed in the original audit PR (#138):
+- ~~**A-015**: P-1 — port `/capture`~~ — **cancelled 2026-05-07**
+- ~~**A-016**: P-2 — port `/inbox`~~ — **cancelled 2026-05-07**
 - **A-017**: P-3 — port `/project` to Python CLI
 - **A-018**: P-4 — port `/review-session` to Python CLI (gates on A-017)
 
-A-012 (Phase 6C archive) stays gated on all four landing.
+A-012 (Phase 6C archive) stays gated on A-017 + A-018 landing.

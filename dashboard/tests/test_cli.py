@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -149,33 +148,6 @@ def test_load_decisions_filters_by_project_and_window(monkeypatch, tmp_path):
     assert len(out_full) == 2
 
 
-# ---------- captures ----------
-
-def test_load_captures_returns_empty_when_db_missing(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "KNOWLEDGE_DB_PATH", tmp_path / "missing.db")
-    assert cli.load_captures(None) == []
-
-
-def test_load_captures_reads_open_only(monkeypatch, tmp_path):
-    db = tmp_path / "k.db"
-    conn = sqlite3.connect(db)
-    conn.executescript("""
-        CREATE TABLE inbox (id INTEGER PRIMARY KEY, content TEXT, project TEXT, type TEXT, status TEXT);
-        INSERT INTO inbox VALUES (1, 'open one', 'agents', 'idea', 'open');
-        INSERT INTO inbox VALUES (2, 'closed one', 'agents', 'task', 'done');
-        INSERT INTO inbox VALUES (3, 'flotilla one', 'flotilla', 'idea', 'open');
-    """)
-    conn.commit()
-    conn.close()
-    monkeypatch.setattr(cli, "KNOWLEDGE_DB_PATH", db)
-    out = cli.load_captures(None)
-    assert len(out) == 2
-    assert all(c["type"] for c in out)
-    out_agents = cli.load_captures("agents")
-    assert len(out_agents) == 1
-    assert out_agents[0]["content"] == "open one"
-
-
 # ---------- ACTIONS.md overlay ----------
 
 _ACTIONS_FIXTURE = """\
@@ -291,7 +263,6 @@ def _build_populated_project() -> cli.Project:
     p.issues_open = [{"number": 42, "title": "Open issue", "updatedAt": "2026-05-06T12:00:00Z"}]
     p.issues_closed = [{"number": 41, "title": "Closed issue", "closedAt": "2026-05-06T12:00:00Z"}]
     p.decisions = [{"id": "D-001", "date": "2026-05-06", "title": "Test decision"}]
-    p.captures = [{"id": 1, "type": "idea", "content": "Capture content", "project": "test"}]
     return p
 
 
@@ -310,8 +281,6 @@ def test_terminal_render_contains_all_sections():
     assert "Issues (1 open, 1 closed-in-window)" in out
     assert "Open issue" in out
     assert "Decisions in window (1)" in out
-    assert "Captures (1 open)" in out
-    assert "Capture content" in out
     assert "window: weekly" in out
 
 

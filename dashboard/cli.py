@@ -2,17 +2,15 @@
 """dashboard — pure-read project status overview.
 
 Reads filesystem YAMLs (knowledge/projects, knowledge/decisions),
-per-project ACTIONS.md, `gh issue list` per resolved repo, and inbox from
-knowledge/knowledge.db (the one subsystem with no YAML form yet — see
-load_captures docstring). Organizes by project. Never writes.
+per-project ACTIONS.md, and `gh issue list` per resolved repo. Organizes
+by project. Never writes.
 
 Single-machine. Cross-device is Phase 7 (see ~/agents/PLAN.md).
 
 Update paths owned elsewhere:
 - Actions:   `action` CLI (auto-commits per #121)
 - Issues:    `gh issue create/close`, `/orchestrate` workflow
-- Decisions: `/learn`, `mcp__knowledge__save_decision`, hand-edit
-- Captures:  `/capture`, `mcp__knowledge__capture`
+- Decisions: `knowledge/decisions/*.yaml` (hand-edit)
 - Project frame: `/project --focus`, hand-edit YAML
 
 Alias: `alias dashboard='python3 ~/agents/dashboard/cli.py'`
@@ -24,7 +22,6 @@ import json
 import os
 import re
 import shutil
-import sqlite3
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -45,7 +42,6 @@ HOME = Path.home()
 KNOWLEDGE_DIR = HOME / "agents" / "knowledge"
 PROJECTS_YAML_DIR = KNOWLEDGE_DIR / "projects"
 DECISIONS_DIR = KNOWLEDGE_DIR / "decisions"
-KNOWLEDGE_DB_PATH = KNOWLEDGE_DIR / "knowledge.db"
 SUBSCRIPTIONS_PATH = HOME / ".claude" / "dashboard-subscriptions.json"
 
 WINDOW_DAYS = {"daily": 1, "weekly": 7, "monthly": 30, "full": None}
@@ -75,7 +71,6 @@ class Project:
     issues_open: list[dict] = field(default_factory=list)
     issues_closed: list[dict] = field(default_factory=list)
     decisions: list[dict] = field(default_factory=list)
-    captures: list[dict] = field(default_factory=list)
 
 
 # ---------- knowledge YAML readers ----------
@@ -129,45 +124,6 @@ def load_decisions(project: str, since: date | None) -> list[dict]:
         })
     out.sort(key=lambda r: r["date"], reverse=True)
     return out
-
-
-def load_captures(project: str | None) -> list[dict]:
-    """Return open inbox captures, optionally filtered to a project.
-
-    Inbox is the one knowledge subsystem that lives only in SQLite
-    (knowledge/knowledge.db) — there's no filesystem-native form yet. The
-    dashboard CLI reads the db for this single concern; everything else
-    reads YAMLs directly. If inbox becomes filesystem-native in a later
-    phase, this function moves to that source.
-
-    Failures (db missing, schema drift, lock) → empty list, never raise.
-    """
-    if not KNOWLEDGE_DB_PATH.exists():
-        return []
-    try:
-        conn = sqlite3.connect(f"file:{KNOWLEDGE_DB_PATH}?mode=ro", uri=True, timeout=2)
-        conn.row_factory = sqlite3.Row
-        if project is None:
-            rows = conn.execute(
-                "SELECT id, content, project, type FROM inbox WHERE status='open' ORDER BY id DESC LIMIT 50"
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT id, content, project, type FROM inbox WHERE status='open' AND project=? ORDER BY id DESC LIMIT 50",
-                (project,),
-            ).fetchall()
-        conn.close()
-    except sqlite3.Error:
-        return []
-    return [
-        {
-            "id": r["id"],
-            "type": r["type"] or "task",
-            "content": (r["content"] or "").strip(),
-            "project": r["project"],
-        }
-        for r in rows
-    ]
 
 
 def _coerce_date_iso(value) -> str | None:
@@ -303,7 +259,6 @@ def populate(project: Project, since: date | None, owner_filter: str | None) -> 
     project.actions_open, project.actions_closed = load_actions(project.name, since, owner_filter)
     project.issues_open, project.issues_closed = load_issues(project.name, since)
     project.decisions = load_decisions(project.name, since)
-    project.captures = load_captures(project.name)
     return project
 
 
@@ -385,11 +340,6 @@ def render_terminal_single(p: Project, window: str, owner_filter: str | None) ->
         lines.append(f"Decisions in window ({len(p.decisions)}):")
         for d in p.decisions[:10]:
             lines.append(_truncate(f"  {d['id']}  {d['date']}  {d['title']}", width))
-        lines.append("")
-    if p.captures:
-        lines.append(f"Captures ({len(p.captures)} open):")
-        for c in p.captures:
-            lines.append(_truncate(f"  #{c['id']}  [{c['type']}]  {c['content']}", width))
         lines.append("")
     lines.append(f"window: {window}")
     return "\n".join(lines).rstrip() + "\n"
@@ -510,10 +460,6 @@ def render_markdown(projects: list[Project], window: str, single: str | None,
             lines.append("|----|------|-------|")
             for d in p.decisions:
                 lines.append(f"| {d['id']} | {d['date']} | {d['title']} |")
-        if p.captures:
-            lines.append(f"\n### Captures — {len(p.captures)} open")
-            for c in p.captures:
-                lines.append(f"- #{c['id']} [{c['type']}]  {c['content']}")
     return "\n".join(lines) + "\n"
 
 
