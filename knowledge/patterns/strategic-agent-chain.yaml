@@ -1,3 +1,4 @@
+schema_version: 1
 id: pat-strategic-agent-chain
 legacy_id: PAT-020
 category: agent-infrastructure

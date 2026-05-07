@@ -1,3 +1,4 @@
+schema_version: 1
 id: LR-002
 rule: When fixing a concurrency bug, scan all projects for the same pattern.
 source: Post-incident from D-091. Bug existed in temper, docketiq, vitalailabs.

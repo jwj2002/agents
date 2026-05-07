@@ -1,3 +1,4 @@
+schema_version: 1
 id: pat-flotilla-channel-agent-setup
 legacy_id: PAT-018
 category: agent-infrastructure

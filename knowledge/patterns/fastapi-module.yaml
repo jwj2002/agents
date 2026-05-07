@@ -1,3 +1,4 @@
+schema_version: 1
 id: pat-fastapi-module
 legacy_id: PAT-034
 category: architecture

@@ -1,3 +1,4 @@
+schema_version: 1
 id: pat-optimistic-concurrency
 legacy_id: PAT-036
 category: concurrency

@@ -1,3 +1,4 @@
+schema_version: 1
 id: LR-003
 rule: Use decimal.Decimal for all money amounts, never float.
 source: 3 human corrections on billing code

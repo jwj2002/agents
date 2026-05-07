@@ -1,3 +1,4 @@
+schema_version: 1
 id: pat-fastapi-service-layer
 legacy_id: PAT-011
 category: service

@@ -1,3 +1,4 @@
+schema_version: 1
 project: buddy
 status: paused
 focus: "Meeting transcription pipeline"

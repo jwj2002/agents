@@ -1,3 +1,4 @@
+schema_version: 1
 id: LR-005
 rule: Project agents must never commit directly to main. Always branch → PR → squash merge. The admin agent spawn command must include this instruction explicitly.
 source: "AdminAgentCards failure 2026-04-07: one-shot agent committed two commits directly to main, bypassing git workflow"

@@ -1,3 +1,4 @@
+schema_version: 1
 id: pat-fastapi-alembic-setup
 legacy_id: PAT-015
 category: migrations

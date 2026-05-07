@@ -1,3 +1,4 @@
+schema_version: 1
 id: pat-fastapi-router-layer
 legacy_id: PAT-012
 category: router

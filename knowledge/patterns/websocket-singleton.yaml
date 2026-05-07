@@ -1,3 +1,4 @@
+schema_version: 1
 id: pat-websocket-singleton
 legacy_id: PAT-031
 category: frontend

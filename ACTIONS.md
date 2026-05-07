@@ -21,6 +21,9 @@ _(none yet)_
 | A-012 |  | Phase 6C — archive ~/agents/knowledge-mcp/, drop MCP registration from settings.json, update PLAN.md target architecture (gated on 6B) | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
 | A-013 |  | Phase 7 — investigate cross-device project state; evaluate git-as-sync vs SSH-based remote read vs centralized store; output decision doc at specs/cross-device-state.md (gated on 6A complete) | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
 | A-018 |  | Phase 6B P-4 — port /review-session skill to Python CLI at ~/agents/review-session/cli.py; SKILL.md becomes thin wrapper (gates on P-3) | Jason | open | 2026-05-07 | spec-phase6b-mcp-audit |  |  |
+| A-019 |  | Build decision-writer CLI: 'decision new --project X --topic Y --title Z' that writes knowledge/decisions/D-NNN.yaml + updates index.yaml. Closes the writer-gap surfaced in specs/knowledge-surfaces.md. | Jason | open | 2026-05-07 | spec-knowledge-surfaces |  |  |
+| A-020 |  | Connect SessionStart hook to knowledge/patterns/*.yaml: filter by tier=critical AND lifecycle.status in (validated, pilot); emit alongside the hardcoded patterns-critical.md. Closes the reader-gap. | Jason | open | 2026-05-07 | spec-knowledge-surfaces |  |  |
+| A-021 |  | Drop dead knowledge/ subdirs (velocity/, project-summaries/, knowledge/specs/, sync.py, schema.sql, .agents/, __pycache__) alongside Phase 6C MCP archival (A-012). | Jason | open | 2026-05-07 | spec-knowledge-surfaces |  |  |
 
 ## Recently Closed
 
@@ -47,4 +50,4 @@ _(none yet)_
 _(none yet)_
 
 ---
-Next ID: **A-019**
+Next ID: **A-022**

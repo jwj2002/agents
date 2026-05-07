@@ -1,3 +1,4 @@
+schema_version: 1
 id: LR-006
 rule: Work package completion requires validation against the original contract before reporting done. Validate branch used, PR merged, files match, code builds.
 source: "AdminAgentCards failure 2026-04-07: admin reported complete without checking if code worked or workflow was followed"

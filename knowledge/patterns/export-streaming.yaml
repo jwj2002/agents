@@ -1,3 +1,4 @@
+schema_version: 1
 id: pat-export-streaming
 legacy_id: PAT-005
 category: export

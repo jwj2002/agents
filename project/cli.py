@@ -46,6 +46,7 @@ from lib.project_resolver import (  # noqa: E402
 
 ALLOWED_STATUS = ("active", "paused", "blocked", "done")
 PROJECT_FIELDS_ORDER = [
+    "schema_version",
     "project", "status", "focus", "next_steps", "blockers",
     "open_questions", "specs", "dependencies", "updated_at", "updated_by",
 ]

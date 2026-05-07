@@ -94,6 +94,7 @@ def register_project(name: str, owner: str = "jason") -> Path:
         raise FileExistsError(f"project yaml already exists: {yaml_path}")
     today_str = date.today().isoformat()
     content = (
+        f"schema_version: 1\n"
         f"project: {name}\n"
         f"status: active\n"
         f'focus: ""\n'

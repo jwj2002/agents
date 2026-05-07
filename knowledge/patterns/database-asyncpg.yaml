@@ -1,3 +1,4 @@
+schema_version: 1
 id: pat-database-asyncpg
 legacy_id: PAT-004
 category: database

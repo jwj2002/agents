@@ -1,3 +1,4 @@
+schema_version: 1
 id: LR-004
 rule: Frontend work packages must include API response shapes for every endpoint referenced. Never let a project agent guess field names.
 source: "AdminAgentCards failure 2026-04-07: agent wrote device.device_id instead of device.id because API shape was not in the work package"
