@@ -53,7 +53,7 @@ For the full command surface, run `python3 ~/agents/dashboard/cli.py --help`
 
 - **Single-project deep view**: `dashboard <name>`, or invoke from cwd
   inside `~/agents/` or `~/projects/<name>/`. Renders frame, actions,
-  issues, decisions, captures.
+  issues, and decisions.
 - **Multi-project overview**: `dashboard` from elsewhere — subscription-
   filtered. Subscriptions live in `~/.claude/dashboard-subscriptions.json`
   and are **authoritative** (no `--all` bypass; missing/empty/all-stale
@@ -72,8 +72,7 @@ For the full command surface, run `python3 ~/agents/dashboard/cli.py --help`
   surfaces:
   - `action` CLI for ACTIONS.md (auto-commits per #121)
   - `gh issue create/close` and `/orchestrate` for GitHub issues
-  - `/learn`, `mcp__knowledge__save_decision`, hand-edit for decisions
-  - `/capture`, `mcp__knowledge__capture` for inbox
+  - `knowledge/decisions/*.yaml` (hand-edit) for decisions
   - `/project --focus`, hand-edit for project YAML frame
 - The script **does not run** the legacy automation
   (`syncBlockers`, `recomputeStatus`, `autoJournalCommits`) that the
