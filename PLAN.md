@@ -41,8 +41,14 @@ Codex delegation, content-brain-style phase discipline).
 Multi-agent channels were dropped in Phase 2 (Option B). Codex delegation
 is the converged multi-agent pattern.
 
+Phase 6 will collapse the project-state interface to Python CLIs over
+filesystem YAMLs and retire the Knowledge MCP server (TypeScript). After
+Phase 6C, the diagram above simplifies to **YAMLs ← Python CLIs ← thin
+Claude-skill wrappers + Codex delegation**.
+
 Reference specs:
 - `specs/phase0-usage-report.md` — what got measured, what didn't, why Phase 3 was deferred
+- `specs/toolchain-consolidation.md` — Phase 6 decision record (Option 3: collapse to Python CLIs)
 
 ---
 
@@ -151,6 +157,25 @@ agent dispatch), let it accumulate, then revisit cuts with real data.
 
 ---
 
+## Phase 6 — Toolchain consolidation (Python CLIs, retire MCP server) ⏳ PLANNED
+
+Decision: collapse to one canonical interface — Python CLIs over the
+filesystem YAMLs that already are the source of truth. Knowledge MCP
+server (TypeScript) retires once every caller has a CLI counterpart.
+
+Full decision record: `specs/toolchain-consolidation.md`.
+
+**Three sub-phases (each independently shippable):**
+- **6A** — port `/dashboard` to a Python CLI; skill becomes thin wrapper. Tracked as A-010.
+- **6B** — audit remaining `mcp__knowledge__*` consumers; per-tool decide port / keep / kill. Tracked as A-011.
+- **6C** — archive `~/agents/knowledge-mcp/`; drop MCP from `settings.json`; update target architecture. Tracked as A-012, gated on 6B.
+
+Sequencing: 6A first (prototype + parallel-period validation); 6B only
+after 6A is in real use ≥1 week; 6C once 6B's inventory shows zero
+programmatic callers.
+
+---
+
 ## Phase 5 — PLAN.md discipline ✅ DONE (template); ongoing per project
 
 **What shipped:**
@@ -187,8 +212,10 @@ agent dispatch), let it accumulate, then revisit cuts with real data.
 ## Sequencing Discipline
 
 Phases 0, 1, 2, 4, 5 shipped. Phase 3 explicitly deferred to give
-measurement infrastructure time to mature.
+measurement infrastructure time to mature. Phase 6 planned —
+implementation begins with 6A (dashboard CLI).
 
 Pre-consolidation rollback SHAs (per `specs/phase0-usage-report.md`):
 - `~/agents` HEAD pre-Phase 1: `fec005d`
 - `~/projects/flotilla` HEAD pre-archival: `e786eac`
+- `~/agents` HEAD pre-Phase 6: TBD at start of 6A.

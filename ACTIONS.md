@@ -18,6 +18,9 @@ _(none yet)_
 
 | ID | Issue | Action | Owner | Status | Opened | Src | Files | Notes |
 |----|----|----|----|----|----|----|----|----|
+| A-010 |  | Phase 6A — port /dashboard to Python CLI at ~/agents/dashboard/cli.py; /dashboard skill becomes thin wrapper; share ACTIONS.md parser with action CLI | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
+| A-011 |  | Phase 6B — audit all knowledge-mcp consumers (skills, plugins, anything in ~/agents/); per-tool decide port-to-CLI / keep / kill; output a follow-up plan | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
+| A-012 |  | Phase 6C — archive ~/agents/knowledge-mcp/, drop MCP registration from settings.json, update PLAN.md target architecture (gated on 6B) | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
 
 ## Recently Closed
 
@@ -38,4 +41,4 @@ _(none yet)_
 _(none yet)_
 
 ---
-Next ID: **A-010**
+Next ID: **A-013**
