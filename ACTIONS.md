@@ -18,12 +18,10 @@ _(none yet)_
 
 | ID | Issue | Action | Owner | Status | Opened | Src | Files | Notes |
 |----|----|----|----|----|----|----|----|----|
-| A-012 |  | Phase 6C — archive ~/agents/knowledge-mcp/, drop MCP registration from settings.json, update PLAN.md target architecture (gated on 6B) | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
 | A-013 |  | Phase 7 — investigate cross-device project state; evaluate git-as-sync vs SSH-based remote read vs centralized store; output decision doc at specs/cross-device-state.md (gated on 6A complete) | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
 | A-018 |  | Phase 6B P-4 — port /review-session skill to Python CLI at ~/agents/review-session/cli.py; SKILL.md becomes thin wrapper (gates on P-3) | Jason | open | 2026-05-07 | spec-phase6b-mcp-audit |  | 2026-05-07: GH issue #142 filed; PR incoming |
 | A-019 |  | Build decision-writer CLI: 'decision new --project X --topic Y --title Z' that writes knowledge/decisions/D-NNN.yaml + updates index.yaml. Closes the writer-gap surfaced in specs/knowledge-surfaces.md. | Jason | open | 2026-05-07 | spec-knowledge-surfaces |  |  |
 | A-020 |  | Connect SessionStart hook to knowledge/patterns/*.yaml: filter by tier=critical AND lifecycle.status in (validated, pilot); emit alongside the hardcoded patterns-critical.md. Closes the reader-gap. | Jason | open | 2026-05-07 | spec-knowledge-surfaces |  |  |
-| A-021 |  | Drop dead knowledge/ subdirs (velocity/, project-summaries/, knowledge/specs/, sync.py, schema.sql, .agents/, __pycache__) alongside Phase 6C MCP archival (A-012). | Jason | open | 2026-05-07 | spec-knowledge-surfaces |  |  |
 
 ## Recently Closed
 
@@ -44,6 +42,8 @@ _(none yet)_
 | A-015 |  | Phase 6B P-1 — port /capture skill to Python CLI at ~/agents/capture/cli.py; SKILL.md becomes thin wrapper | Jason | 2026-05-07 |  | 2026-05-07: Cancelled per critical re-eval 2026-05-07. Inbox usage data: 2 captures in 3 weeks, 0 triaged, 1 was a literal 'Test capture'. User's revealed workflow: action --new with later cancellation, NOT capture-then-promote. /capture is dead surface; deleting the skill rather than porting. |
 | A-016 |  | Phase 6B P-2 — port /inbox skill to Python CLI at ~/agents/inbox/cli.py; SKILL.md becomes thin wrapper (gates on P-1 if shared lib/inbox_db.py) | Jason | 2026-05-07 |  | 2026-05-07: Cancelled per critical re-eval 2026-05-07. With /capture killed (A-015), there are no captures to triage. /inbox skill is dead surface; deleting rather than porting. inbox SQLite table left to die naturally when knowledge-mcp/ is archived in Phase 6C. |
 | A-017 |  | Phase 6B P-3 — port /project skill to Python CLI at ~/agents/project/cli.py; SKILL.md becomes thin wrapper | Jason | 2026-05-07 |  | 2026-05-07: Shipped in #141 (Phase 6B P-3). New project CLI + lib/project_resolver.py refactored from action; /project SKILL.md becomes thin wrapper. 103 tests pass. |
+| A-012 |  | Phase 6C — archive ~/agents/knowledge-mcp/, drop MCP registration from settings.json, update PLAN.md target architecture (gated on 6B) | Jason | 2026-05-07 |  | 2026-05-07: PR #146 incoming |
+| A-021 |  | Drop dead knowledge/ subdirs (velocity/, project-summaries/, knowledge/specs/, sync.py, schema.sql, .agents/, __pycache__) alongside Phase 6C MCP archival (A-012). | Jason | 2026-05-07 |  | 2026-05-07: Bundled in PR #146 |
 
 ## Archive
 

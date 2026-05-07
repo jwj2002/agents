@@ -66,9 +66,9 @@ with the draft pre-filled), not in the Python script.
 
 ## Notes
 
-- The script does **not** call `mcp__knowledge__*` tools (Phase 6B P-4).
-  Focus writes shell out to `python3 ~/agents/project/cli.py <name>
-  --focus "..." --no-prompt`.
+- Focus writes shell out to `python3 ~/agents/project/cli.py <name>
+  --focus "..." --no-prompt`. The Knowledge MCP server retired in
+  Phase 6C (#146); this skill no longer calls any MCP tools.
 - The pending file at `~/.claude/pending_focus_reviews.json` is written
   by the session-end hook; this CLI consumes and clears it.
 - Behavior, prompt copy, file-lifecycle semantics, and atomic-write

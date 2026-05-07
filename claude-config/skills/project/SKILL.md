@@ -72,9 +72,10 @@ Summary:
   was happy committing manually. If multi-machine sync becomes a real
   pain, a follow-up can extract action's git plumbing into a shared
   `lib/git_ops.py` and wire both CLIs to it.
-- The script does **not** call `mcp__knowledge__*` tools (Phase 6B port).
-  Reads/writes hit `knowledge/projects/<name>.yaml` and (for
+- Reads/writes hit `knowledge/projects/<name>.yaml` and (for
   subscriptions) `~/.claude/dashboard-subscriptions.json` directly.
+  The Knowledge MCP server retired in Phase 6C (#146); this skill no
+  longer calls any MCP tools.
 - Specification of behavior, modes, list-removal semantics, and YAML
   round-trip safety lives in `~/agents/project/cli.py`'s module
   docstring + the test suite at `~/agents/project/tests/test_cli.py`.

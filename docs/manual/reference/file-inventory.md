@@ -193,24 +193,27 @@ Located in `claude-config/templates/`. Used by scaffolding commands and the orch
 
 ## Repo-level files (outside claude-config/)
 
-### Knowledge graph (`knowledge/`)
+### Knowledge surfaces (`knowledge/`)
 
-| Path | Count | Purpose |
-|------|------:|---------|
-| `knowledge/patterns/*.yaml` | 39 | Patterns with slug IDs (`pat-<filename-stem>`). Each has a `legacy_id: PAT-NNN` field for backwards-compat (PR #87). |
-| `knowledge/decisions/*.yaml` | 9 | Decision log with `linked_patterns` cross-references. |
-| `knowledge/learning_rules/` | varies | Auto-extracted learning rules. |
-| `knowledge/projects/*.yaml` | 6 | Project state snapshots. |
-| `knowledge/specs/*.md` | several | Spec docs (knowledge-base-spec, pattern-lifecycle, etc.). |
-| `knowledge/sync.py` | — | Builds `knowledge.db` from YAMLs. Includes uniqueness guard (PR #87). |
-| `knowledge/knowledge.db` | — | SQLite, gitignored, rebuilt by post-merge hook. |
+Authority/scope/writer/reader for each surface lives in `specs/knowledge-surfaces.md`.
 
-### MCP servers (`knowledge-mcp/`, `mcp-server/`)
+| Path | Count | Scope | Purpose |
+|------|------:|-------|---------|
+| `knowledge/patterns/pat-*.yaml` | 39 | global | Reusable code patterns with lifecycle metadata. Slug IDs match filename stems. `legacy_id: PAT-NNN` preserved for back-compat. |
+| `knowledge/decisions/D-NNN.yaml` | 9 | per-project (`project:` field) | Architecturally significant decisions; cross-references via `linked.related_decisions`. |
+| `knowledge/decisions/index.yaml` | 1 | global | By-project / by-topic index over the D-NNN files. |
+| `knowledge/learning-rules/LR-NNN.yaml` | 6 | global | Failure-derived rules surfaced at SessionStart. |
+| `knowledge/projects/<name>.yaml` | 7 | per-project | Project tracker (focus, status, blockers, next_steps, open_questions). Written by the `project` CLI. |
+
+All forms use `schema_version: 1` (added in #145). The Knowledge MCP server, `knowledge.db`, `sync.py`, `velocity/`, `project-summaries/`, and `knowledge/specs/` were retired in Phase 6C (#146).
+
+### MCP servers (`mcp-server/`)
 
 | Server | Path | Language | Tools |
 |--------|------|----------|-------|
-| `knowledge` | `knowledge-mcp/index.ts` | TypeScript (tsx) | Pattern/decision query interface. |
 | `vault-metrics` | `mcp-server/server.py` | Python (.venv) | `vault_status`, `vault_search`, `vault_dashboard`, `agent_metrics`, `failure_patterns`. |
+
+The TypeScript `knowledge` MCP server was retired in Phase 6C (#146) — its data moved to filesystem YAMLs read directly by the `action`, `dashboard`, `project`, and `review-session` CLIs. The archived source lives at `_archived/knowledge-mcp/`.
 
 ### Migration scripts (`scripts/`)
 

@@ -1,7 +1,8 @@
 # agents — Consolidation Plan
 
 > Living document. Tracks the multi-phase work to slim the Claude/Codex
-> config and consolidate project-state tooling onto Knowledge MCP.
+> config and consolidate project-state tooling onto filesystem YAMLs +
+> Python CLIs (Phase 6 retired the Knowledge MCP server).
 
 **Modeled on:** `~/projects/content-brain/PLAN.md`
 
@@ -21,16 +22,27 @@ Goal: collapse to one source of truth for project state, slim the config
 to artifacts that earn their cost, keep what compounds (Knowledge MCP,
 Codex delegation, content-brain-style phase discipline).
 
-## Architecture (target state)
+## Architecture (current state, post-Phase 6C)
 
 ```
                        ┌────────────────────┐
-       /dashboard ───▶ │  Knowledge MCP     │  source of truth
-                       │  (YAML in git)     │  decisions, patterns,
-                       └─────────┬──────────┘  rules, project context
-                                 │
+                       │  Filesystem YAMLs  │  source of truth
+                       │  (committed)       │  projects, decisions,
+                       │                    │  patterns, learning rules
+                       └─────────┬──────────┘
+                                 │ direct read/write
+                       ┌─────────┴──────────┐
+                       │  Python CLIs       │  action, dashboard,
+                       │  (~/agents/)       │  project, review-session
+                       └─────────┬──────────┘
+                                 │ shell-out
+                       ┌─────────┴──────────┐
+                       │  Thin Claude       │  /action, /dashboard,
+                       │  skill wrappers    │  /project, /review-session
+                       └────────────────────┘
+
                   + git/gh overlay per project
-                  (last commit, open issues, captures)
+                  (last commit, open issues — read on demand)
 
                        ┌────────────────────┐
                        │  Codex delegation  │  parallel work,
@@ -39,12 +51,9 @@ Codex delegation, content-brain-style phase discipline).
 ```
 
 Multi-agent channels were dropped in Phase 2 (Option B). Codex delegation
-is the converged multi-agent pattern.
-
-Phase 6 will collapse the project-state interface to Python CLIs over
-filesystem YAMLs and retire the Knowledge MCP server (TypeScript). After
-Phase 6C, the diagram above simplifies to **YAMLs ← Python CLIs ← thin
-Claude-skill wrappers + Codex delegation**.
+is the converged multi-agent pattern. The Knowledge MCP server retired in
+Phase 6C (#146); its source is archived at `_archived/knowledge-mcp/`.
+Surface map and scoping rules: `specs/knowledge-surfaces.md`.
 
 Reference specs:
 - `specs/phase0-usage-report.md` — what got measured, what didn't, why Phase 3 was deferred
@@ -157,24 +166,24 @@ agent dispatch), let it accumulate, then revisit cuts with real data.
 
 ---
 
-## Phase 6 — Toolchain consolidation (Python CLIs, retire MCP server) ⏳ PLANNED
+## Phase 6 — Toolchain consolidation (Python CLIs, retire MCP server) ✅ DONE (2026-05-07)
 
-Decision: collapse to one canonical interface — Python CLIs over the
+Decision: collapsed to one canonical interface — Python CLIs over the
 filesystem YAMLs that already are the source of truth. Knowledge MCP
-server (TypeScript) retires once every caller has a CLI counterpart.
+server (TypeScript) retired once every caller had a CLI counterpart.
 
 **Phase 6 is single-machine.** Cross-device project state is Phase 7.
 
 Full decision record: `specs/toolchain-consolidation.md`.
+Knowledge surface map: `specs/knowledge-surfaces.md` (Phase 6 follow-up).
 
-**Three sub-phases (each independently shippable):**
-- **6A** — port `/dashboard` to a Python CLI; skill becomes thin wrapper. Tracked as A-010.
-- **6B** — audit remaining `mcp__knowledge__*` consumers; per-tool decide port / keep / kill. Tracked as A-011.
-- **6C** — archive `~/agents/knowledge-mcp/`; drop MCP from `settings.json`; update target architecture. Tracked as A-012, gated on 6B.
+**Sub-phases (all shipped):**
+- **6A** — `/dashboard` ported to `dashboard/cli.py`; skill becomes thin wrapper. (A-010, #134, #136)
+- **6B** — Audit + ports of remaining `mcp__knowledge__*` consumers. (A-011 audit in #138; A-015/A-016 cancelled — capture/inbox killed in #139; A-017 = `/project` port in #141; A-018 = `/review-session` port in #143.)
+- **6C** — Archived `~/agents/knowledge-mcp/`; dropped `knowledge` from `~/.claude.json`; migrated `session_end_context_update.py` from sqlite to YAML reads; updated target architecture. (A-012 + bundled A-021, #146.)
 
-Sequencing: 6A first (prototype + parallel-period validation); 6B only
-after 6A is in real use ≥1 week; 6C once 6B's inventory shows zero
-programmatic callers.
+After 6C: zero programmatic or hook-level callers of `mcp__knowledge__*`
+or `knowledge.db`. Vault-metrics MCP remains (separate server, unrelated).
 
 ---
 
