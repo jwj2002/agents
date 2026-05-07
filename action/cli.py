@@ -45,6 +45,17 @@ from lib.actions_md import (  # noqa: E402
     replace_row,
     split_row,
 )
+from lib import project_resolver  # noqa: E402  (also exposed as cli.project_resolver for tests)
+from lib.project_resolver import (  # noqa: E402
+    ProjectResolutionError,
+    add_subscription,
+    list_known_projects,
+    project_dir_exists,
+    read_subscriptions,
+    register_project,
+    resolve_from_cwd,
+    resolve_with_picker as _resolve_with_picker_lib,
+)
 
 HOME = Path.home()
 KNOWLEDGE_PROJECTS_DIR = HOME / "agents" / "knowledge" / "projects"
@@ -166,183 +177,36 @@ def normalize_attachment_path(raw: str) -> Path:
 
 
 # ---------- project resolution ----------
+#
+# All project-resolution / subscriptions / registration logic lives in
+# lib/project_resolver.py and is imported above. The thin wrappers below
+# preserve the function names that action's tests + main() consume, and
+# translate ProjectResolutionError → ActionError at the boundary.
+
 
 def resolve_project(args: argparse.Namespace) -> str:
     if args.project:
         return args.project
-    cwd = Path.cwd()
-    agents_dir = HOME / "agents"
-    projects_dir = HOME / "projects"
-    if cwd == agents_dir or agents_dir in cwd.parents:
-        return "agents"
-    if projects_dir in cwd.parents:
-        return cwd.relative_to(projects_dir).parts[0]
+    name = resolve_from_cwd()
+    if name is not None:
+        return name
     raise ActionError(
         "no project resolved — pass --project <name> or run from inside the project directory"
     )
 
 
-def list_known_projects() -> list[str]:
-    """Return sorted list of project names, filtered by this machine's subscriptions.
-
-    Falls back to all registered yamls if subscriptions file is missing or empty.
-    """
-    all_registered = sorted(p.stem for p in KNOWLEDGE_PROJECTS_DIR.glob("*.yaml"))
-    subs = read_subscriptions()
-    if not subs:
-        return all_registered
-    filtered = [p for p in all_registered if p in subs]
-    return filtered if filtered else all_registered
-
-
-def _interactive_pick(candidates: list[str], header: str) -> str:
-    """Print numbered menu, prompt for 1-based selection.
-
-    Reprompts up to 3 times on out-of-range or non-numeric input.
-    Raises ActionError on Ctrl-C, EOF, blank input, or exhausted retries.
-    """
-    print(header)
-    for i, name in enumerate(candidates, 1):
-        print(f"  {i}) {name}")
-    for attempt in range(3):
-        try:
-            raw = input(f"Enter number (1-{len(candidates)}): ").strip()
-        except (EOFError, KeyboardInterrupt):
-            raise ActionError("project selection cancelled")
-        if not raw:
-            raise ActionError("project selection cancelled")
-        try:
-            choice = int(raw)
-        except ValueError:
-            if attempt < 2:
-                print(f"  invalid input — enter a number between 1 and {len(candidates)}")
-                continue
-            raise ActionError("too many invalid inputs — project selection aborted")
-        if 1 <= choice <= len(candidates):
-            return candidates[choice - 1]
-        if attempt < 2:
-            print(f"  out of range — enter a number between 1 and {len(candidates)}")
-        else:
-            raise ActionError("too many invalid inputs — project selection aborted")
-    raise ActionError("too many invalid inputs — project selection aborted")
-
-
 def resolve_project_with_picker(args: argparse.Namespace) -> str:
-    """Wrap resolve_project(); apply validation + interactive picker where appropriate.
-
-    Validation order:
-      1. cwd inference (via resolve_project) — if resolved, return immediately.
-      2. --project <name>: if supplied AND in known list, return it.
-      3. --project <name>: if supplied BUT NOT in known list, picker with
-         header 'unknown project "<name>". Pick one:'.
-      4. No project resolved: picker with header 'no project resolved. Pick one:'.
-      5. Picker only fires when sys.stdin.isatty() AND NOT args.no_prompt.
-         Otherwise raises ActionError with existing message.
-    """
-    # If --project not supplied, try cwd inference first.
-    if not args.project:
-        try:
-            return resolve_project(args)
-        except ActionError:
-            pass
-        # cwd inference failed — offer picker or hard error
-        if sys.stdin.isatty() and not args.no_prompt:
-            candidates = list_known_projects()
-            return _interactive_pick(candidates, "no project resolved. Pick one:")
-        raise ActionError(
-            "no project resolved — pass --project <name> or run from inside the project directory"
-        )
-
-    # --project was supplied — validate against known list
-    known = list_known_projects()
-    if args.project in known:
-        return args.project
-
-    # Unknown project name — check if disk dir exists → auto-register
-    if project_dir_exists(args.project):
-        register_project(args.project)
-        print(f'registered new project "{args.project}" on this machine')
-        return args.project
-
-    # No disk dir — picker or error (Rule 3)
-    if sys.stdin.isatty() and not args.no_prompt:
-        return _interactive_pick(known, f'unknown project "{args.project}". Pick one:')
-    subs = read_subscriptions()
-    subscribed_str = ", ".join(subs) if subs else "(none)"
-    raise ActionError(
-        f'unknown project "{args.project}"\n'
-        f"  - not registered (knowledge/projects/{args.project}.yaml missing)\n"
-        f"  - no repo at ~/projects/{args.project}/\n"
-        f"  To add: clone the repo to ~/projects/{args.project}, "
-        f'or register manually.\n'
-        f"  Subscribed on this machine: {subscribed_str}"
-    )
+    try:
+        return _resolve_with_picker_lib(args.project, no_prompt=args.no_prompt)
+    except ProjectResolutionError as e:
+        raise ActionError(str(e)) from e
 
 
 def project_path(name: str) -> Path:
+    """ACTIONS.md path for a project (action-specific; not in lib/project_resolver)."""
     if name == "agents":
         return HOME / "agents" / "ACTIONS.md"
     return HOME / "projects" / name / "ACTIONS.md"
-
-
-def project_dir_exists(name: str) -> bool:
-    """Return True if a local repo directory exists for this project name."""
-    if name == "agents":
-        return (HOME / "agents").is_dir()
-    return (HOME / "projects" / name).is_dir()
-
-
-def read_subscriptions() -> list[str]:
-    """Read subscribed project names from dashboard-subscriptions.json.
-
-    Returns [] on missing file, malformed JSON, or absent/empty subscribed key.
-    """
-    try:
-        data = json.loads(SUBSCRIPTIONS_PATH.read_text())
-        subs = data.get("subscribed", [])
-        return [s for s in subs if isinstance(s, str)]
-    except (FileNotFoundError, json.JSONDecodeError, AttributeError):
-        return []
-
-
-def add_subscription(name: str) -> None:
-    """Append name to dashboard-subscriptions.json, creating the file if absent."""
-    try:
-        data = json.loads(SUBSCRIPTIONS_PATH.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
-        data = {}
-    subs: list[str] = data.get("subscribed", [])
-    if name not in subs:
-        subs.append(name)
-    data["subscribed"] = subs
-    SUBSCRIPTIONS_PATH.write_text(json.dumps(data, indent=2) + "\n")
-
-
-def register_project(name: str) -> Path:
-    """Write a default yaml to knowledge/projects/<name>.yaml and subscribe this machine.
-
-    Raises FileExistsError if yaml already exists (prevents double-registration).
-    Returns the path to the created yaml.
-    """
-    yaml_path = KNOWLEDGE_PROJECTS_DIR / f"{name}.yaml"
-    if yaml_path.exists():
-        raise FileExistsError(f"project yaml already exists: {yaml_path}")
-    today_str = date.today().isoformat()
-    content = (
-        f"project: {name}\n"
-        f"status: active\n"
-        f'focus: ""\n'
-        f"next_steps: []\n"
-        f"blockers: []\n"
-        f"open_questions: []\n"
-        f"specs: []\n"
-        f"dependencies: []\n"
-        f'updated_at: "{today_str}"\n'
-        f"updated_by: jason\n"
-    )
-    yaml_path.write_text(content)
-    add_subscription(name)
-    return yaml_path
 
 
 # ---------- commands ----------

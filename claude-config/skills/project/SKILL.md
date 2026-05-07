@@ -1,89 +1,82 @@
 ---
 name: project
-version: 1.1
-description: View or update project context
+version: 2.0
+description: View or update a project's tracker YAML — pure-CLI wrapper. Reads/writes ~/agents/knowledge/projects/<name>.yaml directly; no MCP. Subscribe/unsubscribe writes ~/.claude/dashboard-subscriptions.json.
 ---
 
 # /project
 
-View or update full context for one project. Calls `get_project_context` and `update_project_context` MCP tools.
+Thin Claude wrapper around `~/agents/project/cli.py`. The Python script
+is the single source of truth for behavior; this skill just dispatches.
 
-## Usage
+## Execution
 
-```
-/project flotilla                        # view context
-/project flotilla --focus "Terminal layout"  # update focus
-/project flotilla --next "Add E2E tests"     # add next step
-/project flotilla --done "Add Project modal" # remove completed step
-/project flotilla --blocker "Waiting on API" # add blocker
-/project flotilla --unblock "Waiting on API" # remove blocker
-/project flotilla --question "Should we merge captures?" # add question
-/project flotilla --subscribe                # show on this machine's /dashboard
-/project flotilla --unsubscribe              # hide on this machine's /dashboard
+When invoked, run:
+
+```bash
+python3 ~/agents/project/cli.py "$@"
 ```
 
-## Behavior
+Pass through every argument unchanged (positional name, all `--*` flags,
+quoted values). Print the script's stdout verbatim in your reply; print
+stderr verbatim too if non-empty. Use the script's exit code to decide
+whether the command succeeded — any non-zero is an error you should
+surface to the user.
 
-### View mode (no flags)
+Do **not** re-implement any logic on top of the script. Do **not** parse
+or paraphrase the output — give the user the raw text the script
+emitted.
 
-1. Call `mcp__knowledge__get_project_context` with project name
-2. Format output:
+## When the user could just run the shell command
 
-```
-┌─ {project} ──────────────────────────────────────────────┐
-│ Status: {STATUS}          Updated: {updated_at}          │
-│ Focus:  {focus}                                          │
-│                                                          │
-│ NEXT STEPS                                               │
-│ 1. [ ] {next_steps[0]}                                   │
-│ 2. [ ] {next_steps[1]}                                   │
-│                                                          │
-│ BLOCKERS                                                 │
-│ ! {blockers[0]}                                          │
-│                                                          │
-│ OPEN QUESTIONS                                           │
-│ ? {open_questions[0]}                                    │
-│                                                          │
-│ RECENT JOURNAL                                           │
-│ {created_at}  {entry}                                    │
-│                                                          │
-│ RECENT DECISIONS                                         │
-│ {id}  {title}                            {date}          │
-└──────────────────────────────────────────────────────────┘
+The script is also runnable directly:
+
+```bash
+python3 ~/agents/project/cli.py [args]
+# or with the alias in ~/.zshrc:
+alias project='python3 ~/agents/project/cli.py'
+project flotilla                              # view
+project flotilla --focus "Phase 4 polish"     # set focus
+project flotilla --next "Add E2E tests"       # add next step
 ```
 
-### Update mode (with flags)
+If the user invokes `/project` and you suspect they'd be better served
+running it directly, mention the alias once per session — not if they
+seem to be deliberately using the slash-command form.
 
-1. Parse flags into update fields
-2. For `--done`: remove the matching item from next_steps array
-3. For `--unblock`: remove the matching item from blockers array
-4. For `--next`: append to next_steps array
-5. For `--blocker`: append to blockers array
-6. For `--question`: append to open_questions array
-7. For `--focus`: set focus field (auto-journals the change)
-8. Call `mcp__knowledge__update_project_context` with the changes
-9. Show updated context
+## Surface
 
-### Subscription flags (machine-local, no MCP call)
+For the full command surface, run `python3 ~/agents/project/cli.py --help`.
+Summary:
 
-`--subscribe` / `--unsubscribe` edit the per-machine view file at
-`~/.claude/dashboard-subscriptions.json` and do **not** touch the shared
-knowledge DB. They control which projects appear on this machine's
-`/dashboard` (multi-project mode).
+- **Read**: `project <name>` (or invoke from inside `~/agents/` /
+  `~/projects/<name>/` for cwd-detect). Renders status, focus, blockers,
+  open questions, next steps.
+- **Set fields**: `--focus "..."`, `--status active|paused|blocked|done`.
+- **Manage lists**:
+  - `--next "..."` add / `--done "..."` remove (next_steps; remove by exact-or-substring match)
+  - `--blocker "..."` add / `--unblock "..."` remove (blockers)
+  - `--question "..."` add / `--unquestion "..."` remove (open_questions)
+- **Subscribe (machine-local)**: `--subscribe` / `--unsubscribe` write
+  `~/.claude/dashboard-subscriptions.json`. Subscriptions are
+  authoritative for `/dashboard` multi-project mode (per #130).
+- **Auto-register**: explicit name + matching local repo dir → auto-creates
+  `knowledge/projects/<name>.yaml` with sane defaults and subscribes this
+  machine.
 
-File format: `{"subscribed": ["agents", "paul-jason"]}`
+## Notes
 
-Behavior:
-
-1. Read the file. If missing or malformed, treat as `{"subscribed": []}`.
-2. **`--subscribe`**: add the project name to `subscribed` if not already
-   present. Write the file back. Confirm with: `subscribed to {name} on this
-   machine — will appear in /dashboard`.
-3. **`--unsubscribe`**: remove the project name from `subscribed` if
-   present. Write the file back. Confirm with: `unsubscribed from {name} on
-   this machine — hidden from /dashboard (use --all to see all)`.
-4. Subscription flags do not require the project to exist in the tracker —
-   they're a machine-local view preference.
-5. Subscription flags can be combined with other flags in the same
-   invocation (e.g. `/project foo --focus "bar" --subscribe`); apply MCP
-   updates first, then update the subscription file.
+- The script writes the YAML; **commit and push manually** (it prints
+  the suggested git command). Auto-commit was deliberately omitted in v1
+  — project YAML mutations are infrequent vs. ACTIONS.md and the user
+  was happy committing manually. If multi-machine sync becomes a real
+  pain, a follow-up can extract action's git plumbing into a shared
+  `lib/git_ops.py` and wire both CLIs to it.
+- The script does **not** call `mcp__knowledge__*` tools (Phase 6B port).
+  Reads/writes hit `knowledge/projects/<name>.yaml` and (for
+  subscriptions) `~/.claude/dashboard-subscriptions.json` directly.
+- Specification of behavior, modes, list-removal semantics, and YAML
+  round-trip safety lives in `~/agents/project/cli.py`'s module
+  docstring + the test suite at `~/agents/project/tests/test_cli.py`.
+  If you need to change behavior, edit the Python — never re-add logic
+  to this skill.
