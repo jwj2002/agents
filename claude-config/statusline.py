@@ -15,6 +15,7 @@ def main():
     ORANGE = "\033[38;5;214m"
     GREEN = "\033[32m"
     RED = "\033[31m"
+    CYAN = "\033[36m"
     RESET = "\033[0m"
 
     # Server name from hostname (blue)
@@ -24,8 +25,14 @@ def main():
     # Get username (pink)
     username = f"{PINK}{getpass.getuser()}{RESET}"
 
-    # Agent name (orange) — from .mcp.json in cwd, agent config, or env
+    # Current working directory, home-relative (cyan)
     import os
+    home = os.path.expanduser("~")
+    cwd_raw = os.getcwd()
+    cwd_display = "~" + cwd_raw[len(home):] if cwd_raw.startswith(home) else cwd_raw
+    cwd = f"{CYAN}{cwd_display}{RESET}"
+
+    # Agent name (orange) — from .mcp.json in cwd, agent config, or env
     agent_name = input_data.get("agent", {}).get("name") or os.environ.get("AGENT_NAME") or ""
     if not agent_name:
         try:
@@ -55,7 +62,7 @@ def main():
         context_display = f"{GREEN}0.0%{RESET}"
 
     # Build status line
-    status_line = f"{server} | {username} | {current_date} | {context_display} ctx{agent_display}"
+    status_line = f"{server} | {username} | {cwd} | {current_date} | {context_display} ctx{agent_display}"
 
     print(status_line)
 
