@@ -68,9 +68,10 @@ Write to `knowledge/patterns/pat-<slug>.yaml`. Slug rules:
 
 - All lowercase, hyphens, no underscores
 - 3-6 words describing the rule (`pat-permission-dependency`, not `pat-auth`)
-- Filename and `id` field MUST match (slug invariant — see `sync.py` duplicate-id guard)
+- Filename and `id` field MUST match (slug invariant — verify before write)
+- Verify the slug is not already in use: `ls knowledge/patterns/pat-<slug>.yaml` should return nothing.
 
-Required fields (per `sync.py` PATTERN_REQUIRED — build rejects anything missing). `schema_version: 1` is required by the agents-repo schema convention (see `specs/knowledge-surfaces.md`):
+Required fields per `specs/knowledge-surfaces.md` schema:
 
 ```yaml
 schema_version: 1
@@ -78,7 +79,7 @@ id: pat-<slug>
 category: <auth | database | api | frontend | infrastructure | workflow | testing | observability>
 name: <short human label, ≤10 words>
 status: pilot
-tier: secondary  # only "primary" or "secondary" are valid per sync.py — use "primary" for foundational
+tier: secondary  # only "primary" or "secondary" — use "primary" for foundational
 description: <lead with the rule, then the why, ≤2 sentences>
 ```
 
@@ -112,19 +113,28 @@ updated_at: "<today YYYY-MM-DD>"
 
 ### Step 5 — Validate
 
-After ≥1 pattern written, run:
+After each write, confirm the file parses as YAML and has the required fields:
 
 ```bash
-cd knowledge && python3 sync.py build
+python3 -c "
+import sys, yaml
+from pathlib import Path
+p = Path('knowledge/patterns/pat-<slug>.yaml')
+data = yaml.safe_load(p.read_text())
+required = {'schema_version', 'id', 'category', 'name', 'status', 'tier'}
+missing = required - set(data.keys())
+assert not missing, f'missing required fields: {missing}'
+assert data['id'] == p.stem, f'id {data[\"id\"]!r} does not match filename {p.stem!r}'
+assert data['tier'] in ('primary', 'secondary'), f'invalid tier {data[\"tier\"]!r}'
+print('OK')
+"
 ```
 
-Confirm exit 0. If guard fails (likely: duplicate id, missing required field, invalid status/tier):
+If validation fails:
 
-1. Capture stderr
+1. Capture the error
 2. Revert just-written file (`rm` if brand new, `git checkout --` if previously tracked)
 3. Report error to user — don't retry blindly
-
-**Don't run `sync.py build` until ≥1 pattern is written.**
 
 ### Step 6 — Offer to continue
 
@@ -148,7 +158,6 @@ Hard cap: 3 patterns per run. After 3, force-stop regardless of choice.
 - **Cap at 3 patterns per run.**
 - **Confirm before each write.**
 - **All writes to `knowledge/patterns/` only.**
-- **Don't run `sync.py build`** until ≥1 pattern is written.
 - **No bulk extraction** — interactive only.
 - **No updates** — `/discover-patterns` only creates. Updating existing patterns stays manual or via `/learn`.
 
@@ -161,11 +170,10 @@ Discovered N patterns in <focus-area>:
   knowledge/patterns/pat-<slug-1>.yaml  — <name>
   knowledge/patterns/pat-<slug-2>.yaml  — <name>
 
-sync.py build: PASS (exit 0)
+Validation: PASS (YAML schema + id/filename match)
 
-Patterns are status: pilot. They surface through vault-metrics MCP at
-next session start. Promote to validated manually after the convention
-holds across at least one new use.
+Patterns are status: pilot. Promote to validated manually after the
+convention holds across at least one new use.
 ```
 
 ---
@@ -173,5 +181,5 @@ holds across at least one new use.
 ## Related
 
 - `/learn` — top-down extraction from `failures.jsonl`
-- `knowledge/sync.py` — slug-uniqueness guard
+- `specs/knowledge-surfaces.md` — schema for pattern YAMLs (and other knowledge surfaces)
 - `knowledge/patterns/` — destination; existing files are the schema reference

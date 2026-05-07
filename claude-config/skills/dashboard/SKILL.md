@@ -81,9 +81,8 @@ For the full command surface, run `python3 ~/agents/dashboard/cli.py --help`
   likely a separate `automation.py` invoked from a hook/cron, not on
   every dashboard render.
 - Sources: `knowledge/projects/*.yaml`, `knowledge/decisions/*.yaml`,
-  per-project `ACTIONS.md`, `gh issue list` per resolved repo. Inbox
-  reads from `knowledge/knowledge.db` (the one knowledge subsystem
-  without a YAML form yet).
+  per-project `ACTIONS.md`, `gh issue list` per resolved repo. (Inbox
+  was killed in #139; `knowledge.db` was retired in Phase 6C.)
 - Specification of behavior, modes, filters, rendering, and degradation
   rules lives in `~/agents/dashboard/cli.py`'s module docstring + the
   test suite at `~/agents/dashboard/tests/test_cli.py`. If you need to

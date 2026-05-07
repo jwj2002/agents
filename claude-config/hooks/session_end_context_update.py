@@ -10,19 +10,26 @@ Format: { "{project}": { "commits": [...], "current_focus": "...",
                         "session_end": "..." } }
 
 Merges with existing pending reviews — multiple sessions accumulate until
-user resolves them via /dashboard.
+user resolves them via /review-session.
+
+Reads project state from filesystem YAMLs at ~/agents/knowledge/projects/.
+The Knowledge MCP / SQLite cache was retired in Phase 6C (issue #146).
 """
 
 import json
-import os
-import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
+
 PROJECTS_DIR = Path.home() / "projects"
-KNOWLEDGE_DB = Path.home() / "agents" / "knowledge" / "knowledge.db"
+KNOWLEDGE_PROJECTS_DIR = Path.home() / "agents" / "knowledge" / "projects"
 PENDING_FILE = Path.home() / ".claude" / "pending_focus_reviews.json"
 
 
@@ -56,45 +63,50 @@ def get_session_commits(project_dir: Path, since: datetime) -> list[dict]:
 
 
 def get_project_state(project: str) -> tuple[str | None, datetime | None]:
-    """Return (focus, updated_at) from project_tracker. updated_at is naive UTC."""
-    if not KNOWLEDGE_DB.exists():
+    """Return (focus, updated_at) read from knowledge/projects/<project>.yaml.
+
+    updated_at is parsed naive (no timezone). Returns (None, None) on any
+    error — the hook is non-blocking so missing/malformed YAML is silently OK.
+    """
+    if not HAS_YAML:
+        return None, None
+    yaml_path = KNOWLEDGE_PROJECTS_DIR / f"{project}.yaml"
+    if not yaml_path.exists():
         return None, None
     try:
-        conn = sqlite3.connect(str(KNOWLEDGE_DB))
-        row = conn.execute(
-            "SELECT focus, updated_at FROM project_tracker WHERE project = ?", (project,)
-        ).fetchone()
-        conn.close()
-        if not row:
-            return None, None
-        focus = row[0]
-        updated_at = None
-        if row[1]:
-            try:
-                # Format: "2026-04-18 20:48:52Z" or "2026-04-18"
-                stamp = row[1].replace("Z", "").strip()
-                if " " in stamp:
-                    updated_at = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S")
-                else:
-                    updated_at = datetime.strptime(stamp, "%Y-%m-%d")
-            except Exception:
-                updated_at = None
-        return focus, updated_at
+        data = yaml.safe_load(yaml_path.read_text()) or {}
     except Exception:
         return None, None
+    if not isinstance(data, dict):
+        return None, None
+
+    focus = data.get("focus")
+    updated_at = None
+    raw = data.get("updated_at")
+    if raw is not None:
+        try:
+            # YAML can give a date object or a string; normalize to a datetime.
+            if hasattr(raw, "isoformat"):
+                stamp = raw.isoformat()
+            else:
+                stamp = str(raw)
+            stamp = stamp.replace("Z", "").strip()
+            if " " in stamp:
+                updated_at = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S")
+            elif "T" in stamp:
+                updated_at = datetime.fromisoformat(stamp)
+            else:
+                updated_at = datetime.strptime(stamp, "%Y-%m-%d")
+        except Exception:
+            updated_at = None
+    return focus, updated_at
 
 
 def get_tracked_projects() -> set[str]:
-    """Projects registered in knowledge tracker (we only propose updates for these)."""
-    if not KNOWLEDGE_DB.exists():
+    """Projects registered in knowledge/projects/. Empty if the dir is missing."""
+    if not KNOWLEDGE_PROJECTS_DIR.exists():
         return set()
-    try:
-        conn = sqlite3.connect(str(KNOWLEDGE_DB))
-        rows = conn.execute("SELECT project FROM project_tracker").fetchall()
-        conn.close()
-        return {r[0] for r in rows}
-    except Exception:
-        return set()
+    return {p.stem for p in KNOWLEDGE_PROJECTS_DIR.glob("*.yaml")}
 
 
 def main() -> int:

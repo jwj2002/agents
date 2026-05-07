@@ -52,13 +52,8 @@ if ! command -v python3 &>/dev/null; then
     PREREQ_WARN=$((PREREQ_WARN + 1))
 fi
 
-if ! command -v node &>/dev/null; then
-    echo "⚠ node not found — knowledge-mcp requires it"
-    PREREQ_WARN=$((PREREQ_WARN + 1))
-fi
-
-if ! command -v npm &>/dev/null; then
-    echo "⚠ npm not found — knowledge-mcp and npx-based MCP servers require it"
+if ! command -v npx &>/dev/null; then
+    echo "⚠ npx not found — npx-based MCP servers (apple-mcp, gmail-send) require it"
     PREREQ_WARN=$((PREREQ_WARN + 1))
 fi
 
@@ -304,22 +299,11 @@ if command -v claude &>/dev/null; then
         fi
     }
 
-    # --- knowledge-mcp (TypeScript, requires node_modules) ---
-    KNOWLEDGE_MCP_DIR="$REPO_DIR/knowledge-mcp"
-    if [ -f "$KNOWLEDGE_MCP_DIR/index.ts" ]; then
-        # Ensure dependencies are installed
-        if [ ! -d "$KNOWLEDGE_MCP_DIR/node_modules" ]; then
-            echo "  Installing knowledge-mcp dependencies..."
-            (cd "$KNOWLEDGE_MCP_DIR" && npm install --silent 2>/dev/null) || true
-        fi
-        TSX_BIN="$KNOWLEDGE_MCP_DIR/node_modules/.bin/tsx"
-        if [ -x "$TSX_BIN" ]; then
-            register_mcp knowledge "$TSX_BIN" "$KNOWLEDGE_MCP_DIR/index.ts"
-        else
-            echo "  ✗ knowledge: tsx not found (run: cd $KNOWLEDGE_MCP_DIR && npm install)"
-            MCP_SERVERS_TOTAL=$((MCP_SERVERS_TOTAL + 1))
-        fi
-    fi
+    # knowledge-mcp was retired in Phase 6C (issue #146). The Knowledge MCP
+    # server's data — projects/decisions/patterns/learning-rules — now lives
+    # as filesystem YAMLs read directly by the action / dashboard / project /
+    # review-session CLIs. The TypeScript server is archived under
+    # _archived/knowledge-mcp/. See specs/knowledge-surfaces.md.
 
     # --- vault-metrics (Python, uses dedicated venv) ---
     MCP_VENV_PYTHON="$REPO_DIR/mcp-server/.venv/bin/python"
@@ -490,21 +474,9 @@ if [ -d "$HOOKS_DIR" ]; then
     cat > "$POST_MERGE" << 'HOOK'
 #!/bin/bash
 # Post-merge hook: runs after every git pull
-# 1. Rebuilds knowledge.db if knowledge/ files changed
-# 2. Re-runs install.sh if config files changed (idempotent, ~5-10s)
+# Re-runs install.sh if config files changed (idempotent, ~5-10s)
 
 REPO_DIR="$(git rev-parse --show-toplevel)"
-KNOWLEDGE_DIR="$REPO_DIR/knowledge"
-
-# --- Knowledge rebuild ---
-KNOWLEDGE_CHANGED=$(git diff-tree -r --name-only ORIG_HEAD HEAD -- knowledge/ 2>/dev/null)
-
-if [ -n "$KNOWLEDGE_CHANGED" ]; then
-    echo "[post-merge] Knowledge files changed — rebuilding knowledge.db..."
-    cd "$KNOWLEDGE_DIR" && python3 sync.py build 2>&1 | sed 's/^/[post-merge] /'
-else
-    echo "[post-merge] No knowledge changes — skipping rebuild"
-fi
 
 # --- Config re-install ---
 CONFIG_CHANGED=$(git diff-tree -r --name-only ORIG_HEAD HEAD -- claude-config/ codex-config/ install-all.sh 2>/dev/null)
@@ -517,7 +489,7 @@ else
 fi
 HOOK
     chmod +x "$POST_MERGE"
-    echo "  ✓ post-merge hook (auto-rebuild knowledge.db on git pull)"
+    echo "  ✓ post-merge hook (auto-rerun installer on config changes)"
 else
     echo "  ⚠ Not a git repo — skipping post-merge hook"
 fi
