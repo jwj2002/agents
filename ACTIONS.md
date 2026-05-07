@@ -20,7 +20,6 @@ _(none yet)_
 |----|----|----|----|----|----|----|----|----|
 | A-012 |  | Phase 6C — archive ~/agents/knowledge-mcp/, drop MCP registration from settings.json, update PLAN.md target architecture (gated on 6B) | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
 | A-013 |  | Phase 7 — investigate cross-device project state; evaluate git-as-sync vs SSH-based remote read vs centralized store; output decision doc at specs/cross-device-state.md (gated on 6A complete) | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
-| A-017 |  | Phase 6B P-3 — port /project skill to Python CLI at ~/agents/project/cli.py; SKILL.md becomes thin wrapper | Jason | open | 2026-05-07 | spec-phase6b-mcp-audit |  |  |
 | A-018 |  | Phase 6B P-4 — port /review-session skill to Python CLI at ~/agents/review-session/cli.py; SKILL.md becomes thin wrapper (gates on P-3) | Jason | open | 2026-05-07 | spec-phase6b-mcp-audit |  |  |
 
 ## Recently Closed
@@ -41,6 +40,7 @@ _(none yet)_
 | A-011 |  | Phase 6B — audit all knowledge-mcp consumers (skills, plugins, anything in ~/agents/); per-tool decide port-to-CLI / keep / kill; output a follow-up plan | Jason | 2026-05-07 |  | 2026-05-07: Audit shipped in #138 (specs/phase6b-mcp-audit.md). 5 PORT, 15 KILL, 0 KEEP. Sub-actions A-015..A-018 filed for the per-skill migrations. |
 | A-015 |  | Phase 6B P-1 — port /capture skill to Python CLI at ~/agents/capture/cli.py; SKILL.md becomes thin wrapper | Jason | 2026-05-07 |  | 2026-05-07: Cancelled per critical re-eval 2026-05-07. Inbox usage data: 2 captures in 3 weeks, 0 triaged, 1 was a literal 'Test capture'. User's revealed workflow: action --new with later cancellation, NOT capture-then-promote. /capture is dead surface; deleting the skill rather than porting. |
 | A-016 |  | Phase 6B P-2 — port /inbox skill to Python CLI at ~/agents/inbox/cli.py; SKILL.md becomes thin wrapper (gates on P-1 if shared lib/inbox_db.py) | Jason | 2026-05-07 |  | 2026-05-07: Cancelled per critical re-eval 2026-05-07. With /capture killed (A-015), there are no captures to triage. /inbox skill is dead surface; deleting rather than porting. inbox SQLite table left to die naturally when knowledge-mcp/ is archived in Phase 6C. |
+| A-017 |  | Phase 6B P-3 — port /project skill to Python CLI at ~/agents/project/cli.py; SKILL.md becomes thin wrapper | Jason | 2026-05-07 |  | 2026-05-07: Shipped in #141 (Phase 6B P-3). New project CLI + lib/project_resolver.py refactored from action; /project SKILL.md becomes thin wrapper. 103 tests pass. |
 
 ## Archive
 
