@@ -18,6 +18,8 @@ _(none yet)_
 
 | ID | Issue | Action | Owner | Status | Opened | Src | Files | Notes |
 |----|----|----|----|----|----|----|----|----|
+| A-008 |  | dashboard: subscriptions are authoritative — remove --all bypass; missing/empty subs file should error, not silently show everything | Jason | open | 2026-05-07 | review-2026-05-07 |  |  |
+| A-009 |  | subscribe this machine to agents + buddy (and clean up _smoke_test_action leftover) in ~/.claude/dashboard-subscriptions.json | Jason | open | 2026-05-07 | review-2026-05-07 |  |  |
 
 ## Recently Closed
 
@@ -36,4 +38,4 @@ _(none yet)_
 _(none yet)_
 
 ---
-Next ID: **A-008**
+Next ID: **A-010**
