@@ -1,6 +1,6 @@
 ---
 name: dashboard
-version: 6.0
+version: 6.1
 description: Cross-project status overview (or single-project deep view via cwd detection / explicit name) with windowed activity (daily/weekly/monthly/full), owner filter, and markdown digest format for agent-to-agent email
 ---
 
@@ -17,14 +17,14 @@ Two modes:
   explicit project name.
 - **Multi-project overview** — active cards with full listings, paused
   cards condensed, blocked cards show only blockers. Triggered by
-  `--all` or running outside any tracked project.
+  running outside any tracked project. Always filtered by per-machine
+  subscriptions (no bypass — see "Per-Machine Subscriptions").
 
 ## Usage
 
 ```
 /dashboard                          # cwd-detect; window=daily by default
 /dashboard flotilla                 # explicit single-project deep view
-/dashboard --all                    # multi-project, ignore subscription filter
 /dashboard --status active          # multi-project, filter by status
 
 # Activity window — applies to issues, actions, decisions, journal, patterns
@@ -122,9 +122,17 @@ Filter rules (multi-project mode only):
 
 - File **exists** with non-empty `subscribed` array → show only those projects.
   If a subscribed name isn't in the tracker, silently skip it (no error).
-- File **missing**, malformed, or `subscribed` is empty/absent → show all
-  tracked projects (back-compat).
-- `--all` flag → bypass the filter and show everything in the tracker.
+  If **every** subscribed name is missing from the tracker, error per below.
+- File **missing**, malformed, or `subscribed` is empty/absent → **error**:
+
+  ```
+  error: ~/.claude/dashboard-subscriptions.json is missing or empty.
+    Subscribe with: /project NAME --subscribe
+    Or hand-edit:   { "subscribed": ["agents", "buddy"] }
+  ```
+
+- There is **no bypass flag**. Subscriptions are authoritative for
+  multi-project mode; `--all` was removed in v6.1.
 
 Single-project mode is **not** filtered — explicit `/dashboard <name>` and
 cwd-detection always work even if the project isn't subscribed on this
@@ -134,14 +142,14 @@ Manage subscriptions with `/project <name> --subscribe` and `--unsubscribe`.
 
 ## Mode Selection
 
-1. If `--all` is present → multi-project mode.
-2. If a positional argument is present (e.g. `flotilla`) → single-project mode for that name.
-3. Otherwise: read `pwd`. Strip `$HOME/projects/` prefix; if remaining path's first segment matches a tracked project, single-project mode for that name. Special case: `$HOME/agents` → `agents` project.
-4. If no match and no flag → multi-project mode (today's default).
+1. If a positional argument is present (e.g. `flotilla`) → single-project mode for that name.
+2. Otherwise: read `pwd`. Strip `$HOME/projects/` prefix; if remaining path's first segment matches a tracked project, single-project mode for that name. Special case: `$HOME/agents` → `agents` project.
+3. If no match → multi-project mode (subscription-filtered).
 
 If single-project mode resolves to a project that isn't in the tracker,
 emit a one-line notice ("project `X` not tracked — use `/project X --focus
-\"...\"` to add it") and fall back to multi-project mode.
+\"...\"` to add it") and fall back to multi-project mode (subject to the
+same subscription filter).
 
 ## Data Sources
 
@@ -545,15 +553,14 @@ Rules:
 ### Step 0 — Mode resolution
 
 1. Parse args:
-   - `--all`, `--status <s>`, positional project name (mode selectors)
+   - `--status <s>`, positional project name (mode selectors)
    - `--window daily|weekly|monthly|full` (default: `daily`)
    - `--for <owner>` (default: none)
    - `--format terminal|markdown` (default: `terminal`)
-2. If `--all` → multi-project mode.
-3. Else if positional name → single-project mode for that name.
-4. Else: read `pwd`. If `pwd == $HOME/agents` or starts with `$HOME/agents/`, mode = single-project (`agents`). If `pwd` starts with `$HOME/projects/`, take the first segment after; if it matches a tracked project, mode = single-project (that name).
-5. Else → multi-project mode.
-6. Compute `WINDOW_START` = today minus 1d/7d/30d, or null for `full`.
+2. If positional name → single-project mode for that name.
+3. Else: read `pwd`. If `pwd == $HOME/agents` or starts with `$HOME/agents/`, mode = single-project (`agents`). If `pwd` starts with `$HOME/projects/`, take the first segment after; if it matches a tracked project, mode = single-project (that name).
+4. Else → multi-project mode.
+5. Compute `WINDOW_START` = today minus 1d/7d/30d, or null for `full`.
 
 ### Single-project mode
 
@@ -585,11 +592,17 @@ Rules:
 ### Multi-project mode
 
 1. `mcp__knowledge__get_dashboard` (with `status` if provided)
-2. **Apply subscription filter** (unless `--all`): read
-   `~/.claude/dashboard-subscriptions.json`. If it parses to an object with a
-   non-empty `subscribed` array, drop any project whose name isn't in that
-   array. If the file is missing, malformed, or has no/empty `subscribed`,
-   show all (back-compat).
+2. **Apply subscription filter (mandatory)**: read
+   `~/.claude/dashboard-subscriptions.json`.
+   - If the file parses to an object with a non-empty `subscribed` array,
+     drop any project whose name isn't in that array.
+   - If the file is missing, malformed, or has no/empty `subscribed`, **error
+     immediately** with the instructive message in "Per-Machine Subscriptions"
+     (do not render a dashboard, do not fall through to all-projects).
+   - If filtering leaves zero projects (every subscribed name is missing
+     from the tracker), error with: `subscribed projects (X, Y) are not in
+     the tracker — use /project X --focus "..." to register them, or
+     /project X --unsubscribe`.
 3. `mcp__knowledge__get_inbox` with `status: "open"` — group by project
    client-side, then drop entries whose project was filtered out above.
 4. For each project in result:
