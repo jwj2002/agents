@@ -18,7 +18,7 @@ _(none yet)_
 
 | ID | Issue | Action | Owner | Status | Opened | Src | Files | Notes |
 |----|----|----|----|----|----|----|----|----|
-| A-008 |  | dashboard: subscriptions are authoritative — remove --all bypass; missing/empty subs file should error, not silently show everything | Jason | open | 2026-05-07 | review-2026-05-07 |  | 2026-05-07: Edge case (resolved 2026-05-07): when ~/.claude/dashboard-subscriptions.json is missing or has empty 'subscribed', error out with an instructive message pointing at /project NAME --subscribe. No silent fall-through to all-projects. Apply the same rule to multi-project /dashboard and to /dashboard --all (the --all flag should be removed). |
+| A-008 | #129 | dashboard: subscriptions are authoritative — remove --all bypass; missing/empty subs file should error, not silently show everything | Jason | open | 2026-05-07 | review-2026-05-07 |  | 2026-05-07: Edge case (resolved 2026-05-07): when ~/.claude/dashboard-subscriptions.json is missing or has empty 'subscribed', error out with an instructive message pointing at /project NAME --subscribe. No silent fall-through to all-projects. Apply the same rule to multi-project /dashboard and to /dashboard --all (the --all flag should be removed). |
 | A-009 |  | subscribe this machine to agents + buddy (and clean up _smoke_test_action leftover) in ~/.claude/dashboard-subscriptions.json | Jason | open | 2026-05-07 | review-2026-05-07 |  |  |
 
 ## Recently Closed
