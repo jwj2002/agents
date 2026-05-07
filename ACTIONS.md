@@ -21,6 +21,7 @@ _(none yet)_
 | A-011 |  | Phase 6B — audit all knowledge-mcp consumers (skills, plugins, anything in ~/agents/); per-tool decide port-to-CLI / keep / kill; output a follow-up plan | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
 | A-012 |  | Phase 6C — archive ~/agents/knowledge-mcp/, drop MCP registration from settings.json, update PLAN.md target architecture (gated on 6B) | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
 | A-013 |  | Phase 7 — investigate cross-device project state; evaluate git-as-sync vs SSH-based remote read vs centralized store; output decision doc at specs/cross-device-state.md (gated on 6A complete) | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
+| A-014 |  | Phase 6A.2 — replace claude-config/skills/dashboard/SKILL.md with thin shell-out wrapper that invokes ~/agents/dashboard/cli.py (the /action skill is the model) | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
 
 ## Recently Closed
 
@@ -42,4 +43,4 @@ _(none yet)_
 _(none yet)_
 
 ---
-Next ID: **A-014**
+Next ID: **A-015**
