@@ -20,7 +20,7 @@ _(none yet)_
 |----|----|----|----|----|----|----|----|----|
 | A-012 |  | Phase 6C — archive ~/agents/knowledge-mcp/, drop MCP registration from settings.json, update PLAN.md target architecture (gated on 6B) | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
 | A-013 |  | Phase 7 — investigate cross-device project state; evaluate git-as-sync vs SSH-based remote read vs centralized store; output decision doc at specs/cross-device-state.md (gated on 6A complete) | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
-| A-018 |  | Phase 6B P-4 — port /review-session skill to Python CLI at ~/agents/review-session/cli.py; SKILL.md becomes thin wrapper (gates on P-3) | Jason | open | 2026-05-07 | spec-phase6b-mcp-audit |  |  |
+| A-018 |  | Phase 6B P-4 — port /review-session skill to Python CLI at ~/agents/review-session/cli.py; SKILL.md becomes thin wrapper (gates on P-3) | Jason | open | 2026-05-07 | spec-phase6b-mcp-audit |  | 2026-05-07: GH issue #142 filed; PR incoming |
 
 ## Recently Closed
 
