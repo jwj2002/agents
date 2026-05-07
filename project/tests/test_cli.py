@@ -269,6 +269,39 @@ def test_atomic_write_no_temp_left_behind(monkeypatch, tmp_path):
     assert leftover == []
 
 
+def test_schema_version_preserved_on_write(monkeypatch, tmp_path):
+    """An existing schema_version field must survive apply_updates round-trip.
+
+    The agents-repo YAML schema convention (specs/knowledge-surfaces.md) puts
+    schema_version first; any write path that drops it would silently break
+    forward-compat tooling.
+    """
+    versioned_yaml = "schema_version: 1\n" + _MIN_YAML
+    yaml_path = _patch_resolver(monkeypatch, tmp_path, "testproj", versioned_yaml)
+    rc = cli.main(["testproj", "--focus", "round-tripped", "--no-prompt"])
+    assert rc == 0
+    text = yaml_path.read_text()
+    assert "schema_version: 1" in text
+    # And it remains the first non-comment field.
+    first_field = text.lstrip().splitlines()[0]
+    assert first_field.startswith("schema_version:")
+
+
+def test_register_project_writes_schema_version(monkeypatch, tmp_path):
+    """register_project (auto-create on first --subscribe of a known repo dir)
+    must seed schema_version: 1."""
+    from lib import project_resolver as pr
+
+    projects_dir = tmp_path / "knowledge" / "projects"
+    projects_dir.mkdir(parents=True)
+    subs_file = tmp_path / "subs.json"
+    monkeypatch.setattr(pr, "KNOWLEDGE_PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(pr, "SUBSCRIPTIONS_PATH", subs_file)
+    yaml_path = pr.register_project("brandnew", owner="jason")
+    text = yaml_path.read_text()
+    assert text.splitlines()[0] == "schema_version: 1"
+
+
 # ---------- argparse / mode resolution ----------
 
 def test_no_args_no_writes_is_read_mode(monkeypatch, tmp_path, capsys):

@@ -70,9 +70,10 @@ Write to `knowledge/patterns/pat-<slug>.yaml`. Slug rules:
 - 3-6 words describing the rule (`pat-permission-dependency`, not `pat-auth`)
 - Filename and `id` field MUST match (slug invariant — see `sync.py` duplicate-id guard)
 
-Required fields (per `sync.py` PATTERN_REQUIRED — build rejects anything missing):
+Required fields (per `sync.py` PATTERN_REQUIRED — build rejects anything missing). `schema_version: 1` is required by the agents-repo schema convention (see `specs/knowledge-surfaces.md`):
 
 ```yaml
+schema_version: 1
 id: pat-<slug>
 category: <auth | database | api | frontend | infrastructure | workflow | testing | observability>
 name: <short human label, ≤10 words>

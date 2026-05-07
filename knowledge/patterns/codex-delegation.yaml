@@ -1,3 +1,4 @@
+schema_version: 1
 id: pat-codex-delegation
 legacy_id: PAT-024
 category: workflow

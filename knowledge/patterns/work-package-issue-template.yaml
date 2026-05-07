@@ -1,3 +1,4 @@
+schema_version: 1
 id: pat-work-package-issue-template
 legacy_id: PAT-019
 category: agent-infrastructure

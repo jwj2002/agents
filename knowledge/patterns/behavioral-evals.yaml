@@ -1,3 +1,4 @@
+schema_version: 1
 id: pat-behavioral-evals
 legacy_id: PAT-023
 category: workflow

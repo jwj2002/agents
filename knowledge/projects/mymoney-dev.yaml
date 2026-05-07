@@ -1,3 +1,4 @@
+schema_version: 1
 project: mymoney-dev
 status: paused
 focus: "Financial planning platform"

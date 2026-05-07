@@ -1,3 +1,4 @@
+schema_version: 1
 id: pat-fastapi-test-fixtures
 legacy_id: PAT-014
 category: testing

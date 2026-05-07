@@ -1,3 +1,4 @@
+schema_version: 1
 id: pat-error-handling
 legacy_id: PAT-006
 category: error-handling

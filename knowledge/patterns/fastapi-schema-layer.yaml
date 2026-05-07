@@ -1,3 +1,4 @@
+schema_version: 1
 id: pat-fastapi-schema-layer
 legacy_id: PAT-009
 category: schema
