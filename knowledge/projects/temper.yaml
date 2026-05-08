@@ -1,5 +1,6 @@
 schema_version: 1
 project: temper
+host: jns-mac
 status: paused
 focus: "AI SDLC Orchestrator — spec-to-PR pipeline"
 next_steps:

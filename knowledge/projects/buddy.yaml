@@ -1,5 +1,6 @@
 schema_version: 1
 project: buddy
+host: jns-mac
 status: paused
 focus: "Meeting transcription pipeline"
 next_steps:

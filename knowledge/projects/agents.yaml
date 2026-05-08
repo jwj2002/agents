@@ -1,5 +1,6 @@
 schema_version: 1
 project: agents
+host: jns-mac
 status: active
 focus: Stack consolidation complete (Phases 0, 1, 2, 4, 5 shipped). Phase 3
   (artifact pruning) deferred until usage logger lands.

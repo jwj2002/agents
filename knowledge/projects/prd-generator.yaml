@@ -1,5 +1,6 @@
 schema_version: 1
 project: prd-generator
+host: jns-mac
 status: paused
 focus: "PRD generator for product requirements"
 next_steps: []

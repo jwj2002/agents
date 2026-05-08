@@ -1,5 +1,6 @@
 schema_version: 1
 project: mymoney-dev
+host: jns-mac
 status: paused
 focus: "Financial planning platform"
 next_steps: []

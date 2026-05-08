@@ -1,5 +1,6 @@
 schema_version: 1
 project: flotilla
+host: jns-mac
 status: done
 focus: Archived 2026-05-06 as part of agents Phase 2 (Option B — drop
   multi-agent channels). Local clone moved to ~/projects/_archived/flotilla.

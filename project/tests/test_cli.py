@@ -295,11 +295,161 @@ def test_register_project_writes_schema_version(monkeypatch, tmp_path):
     projects_dir = tmp_path / "knowledge" / "projects"
     projects_dir.mkdir(parents=True)
     subs_file = tmp_path / "subs.json"
+    host_file = tmp_path / "host-name"
+    host_file.write_text("test-host\n")
     monkeypatch.setattr(pr, "KNOWLEDGE_PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(pr, "SUBSCRIPTIONS_PATH", subs_file)
+    monkeypatch.setattr(pr, "HOST_NAME_PATH", host_file)
     yaml_path = pr.register_project("brandnew", owner="jason")
     text = yaml_path.read_text()
     assert text.splitlines()[0] == "schema_version: 1"
+
+
+# ---------- host: field (Phase 7.1) ----------
+
+def test_register_project_stamps_host_from_file(monkeypatch, tmp_path):
+    from lib import project_resolver as pr
+
+    projects_dir = tmp_path / "knowledge" / "projects"
+    projects_dir.mkdir(parents=True)
+    subs_file = tmp_path / "subs.json"
+    host_file = tmp_path / "host-name"
+    host_file.write_text("jns-mac\n")
+    monkeypatch.setattr(pr, "KNOWLEDGE_PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(pr, "SUBSCRIPTIONS_PATH", subs_file)
+    monkeypatch.setattr(pr, "HOST_NAME_PATH", host_file)
+
+    yaml_path = pr.register_project("hostproj")
+    data = yaml.safe_load(yaml_path.read_text())
+    assert data["host"] == "jns-mac"
+
+
+def test_register_project_falls_back_to_gethostname(monkeypatch, tmp_path):
+    """host-name file absent → gethostname() lowercased + first segment."""
+    from lib import project_resolver as pr
+
+    projects_dir = tmp_path / "knowledge" / "projects"
+    projects_dir.mkdir(parents=True)
+    subs_file = tmp_path / "subs.json"
+    monkeypatch.setattr(pr, "KNOWLEDGE_PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(pr, "SUBSCRIPTIONS_PATH", subs_file)
+    monkeypatch.setattr(pr, "HOST_NAME_PATH", tmp_path / "no-host-file")
+    monkeypatch.setattr(pr.socket, "gethostname", lambda: "Some-Host.local")
+
+    yaml_path = pr.register_project("fallback")
+    data = yaml.safe_load(yaml_path.read_text())
+    assert data["host"] == "some-host"  # lowercased + .local stripped
+
+
+def test_register_project_explicit_host_override(monkeypatch, tmp_path):
+    """register_project(host='jbox06') wins over the file/fallback."""
+    from lib import project_resolver as pr
+
+    projects_dir = tmp_path / "knowledge" / "projects"
+    projects_dir.mkdir(parents=True)
+    subs_file = tmp_path / "subs.json"
+    host_file = tmp_path / "host-name"
+    host_file.write_text("jns-mac\n")
+    monkeypatch.setattr(pr, "KNOWLEDGE_PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(pr, "SUBSCRIPTIONS_PATH", subs_file)
+    monkeypatch.setattr(pr, "HOST_NAME_PATH", host_file)
+
+    yaml_path = pr.register_project("override", host="jbox06")
+    data = yaml.safe_load(yaml_path.read_text())
+    assert data["host"] == "jbox06"
+
+
+def test_get_host_name_handles_empty_file(monkeypatch, tmp_path):
+    """Empty host-name file → fallback (file has empty content; we should not return '')."""
+    from lib import project_resolver as pr
+
+    host_file = tmp_path / "host-name"
+    host_file.write_text("\n")
+    monkeypatch.setattr(pr, "HOST_NAME_PATH", host_file)
+    monkeypatch.setattr(pr.socket, "gethostname", lambda: "Fallback-Host")
+    assert pr.get_host_name() == "fallback-host"
+
+
+def test_set_host_name_writes_file(monkeypatch, tmp_path):
+    from lib import project_resolver as pr
+
+    host_file = tmp_path / "host-name"
+    monkeypatch.setattr(pr, "HOST_NAME_PATH", host_file)
+    pr.set_host_name("jns-mac")
+    assert host_file.read_text().strip() == "jns-mac"
+    # idempotent
+    pr.set_host_name("jns-mac")
+    assert host_file.read_text().strip() == "jns-mac"
+
+
+def test_set_host_name_rejects_empty(monkeypatch, tmp_path):
+    from lib import project_resolver as pr
+
+    monkeypatch.setattr(pr, "HOST_NAME_PATH", tmp_path / "host-name")
+    with pytest.raises(ValueError):
+        pr.set_host_name("")
+    with pytest.raises(ValueError):
+        pr.set_host_name("   ")
+
+
+def test_register_host_flag_writes_file(monkeypatch, tmp_path, capsys):
+    """`project --register-host <name>` writes ~/.claude/host-name."""
+    host_file = tmp_path / "host-name"
+    monkeypatch.setattr(cli.project_resolver, "HOST_NAME_PATH", host_file)
+    rc = cli.main(["--register-host", "jns-mac"])
+    assert rc == 0
+    assert host_file.read_text().strip() == "jns-mac"
+    out = capsys.readouterr().out
+    assert "registered as host: jns-mac" in out
+
+
+def test_set_host_flag_updates_existing(monkeypatch, tmp_path):
+    versioned_yaml = "schema_version: 1\nproject: testproj\nhost: jns-mac\n" + _MIN_YAML
+    yaml_path = _patch_resolver(monkeypatch, tmp_path, "testproj", versioned_yaml)
+    rc = cli.main(["testproj", "--set-host", "jbox06", "--no-prompt"])
+    assert rc == 0
+    data = yaml.safe_load(yaml_path.read_text())
+    assert data["host"] == "jbox06"
+
+
+def test_set_host_flag_does_not_bump_updated_at(monkeypatch, tmp_path):
+    """--set-host is operational, not content. Same precedent as --subscribe."""
+    versioned_yaml = "schema_version: 1\nproject: testproj\nhost: jns-mac\n" + _MIN_YAML
+    yaml_path = _patch_resolver(monkeypatch, tmp_path, "testproj", versioned_yaml)
+    original_updated_at = yaml.safe_load(yaml_path.read_text())["updated_at"]
+    rc = cli.main(["testproj", "--set-host", "jbox06", "--no-prompt"])
+    assert rc == 0
+    new_updated_at = yaml.safe_load(yaml_path.read_text())["updated_at"]
+    assert new_updated_at == original_updated_at
+
+
+def test_set_host_flag_idempotent(monkeypatch, tmp_path, capsys):
+    versioned_yaml = "schema_version: 1\nproject: testproj\nhost: jns-mac\n" + _MIN_YAML
+    _patch_resolver(monkeypatch, tmp_path, "testproj", versioned_yaml)
+    rc = cli.main(["testproj", "--set-host", "jns-mac", "--no-prompt"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "no-op" in out
+
+
+def test_field_order_includes_host_between_project_and_status(monkeypatch, tmp_path):
+    versioned_yaml = "schema_version: 1\nproject: testproj\nhost: jns-mac\n" + _MIN_YAML
+    yaml_path = _patch_resolver(monkeypatch, tmp_path, "testproj", versioned_yaml)
+    cli.main(["testproj", "--focus", "trigger write", "--no-prompt"])
+    text = yaml_path.read_text()
+    project_idx = text.index("project:")
+    host_idx = text.index("host:")
+    status_idx = text.index("status:")
+    assert project_idx < host_idx < status_idx
+
+
+def test_render_includes_host(monkeypatch, tmp_path, capsys):
+    versioned_yaml = "schema_version: 1\nproject: testproj\nhost: jbox06\n" + _MIN_YAML
+    _patch_resolver(monkeypatch, tmp_path, "testproj", versioned_yaml)
+    rc = cli.main(["testproj", "--no-prompt"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Host: jbox06" in out
 
 
 # ---------- argparse / mode resolution ----------

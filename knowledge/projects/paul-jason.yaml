@@ -1,5 +1,6 @@
 schema_version: 1
 project: paul-jason
+host: jns-mac
 status: active
 focus: Paul and Jason recurring one-on-one
 next_steps: []
