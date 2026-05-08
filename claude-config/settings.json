@@ -30,6 +30,12 @@
       "Bash(curl -s -H PRIVATE-TOKEN:*)",
       "Bash(curl -s -X POST -H PRIVATE-TOKEN:*)",
       "Bash(curl -s -X PUT -H PRIVATE-TOKEN:*)",
+      "Bash(ruff check:*)",
+      "Bash(ruff format --check:*)",
+      "mcp__plugin_playwright_playwright__browser_snapshot",
+      "mcp__knowledge__get_inbox",
+      "mcp__knowledge__get_dashboard",
+      "mcp__knowledge__get_project_context",
       "Write(/home/jjob/.claude/projects/*/memory/**)",
       "Edit(/home/jjob/.claude/projects/*/memory/**)"
     ],
