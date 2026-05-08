@@ -285,17 +285,21 @@ MCP_SERVERS_TOTAL=0
 if command -v claude &>/dev/null; then
     register_mcp() {
         # register_mcp <name> <command> [args...]
-        # Always re-registers — claude mcp add is idempotent and overwrites,
-        # which ensures paths stay correct if the repo moves.
+        # `claude mcp add` is NOT idempotent — it exits 1 with "already exists"
+        # if the server is registered. Remove first (no-op if absent), then add,
+        # so paths stay correct if REPO_DIR moved between runs.
         local name="$1"
         shift
         MCP_SERVERS_TOTAL=$((MCP_SERVERS_TOTAL + 1))
 
-        if claude mcp add --scope user "$name" -- "$@" 2>/dev/null; then
+        claude mcp remove --scope user "$name" >/dev/null 2>&1 || true
+
+        local err
+        if err=$(claude mcp add --scope user "$name" -- "$@" 2>&1); then
             echo "  ✓ $name registered"
             MCP_SERVERS_REGISTERED=$((MCP_SERVERS_REGISTERED + 1))
         else
-            echo "  ✗ Failed to register $name"
+            echo "  ✗ Failed to register $name: $err"
         fi
     }
 
