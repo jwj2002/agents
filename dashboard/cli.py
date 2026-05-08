@@ -224,18 +224,18 @@ def load_issues(name: str, since: date | None) -> tuple[list[dict], list[dict]]:
         return ([], [])
     open_issues = _gh_run([
         "gh", "issue", "list", "--repo", slug, "--state", "open",
-        "--limit", "100", "--json", "number,title,updatedAt",
+        "--limit", "100", "--json", "number,title,createdAt,updatedAt",
     ])
     if since is None:
         closed_issues = _gh_run([
             "gh", "issue", "list", "--repo", slug, "--state", "closed",
-            "--limit", "50", "--json", "number,title,closedAt",
+            "--limit", "50", "--json", "number,title,createdAt,closedAt",
         ])
     else:
         closed_issues = _gh_run([
             "gh", "issue", "list", "--repo", slug, "--state", "closed",
             "--search", f"closed:>={since.isoformat()}",
-            "--limit", "50", "--json", "number,title,closedAt",
+            "--limit", "50", "--json", "number,title,createdAt,closedAt",
         ])
     return (open_issues, closed_issues)
 
@@ -331,10 +331,11 @@ def render_terminal_single(p: Project, window: str, owner_filter: str | None) ->
         lines.append("Next Steps:")
         for i, s in enumerate(p.next_steps, 1):
             lines.append(_truncate(f"  {i}. {s}", width))
+    action_by_issue = _build_action_by_issue_map([*p.actions_open, *p.actions_closed])
     lines.append("")
     lines.append(_actions_block(p, owner_filter, width))
     lines.append("")
-    lines.append(_issues_block(p, width))
+    lines.append(_issues_block(p, action_by_issue, width))
     lines.append("")
     if p.decisions:
         lines.append(f"Decisions in window ({len(p.decisions)}):")
@@ -345,48 +346,162 @@ def render_terminal_single(p: Project, window: str, owner_filter: str | None) ->
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _row_with_suffix(prefix: str, body: str, suffix: str, width: int) -> str:
-    """Truncate `body` so `prefix + body + suffix` fits in width without losing the suffix."""
-    budget = width - len(prefix) - len(suffix)
-    if budget < 5:  # not enough room for any sensible body
-        return (prefix + body + suffix)[:width]
-    if len(body) > budget:
-        body = body[: budget - 1] + "…"
-    return prefix + body + suffix
+DASH = "----"
+
+
+def _truncate_body(s: str, width: int) -> str:
+    """Truncate exactly to `width`, adding ellipsis if shortened."""
+    if len(s) <= width:
+        return s.ljust(width)
+    return s[: width - 1] + "…"
+
+
+def _build_action_by_issue_map(rows: list[dict]) -> dict[int, str]:
+    """{issue_num: A-id} for any action row that has an Issue cell pointing at a number."""
+    out: dict[int, str] = {}
+    for r in rows:
+        raw = (r.get("Issue") or "").strip().lstrip("#")
+        if not raw:
+            continue
+        try:
+            out[int(raw)] = r.get("ID", "?")
+        except ValueError:
+            continue
+    return out
+
+
+def _issue_cell_for_action(r: dict) -> str:
+    """Render the ISSUE column for an action row: '#NN' or '----'."""
+    raw = (r.get("Issue") or "").strip()
+    if not raw:
+        return DASH
+    return raw if raw.startswith("#") else f"#{raw}"
 
 
 def _actions_block(p: Project, owner_filter: str | None, width: int) -> str:
     head_suffix = f" (filter: Owner={owner_filter})" if owner_filter else ""
-    head = f"Actions ({len(p.actions_open)} open, {len(p.actions_closed)} closed-in-window){head_suffix}:"
-    rows = []
-    for r in p.actions_open:
-        status = (r.get("Status") or "open").lower()
-        icon = " ⚙" if status == "wip" else " ⛔" if status == "blocked" else ""
-        prefix = f"  {r.get('ID', '?')}  {r.get('Owner', '?')}  "
-        rows.append(_row_with_suffix(prefix, r.get("Action", ""), icon, width))
-    for r in p.actions_closed:
-        prefix = f"  {r.get('ID', '?')}  {r.get('Owner', '?')}  "
-        suffix = f"  ✓ {r.get('Closed', '?')}"
-        rows.append(_row_with_suffix(prefix, r.get("Action", ""), suffix, width))
-    if not rows:
-        rows.append("  (none)")
-    return head + "\n" + "\n".join(rows)
+    n_open, n_closed = len(p.actions_open), len(p.actions_closed)
+    out: list[str] = []
+
+    # Column widths (fixed for ID/ISSUE/OWNER/dates; ACTION fills the rest).
+    W_ID, W_ISSUE, W_OWNER, W_DATE = 6, 7, 8, 10
+    indent = "  "
+
+    def fmt_open_header() -> str:
+        return (f"{indent}{'ID':<{W_ID}} {'ISSUE':<{W_ISSUE}} {'OWNER':<{W_OWNER}} "
+                f"{'OPENED':<{W_DATE}} ACTION")
+
+    def fmt_closed_header() -> str:
+        return (f"{indent}{'ID':<{W_ID}} {'ISSUE':<{W_ISSUE}} {'OWNER':<{W_OWNER}} "
+                f"{'OPENED':<{W_DATE}} {'CLOSED':<{W_DATE}} ACTION")
+
+    out.append(f"Actions — Open ({n_open}){head_suffix}:")
+    if n_open == 0:
+        out.append(f"{indent}(none)")
+    else:
+        out.append(fmt_open_header())
+        # ACTION budget: width - indent - fixed cols - separators
+        budget = max(20, width - len(indent) - W_ID - 1 - W_ISSUE - 1 - W_OWNER - 1 - W_DATE - 1)
+        for r in p.actions_open:
+            status = (r.get("Status") or "open").lower()
+            # Annotate non-default status inline at the start of the action text.
+            # Doesn't break column alignment because it lives inside the ACTION budget.
+            prefix = ""
+            if status == "wip":
+                prefix = "[wip] "
+            elif status == "blocked":
+                prefix = "[blocked] "
+            body = prefix + (r.get("Action") or "")
+            line = (
+                f"{indent}{(r.get('ID') or '?'):<{W_ID}} "
+                f"{_issue_cell_for_action(r):<{W_ISSUE}} "
+                f"{(r.get('Owner') or '?')[:W_OWNER]:<{W_OWNER}} "
+                f"{(r.get('Opened') or DASH)[:W_DATE]:<{W_DATE}} "
+                f"{_truncate_body(body, budget)}"
+            )
+            out.append(line.rstrip())
+
+    out.append("")
+    out.append(f"Actions — Closed ({n_closed} in window){head_suffix}:")
+    if n_closed == 0:
+        out.append(f"{indent}(none)")
+    else:
+        out.append(fmt_closed_header())
+        budget = max(20, width - len(indent) - W_ID - 1 - W_ISSUE - 1 - W_OWNER - 1
+                     - W_DATE - 1 - W_DATE - 1)
+        for r in p.actions_closed:
+            line = (
+                f"{indent}{(r.get('ID') or '?'):<{W_ID}} "
+                f"{_issue_cell_for_action(r):<{W_ISSUE}} "
+                f"{(r.get('Owner') or '?')[:W_OWNER]:<{W_OWNER}} "
+                f"{(r.get('Opened') or DASH)[:W_DATE]:<{W_DATE}} "
+                f"{(r.get('Closed') or DASH)[:W_DATE]:<{W_DATE}} "
+                f"{_truncate_body(r.get('Action') or '', budget)}"
+            )
+            out.append(line.rstrip())
+
+    return "\n".join(out)
 
 
-def _issues_block(p: Project, width: int) -> str:
-    head = f"Issues ({len(p.issues_open)} open, {len(p.issues_closed)} closed-in-window):"
-    rows = []
-    for issue in p.issues_open:
-        prefix = f"  #{issue.get('number', '?')}  "
-        rows.append(_row_with_suffix(prefix, issue.get("title", ""), "", width))
-    for issue in p.issues_closed:
-        closed_at = (issue.get("closedAt") or "")[:10]
-        prefix = f"  #{issue.get('number', '?')}  "
-        suffix = f"  ✓ {closed_at}"
-        rows.append(_row_with_suffix(prefix, issue.get("title", ""), suffix, width))
-    if not rows:
-        rows.append("  (none)")
-    return head + "\n" + "\n".join(rows)
+def _issues_block(p: Project, action_by_issue: dict[int, str], width: int) -> str:
+    n_open, n_closed = len(p.issues_open), len(p.issues_closed)
+    out: list[str] = []
+    W_NUM, W_ACTION, W_DATE = 6, 7, 10
+    indent = "  "
+
+    def action_for(issue: dict) -> str:
+        n = issue.get("number")
+        try:
+            return action_by_issue.get(int(n), DASH) if n is not None else DASH
+        except (TypeError, ValueError):
+            return DASH
+
+    def fmt_open_header() -> str:
+        return (f"{indent}{'#':<{W_NUM}} {'ACTION':<{W_ACTION}} "
+                f"{'CREATED':<{W_DATE}} TITLE")
+
+    def fmt_closed_header() -> str:
+        return (f"{indent}{'#':<{W_NUM}} {'ACTION':<{W_ACTION}} "
+                f"{'CREATED':<{W_DATE}} {'CLOSED':<{W_DATE}} TITLE")
+
+    out.append(f"Issues — Open ({n_open}):")
+    if n_open == 0:
+        out.append(f"{indent}(none)")
+    else:
+        out.append(fmt_open_header())
+        budget = max(20, width - len(indent) - W_NUM - 1 - W_ACTION - 1 - W_DATE - 1)
+        for issue in p.issues_open:
+            num = f"#{issue.get('number', '?')}"
+            created = (issue.get("createdAt") or "")[:10] or DASH
+            line = (
+                f"{indent}{num:<{W_NUM}} "
+                f"{action_for(issue):<{W_ACTION}} "
+                f"{created:<{W_DATE}} "
+                f"{_truncate_body(issue.get('title') or '', budget)}"
+            )
+            out.append(line.rstrip())
+
+    out.append("")
+    out.append(f"Issues — Closed ({n_closed} in window):")
+    if n_closed == 0:
+        out.append(f"{indent}(none)")
+    else:
+        out.append(fmt_closed_header())
+        budget = max(20, width - len(indent) - W_NUM - 1 - W_ACTION - 1 - W_DATE - 1 - W_DATE - 1)
+        for issue in p.issues_closed:
+            num = f"#{issue.get('number', '?')}"
+            created = (issue.get("createdAt") or "")[:10] or DASH
+            closed = (issue.get("closedAt") or "")[:10] or DASH
+            line = (
+                f"{indent}{num:<{W_NUM}} "
+                f"{action_for(issue):<{W_ACTION}} "
+                f"{created:<{W_DATE}} "
+                f"{closed:<{W_DATE}} "
+                f"{_truncate_body(issue.get('title') or '', budget)}"
+            )
+            out.append(line.rstrip())
+
+    return "\n".join(out)
 
 
 def render_terminal_multi(projects: list[Project], window: str, owner_filter: str | None) -> str:

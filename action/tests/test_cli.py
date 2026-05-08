@@ -706,7 +706,10 @@ def test_list_default_shows_metadata_columns(monkeypatch, tmp_path, capsys):
     rc = cli.main(["--list", "--no-prompt"])
     assert rc == 0
     out = capsys.readouterr().out
-    header = out.splitlines()[0]
+    # First line is the section label "Open (N):"; second line is the header
+    lines = out.splitlines()
+    assert lines[0].startswith("Open (")
+    header = next(line for line in lines if line.startswith("ID"))
     for col in ("ID", "Owner", "Status", "Opened", "Src", "Issue", "Files", "Action"):
         assert col in header, f"missing column {col!r} in header: {header!r}"
 
@@ -777,6 +780,96 @@ def test_list_no_trunc_preserves_full_action_text(monkeypatch, tmp_path, capsys)
     a002 = next(line for line in out.splitlines() if line.startswith("A-002"))
     assert "trailing ellipsis is appended correctly" in a002
     assert not a002.endswith("…")
+
+
+# ---------- open/closed split + Opened column on closed (A-013-style) ----------
+
+_MIXED_ACTIONS_CONTENT = """\
+# Mixed Test Project
+
+Next ID: **A-005**
+
+## Open
+
+| ID | Issue | Action | Owner | Status | Opened | Src | Files | Notes |
+|----|-------|--------|-------|--------|--------|-----|-------|-------|
+| A-001 | #42 | Open action | Jason | open | 2026-05-01 |  |  | |
+
+## Recently Closed
+
+| ID | Issue | Action | Owner | Opened | Closed | Files | Notes |
+|----|-------|--------|-------|--------|--------|-------|-------|
+| A-002 |  | Recently closed | Jason | 2026-05-01 | 2026-05-05 |  | |
+"""
+
+
+def _patch_mixed_project(monkeypatch, tmp_path: Path):
+    p = tmp_path / "ACTIONS.md"
+    p.write_text(_MIXED_ACTIONS_CONTENT)
+    monkeypatch.setattr(cli, "resolve_project_with_picker", lambda args: "mixed")
+    monkeypatch.setattr(cli, "project_path", lambda name: p)
+    return p
+
+
+def test_list_default_open_only_has_no_closed_section(monkeypatch, tmp_path, capsys):
+    _patch_mixed_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    rc = cli.main(["--list", "--no-prompt"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Open (1):" in out
+    assert "Closed (" not in out
+    assert "A-001" in out
+    assert "A-002" not in out
+
+
+def test_list_closed_only(monkeypatch, tmp_path, capsys):
+    _patch_mixed_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    rc = cli.main(["--list", "--closed", "--no-prompt"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Closed (1):" in out
+    assert "Open (" not in out
+    # Closed table must surface BOTH Opened and Closed columns now
+    header = next(line for line in out.splitlines() if line.startswith("ID"))
+    assert "Opened" in header and "Closed" in header
+    a002 = next(line for line in out.splitlines() if line.startswith("A-002"))
+    assert "2026-05-01" in a002  # Opened
+    assert "2026-05-05" in a002  # Closed
+
+
+def test_list_all_renders_two_distinct_tables(monkeypatch, tmp_path, capsys):
+    _patch_mixed_project(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    rc = cli.main(["--list", "--all", "--no-prompt"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Open (1):" in out
+    assert "Closed (1):" in out
+    # Open should appear before Closed in output
+    assert out.index("Open (1):") < out.index("Closed (1):")
+    assert "A-001" in out
+    assert "A-002" in out
+
+
+# ---------- close-flow forwards Opened (A-013-style) ----------
+
+def test_close_open_action_carries_opened_to_closed_table(monkeypatch, tmp_path):
+    """When `action A-NNN --status done` moves a row, the original Opened
+    date must travel with it so duration stays queryable."""
+    p = tmp_path / "ACTIONS.md"
+    p.write_text(_MIXED_ACTIONS_CONTENT)
+    monkeypatch.setattr(cli, "resolve_project_with_picker", lambda args: "mixed")
+    monkeypatch.setattr(cli, "project_path", lambda name: p)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: None)
+    rc = cli.main(["A-001", "--status", "done", "--no-prompt", "--no-commit"])
+    assert rc == 0
+    text = p.read_text()
+    # Find A-001's new row in Closed table; it should carry Opened=2026-05-01
+    closed_lines = [line for line in text.splitlines() if line.startswith("| A-001")]
+    assert len(closed_lines) == 1
+    assert "2026-05-01" in closed_lines[0]  # original Opened preserved
 
 
 # ---------- --new capture parity (cap → action consolidation) ----------
