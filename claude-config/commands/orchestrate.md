@@ -261,6 +261,41 @@ if [ "$BRANCH" = "main" ]; then
 fi
 ```
 
+### Step 2.5: Initialize Task Tracking (TaskCreate)
+
+After classification and stack detection, before agent dispatch, register a
+TaskCreate todo list with one task per phase that will actually run. This
+surfaces progress as a visible checklist instead of burying it in tool output.
+
+**Phases to register** (omit any flag-gated or stack-gated phase not running):
+
+| Tier | Tasks in order |
+|------|----------------|
+| SIMPLE  | DISCUSS¹ → MAP-PLAN → TEST-PLANNER¹ → CONTRACT² → PLAN-CHECK → PATCH → PROVE → Record-Outcome |
+| COMPLEX | DISCUSS¹ → MAP → PLAN → TEST-PLANNER¹ → CONTRACT² → PLAN-CHECK → PATCH → PROVE → Record-Outcome |
+
+¹ Only when the corresponding flag is set (`--discuss`, `--with-tests`).
+² Only when CONTRACT-full applies (Step 1.6). CONTRACT-lite is inline — no task.
+
+**Per task**:
+- `subject`: phase + issue, e.g. `"MAP-PLAN issue #184"`
+- `description`: one-line phase purpose
+- `activeForm`: gerund for the spinner, e.g. `"Running MAP-PLAN"`
+
+**Dependencies**: chain sequentially with `addBlockedBy`. Exception: documented
+parallel patterns from Step 1.7's swarm table (e.g. PLAN-CHECK + TEST-PLANNER
+fan-out) share a single upstream blocker and do not block each other.
+
+**During Step 3 dispatch**: before each `Task()` call, mark the corresponding
+task `in_progress`. After artifact validation passes, mark it `completed`. If
+a phase fails, leave the task `in_progress` and STOP per Failure Handling —
+the in-flight task documents where the run halted.
+
+**At Step 5**: every task should be `completed`. `Record-Outcome` wraps Step 4.
+
+Skip this step entirely on `--resume` runs unless the resumed phase has no
+existing task (re-create only the missing tail of the chain).
+
 ### Step 3: Spawn Agents (Task Tool)
 
 **CRITICAL**: Use the Task tool to spawn each phase agent via **native subagent
