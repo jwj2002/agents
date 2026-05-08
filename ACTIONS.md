@@ -18,7 +18,6 @@ _(none yet)_
 
 | ID | Issue | Action | Owner | Status | Opened | Src | Files | Notes |
 |----|----|----|----|----|----|----|----|----|
-| A-013 |  | Phase 7 — investigate cross-device project state; evaluate git-as-sync vs SSH-based remote read vs centralized store; output decision doc at specs/cross-device-state.md (gated on 6A complete) | Jason | open | 2026-05-07 | spec-toolchain-consolidation |  |  |
 | A-018 |  | Phase 6B P-4 — port /review-session skill to Python CLI at ~/agents/review-session/cli.py; SKILL.md becomes thin wrapper (gates on P-3) | Jason | open | 2026-05-07 | spec-phase6b-mcp-audit |  | 2026-05-07: GH issue #142 filed; PR incoming |
 | A-020 |  | Connect SessionStart hook to knowledge/patterns/*.yaml: filter by tier=critical AND lifecycle.status in (validated, pilot); emit alongside the hardcoded patterns-critical.md. Closes the reader-gap. | Jason | open | 2026-05-07 | spec-knowledge-surfaces |  |  |
 
@@ -44,6 +43,7 @@ _(none yet)_
 | A-012 |  | Phase 6C — archive ~/agents/knowledge-mcp/, drop MCP registration from settings.json, update PLAN.md target architecture (gated on 6B) | Jason | 2026-05-07 |  | 2026-05-07: PR #146 incoming |
 | A-021 |  | Drop dead knowledge/ subdirs (velocity/, project-summaries/, knowledge/specs/, sync.py, schema.sql, .agents/, __pycache__) alongside Phase 6C MCP archival (A-012). | Jason | 2026-05-07 |  | 2026-05-07: Bundled in PR #146 |
 | A-019 |  | Build decision-writer CLI: 'decision new --project X --topic Y --title Z' that writes knowledge/decisions/D-NNN.yaml + updates index.yaml. Closes the writer-gap surfaced in specs/knowledge-surfaces.md. | Jason | 2026-05-07 |  | 2026-05-07: Shipped in PR #148-incoming. New decision/cli.py + thin SKILL.md wrapper. 23 unit tests + smoke against existing 9 decisions. |
+| A-013 |  | Phase 7 — investigate cross-device project state; evaluate git-as-sync vs SSH-based remote read vs centralized store; output decision doc at specs/cross-device-state.md (gated on 6A complete) | Jason | 2026-05-08 |  | 2026-05-08: Phase 7.1 shipped in PR #150-incoming. Decision doc + host: field + ~/.claude/host-name mechanism. 7.2/7.3 deferred until trigger conditions met (per spec). |
 
 ## Archive
 

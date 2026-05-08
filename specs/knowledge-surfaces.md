@@ -14,7 +14,7 @@
 
 | Surface | Scope | Status | Authoritative for |
 |---|---|---|---|
-| `knowledge/projects/<name>.yaml` | per-project | ALIVE | project tracker (focus, status, blockers, next_steps, open_questions) |
+| `knowledge/projects/<name>.yaml` | per-project | ALIVE | project tracker (focus, host, status, blockers, next_steps, open_questions). `host:` declares which host owns the project — see `specs/cross-device-state.md` (Phase 7.1). |
 | `knowledge/decisions/D-NNN.yaml` | per-project (`project:` field) | DORMANT — no writer | architecturally significant decisions |
 | `knowledge/patterns/pat-<slug>.yaml` | global (no `project:` field) | CATALOG-ONLY — no live reader | reusable code patterns + lifecycle (pilot → validated) |
 | `knowledge/learning-rules/LR-NNN.yaml` | global | DORMANT — no recent writer | failure-derived rules surfaced at SessionStart |

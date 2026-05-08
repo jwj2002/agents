@@ -38,16 +38,18 @@ from lib import project_resolver  # noqa: E402
 from lib.project_resolver import (  # noqa: E402
     ProjectResolutionError,
     add_subscription,
+    get_host_name,
     project_yaml_path,
     register_project,
     remove_subscription,
     resolve_with_picker,
+    set_host_name,
 )
 
 ALLOWED_STATUS = ("active", "paused", "blocked", "done")
 PROJECT_FIELDS_ORDER = [
     "schema_version",
-    "project", "status", "focus", "next_steps", "blockers",
+    "project", "host", "status", "focus", "next_steps", "blockers",
     "open_questions", "specs", "dependencies", "updated_at", "updated_by",
 ]
 DEFAULT_OWNER = "jason"
@@ -198,10 +200,11 @@ def render(data: dict) -> str:
     name = data.get("project", "?")
     status = (data.get("status") or "?").upper()
     updated = data.get("updated_at", "?")
+    host = data.get("host") or "?"
     lines = [
         f"PROJECT: {name}",
         "─" * width,
-        f"Status:    {status}    Updated: {updated}",
+        f"Status:    {status}    Host: {host}    Updated: {updated}",
     ]
     focus = (data.get("focus") or "").strip()
     if focus:
@@ -255,6 +258,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    help="Add to ~/.claude/dashboard-subscriptions.json (this machine).")
     p.add_argument("--unsubscribe", action="store_true",
                    help="Remove from ~/.claude/dashboard-subscriptions.json.")
+    p.add_argument("--set-host", dest="set_host", default=None,
+                   help="Set the project's host: field (e.g., jns-mac, vitalai-laptop, jbox06).")
+    p.add_argument("--register-host", dest="register_host", default=None, metavar="HOSTNAME",
+                   help="Write ~/.claude/host-name with the canonical name for THIS machine. "
+                        "Does not require a project name.")
     p.add_argument("--no-prompt", action="store_true", default=False,
                    help="Skip interactive picker; error if name is missing/unknown.")
     return p.parse_args(argv)
@@ -267,6 +275,15 @@ def main(argv: list[str] | None = None) -> int:
         argv = sys.argv[1:]
     try:
         args = parse_args(argv)
+
+        # Short-circuit: --register-host writes ~/.claude/host-name and exits.
+        # No project name required.
+        if args.register_host is not None:
+            set_host_name(args.register_host)
+            print(f"this machine is now registered as host: {args.register_host}")
+            print(f"  wrote {Path.home() / '.claude' / 'host-name'}")
+            print(f"  current autodetect: {get_host_name()}")
+            return 0
 
         # Resolve project name (cwd / explicit / picker / auto-register).
         name = resolve_with_picker(args.name, no_prompt=args.no_prompt)
@@ -281,9 +298,10 @@ def main(argv: list[str] | None = None) -> int:
             args.blocker, args.unblock,
             args.question, args.unquestion,
         ])
+        host_flag = args.set_host is not None
         sub_flags = args.subscribe or args.unsubscribe
 
-        if not write_flags and not sub_flags:
+        if not write_flags and not sub_flags and not host_flag:
             # Read mode.
             data = load_yaml(path)
             sys.stdout.write(render(data))
@@ -298,6 +316,18 @@ def main(argv: list[str] | None = None) -> int:
                 data["updated_at"] = today_iso()
                 data["updated_by"] = data.get("updated_by") or DEFAULT_OWNER
                 write_yaml(path, data)
+
+        # --set-host is operational (which host owns this project), not content.
+        # No updated_at bump — same precedent as --subscribe.
+        if host_flag:
+            data = load_yaml(path)
+            old_host = data.get("host")
+            if old_host == args.set_host:
+                applied.append(f"host already {args.set_host} for {name} (no-op)")
+            else:
+                data["host"] = args.set_host
+                write_yaml(path, data)
+                applied.append(f"host: {old_host or '(unset)'} → {args.set_host}")
 
         # Subscription flags (machine-local; never touch the YAML).
         if args.subscribe:

@@ -1,4 +1,4 @@
-"""Project name resolution + registration + per-machine subscriptions.
+"""Project name resolution + registration + per-machine subscriptions + host name.
 
 Tool-agnostic. Used by `action/cli.py`, `project/cli.py`, and any future
 CLI that needs to resolve a project name from cwd / --project flag and
@@ -11,7 +11,9 @@ Public API:
 - project_dir_exists(name) -> bool
 - read_subscriptions() -> list[str]
 - add_subscription(name) / remove_subscription(name)
-- register_project(name, owner='jason') -> Path  (writes default YAML)
+- get_host_name() -> str  (reads ~/.claude/host-name, falls back to gethostname)
+- set_host_name(name) -> None  (writes the file)
+- register_project(name, owner='jason', host=None) -> Path  (writes default YAML)
 - interactive_pick(candidates, header) -> str  (TTY)
 - resolve_with_picker(name, no_prompt=False) -> str  (combined resolver)
 
@@ -21,6 +23,7 @@ their own user-facing error type.
 from __future__ import annotations
 
 import json
+import socket
 import sys
 from datetime import date
 from pathlib import Path
@@ -28,6 +31,7 @@ from pathlib import Path
 HOME = Path.home()
 KNOWLEDGE_PROJECTS_DIR = HOME / "agents" / "knowledge" / "projects"
 SUBSCRIPTIONS_PATH = HOME / ".claude" / "dashboard-subscriptions.json"
+HOST_NAME_PATH = HOME / ".claude" / "host-name"
 
 
 class ProjectResolutionError(Exception):
@@ -84,8 +88,11 @@ def list_known_projects() -> list[str]:
     return filtered if filtered else all_registered
 
 
-def register_project(name: str, owner: str = "jason") -> Path:
+def register_project(name: str, owner: str = "jason", host: str | None = None) -> Path:
     """Write a default YAML to knowledge/projects/<name>.yaml + subscribe this machine.
+
+    `host` declares which host owns this project (Phase 7.1; see
+    specs/cross-device-state.md). If None, autodetected via get_host_name().
 
     Raises FileExistsError if YAML already exists. Returns the YAML path.
     """
@@ -93,9 +100,11 @@ def register_project(name: str, owner: str = "jason") -> Path:
     if yaml_path.exists():
         raise FileExistsError(f"project yaml already exists: {yaml_path}")
     today_str = date.today().isoformat()
+    host_str = host if host is not None else get_host_name()
     content = (
         f"schema_version: 1\n"
         f"project: {name}\n"
+        f"host: {host_str}\n"
         f"status: active\n"
         f'focus: ""\n'
         f"next_steps: []\n"
@@ -110,6 +119,36 @@ def register_project(name: str, owner: str = "jason") -> Path:
     yaml_path.write_text(content)
     add_subscription(name)
     return yaml_path
+
+
+# ---------- per-machine host name ----------
+
+def get_host_name() -> str:
+    """Read the canonical host name for this machine.
+
+    Reads `~/.claude/host-name` (one line). Falls back to a sanitized
+    `socket.gethostname()` if the file is absent — lowercased, first
+    segment only (strips `.local`, `.localdomain`, `.lan`, etc.).
+
+    Phase 7.1 — see specs/cross-device-state.md for context.
+    """
+    try:
+        text = HOST_NAME_PATH.read_text().strip()
+        if text:
+            return text
+    except FileNotFoundError:
+        pass
+    fallback = socket.gethostname() or "unknown"
+    return fallback.lower().split(".")[0]
+
+
+def set_host_name(name: str) -> None:
+    """Write the canonical host name to `~/.claude/host-name`. Idempotent."""
+    name = name.strip()
+    if not name:
+        raise ValueError("host name must be non-empty")
+    HOST_NAME_PATH.parent.mkdir(parents=True, exist_ok=True)
+    HOST_NAME_PATH.write_text(name + "\n")
 
 
 # ---------- subscriptions ----------
