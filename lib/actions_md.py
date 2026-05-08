@@ -13,9 +13,10 @@ Mutation path:
 All parse failures raise MarkdownParseError. Callers translate to their own
 user-facing error type.
 
-Schema (v2): | ID | Issue | Action | Owner | Status | Opened | Src | Files | Notes |
-            | ID | Issue | Action | Owner | Closed | Files | Notes |
-Legacy v1 (no Files col) is tolerated on read; auto-migrated on next write.
+Schema (v3): | ID | Issue | Action | Owner | Status | Opened | Src | Files | Notes |
+            | ID | Issue | Action | Owner | Opened | Closed | Files | Notes |
+Legacy v2 (no Opened in closed) and v1 (no Files col) are tolerated on read;
+auto-migrated on next write. Migration leaves Opened empty for pre-v3 closed rows.
 """
 from __future__ import annotations
 
@@ -23,10 +24,12 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-# Current schema (v2): Files column inserted between Src/Closed and Notes.
+# Current schema (v3): Opened added to closed rows so duration is queryable.
 OPEN_COLS = ["ID", "Issue", "Action", "Owner", "Status", "Opened", "Src", "Files", "Notes"]
-CLOSED_COLS = ["ID", "Issue", "Action", "Owner", "Closed", "Files", "Notes"]
-# Legacy schema (v1): no Files column. Tolerated on read; auto-migrated on next write.
+CLOSED_COLS = ["ID", "Issue", "Action", "Owner", "Opened", "Closed", "Files", "Notes"]
+# Legacy v2: closed rows had no Opened column.
+CLOSED_COLS_V2 = ["ID", "Issue", "Action", "Owner", "Closed", "Files", "Notes"]
+# Legacy v1: no Files column. Tolerated on read; auto-migrated on next write.
 OPEN_COLS_V1 = ["ID", "Issue", "Action", "Owner", "Status", "Opened", "Src", "Notes"]
 CLOSED_COLS_V1 = ["ID", "Issue", "Action", "Owner", "Closed", "Notes"]
 
@@ -72,15 +75,22 @@ def render_files_cell(paths: list[str]) -> str:
     return ", ".join(escape_pipes(p) for p in paths)
 
 
-def _row_cells(line: str, schema: list[str], legacy: list[str]) -> dict[str, str]:
-    """Parse a markdown table row into a dict, tolerating the legacy (no-Files) schema."""
+def _row_cells(line: str, schema: list[str], *legacies: list[str]) -> dict[str, str]:
+    """Parse a markdown table row into a dict, tolerating older schemas.
+
+    Tries the current schema first, then each legacy schema. Synthesizes any
+    fields missing from a legacy form to empty strings so callers can rely on
+    every current-schema key being present.
+    """
     cells = split_row(line)
     if len(cells) == len(schema):
         return dict(zip(schema, cells))
-    if len(cells) == len(legacy):
-        d = dict(zip(legacy, cells))
-        d["Files"] = ""  # synthesize missing column
-        return d
+    for legacy in legacies:
+        if len(cells) == len(legacy):
+            d = dict(zip(legacy, cells))
+            for col in schema:
+                d.setdefault(col, "")
+            return d
     return {}  # malformed; treat as no row
 
 
@@ -101,7 +111,10 @@ class FileModel:
         return [_row_cells(self.lines[i], OPEN_COLS, OPEN_COLS_V1) for i in self.open_row_indices]
 
     def closed_rows(self) -> list[dict[str, str]]:
-        return [_row_cells(self.lines[i], CLOSED_COLS, CLOSED_COLS_V1) for i in self.closed_row_indices]
+        return [
+            _row_cells(self.lines[i], CLOSED_COLS, CLOSED_COLS_V2, CLOSED_COLS_V1)
+            for i in self.closed_row_indices
+        ]
 
     def find_row(self, action_id: str) -> tuple[str, int]:
         """Return (table, line_index) where table ∈ {'open', 'closed'}."""
@@ -110,7 +123,7 @@ class FileModel:
             if cells.get("ID") == action_id:
                 return ("open", i)
         for i in self.closed_row_indices:
-            cells = _row_cells(self.lines[i], CLOSED_COLS, CLOSED_COLS_V1)
+            cells = _row_cells(self.lines[i], CLOSED_COLS, CLOSED_COLS_V2, CLOSED_COLS_V1)
             if cells.get("ID") == action_id:
                 return ("closed", i)
         raise MarkdownParseError(f"{action_id} not found in {self.path.parent.name}")
@@ -119,7 +132,7 @@ class FileModel:
         """Read a row at line_idx, normalized to current schema."""
         if table == "open":
             return _row_cells(self.lines[line_idx], OPEN_COLS, OPEN_COLS_V1)
-        return _row_cells(self.lines[line_idx], CLOSED_COLS, CLOSED_COLS_V1)
+        return _row_cells(self.lines[line_idx], CLOSED_COLS, CLOSED_COLS_V2, CLOSED_COLS_V1)
 
     def migrate_schema_in_place(self) -> None:
         """Rewrite header + separator + every data row to current schema.
@@ -143,7 +156,7 @@ class FileModel:
                 "|" + "|".join(["----"] * len(CLOSED_COLS)) + "|"
             )
         for i in self.closed_row_indices:
-            cells = _row_cells(self.lines[i], CLOSED_COLS, CLOSED_COLS_V1)
+            cells = _row_cells(self.lines[i], CLOSED_COLS, CLOSED_COLS_V2, CLOSED_COLS_V1)
             if cells:
                 self.lines[i] = render_row(CLOSED_COLS, cells)
 

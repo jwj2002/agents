@@ -135,10 +135,15 @@ def today() -> str:
 
 
 def append_note(existing: str, text: str) -> str:
-    """Append ' | YYYY-MM-DD: <text>' (escaped) preserving prior notes."""
+    """Append '; YYYY-MM-DD: <text>' (escaped) preserving prior notes.
+
+    Uses '; ' as the separator so the joined string never contains a literal
+    '|' that markdown would interpret as a column boundary. Prior versions
+    used ' | ' which corrupted rows over multiple appends.
+    """
     fragment = f"{today()}: {escape_pipes(text)}"
     existing = existing.strip()
-    return f"{existing} | {fragment}" if existing else fragment
+    return f"{existing}; {fragment}" if existing else fragment
 
 
 def normalize_attachment_path(raw: str) -> Path:
@@ -240,8 +245,8 @@ def _actions_template(project_name: str) -> str:
         "\n"
         "## Recently Closed\n"
         "\n"
-        "| ID | Issue | Action | Owner | Closed | Files | Notes |\n"
-        "|----|-------|--------|-------|--------|-------|-------|\n"
+        "| ID | Issue | Action | Owner | Opened | Closed | Files | Notes |\n"
+        "|----|-------|--------|-------|--------|--------|-------|-------|\n"
         "\n"
         "## Archive\n"
         "\n"
@@ -350,6 +355,7 @@ def cmd_new(args: argparse.Namespace, path: Path) -> int:
                 "ID": aid, "Issue": "",
                 "Action": escape_pipes(text),
                 "Owner": owner,
+                "Opened": today(),
                 "Closed": today(),
                 "Files": files_cell, "Notes": notes,
             })
@@ -532,19 +538,6 @@ def _commit_message_for(
 
 def cmd_list(args: argparse.Namespace, path: Path) -> int:
     model = parse_file(path)
-    rows: list[tuple[str, dict[str, str]]] = []  # (table_label, cells)
-
-    if args.closed or (args.status and args.status.lower() == "closed"):
-        for cells in model.closed_rows():
-            rows.append(("closed", cells))
-    elif args.all:
-        for cells in model.open_rows():
-            rows.append(("open", cells))
-        for cells in model.closed_rows():
-            rows.append(("closed", cells))
-    else:
-        for cells in model.open_rows():
-            rows.append(("open", cells))
 
     def matches(label: str, cells: dict[str, str]) -> bool:
         if args.status and args.status.lower() != "closed":
@@ -557,17 +550,27 @@ def cmd_list(args: argparse.Namespace, path: Path) -> int:
                 return False
         return True
 
-    rows = [(lbl, c) for lbl, c in rows if matches(lbl, c)]
-    if not rows:
+    open_rows = [c for c in model.open_rows() if matches("open", c)]
+    closed_rows = [c for c in model.closed_rows() if matches("closed", c)]
+
+    show_open = not (args.closed or (args.status and args.status.lower() == "closed"))
+    show_closed = args.closed or args.all or (args.status and args.status.lower() == "closed")
+
+    if not show_open:
+        open_rows = []
+    if not show_closed:
+        closed_rows = []
+
+    if not open_rows and not closed_rows:
         print("(no matching actions)")
         return 0
 
     if args.short:
-        for lbl, c in rows:
-            if lbl == "closed":
-                status_col = f"closed:{c.get('Closed', '?')}"
-            else:
-                status_col = c.get("Status", "?")
+        for c in open_rows:
+            status_col = c.get("Status", "?")
+            print(f"{c.get('ID', '?'):<6} {c.get('Owner', '?'):<8} {status_col:<14} {c.get('Action', '')}")
+        for c in closed_rows:
+            status_col = f"closed:{c.get('Closed', '?')}"
             print(f"{c.get('ID', '?'):<6} {c.get('Owner', '?'):<8} {status_col:<14} {c.get('Action', '')}")
         return 0
 
@@ -575,47 +578,55 @@ def cmd_list(args: argparse.Namespace, path: Path) -> int:
         val = (c.get(key, "") or "").strip()
         return val if val else default
 
-    def _status(lbl: str, c: dict[str, str]) -> str:
-        if lbl == "closed":
-            return f"closed:{c.get('Closed', '?')}"
-        return _cell(c, "Status")
-
     def _files_count(c: dict[str, str]) -> str:
         files = parse_files_cell(c.get("Files", ""))
         return str(len(files)) if files else "-"
 
-    rendered = [
-        {
-            "ID":     _cell(c, "ID", "?"),
-            "Owner":  _cell(c, "Owner"),
-            "Status": _status(lbl, c),
-            "Opened": _cell(c, "Opened"),
-            "Src":    _cell(c, "Src"),
-            "Issue":  _cell(c, "Issue"),
-            "Files":  _files_count(c),
-            "Action": _cell(c, "Action", ""),
-        }
-        for lbl, c in rows
-    ]
-
-    fixed_cols = ["ID", "Owner", "Status", "Opened", "Src", "Issue", "Files"]
-    widths = {col: max(len(col), max(len(r[col]) for r in rendered)) for col in fixed_cols}
-
     term_width = shutil.get_terminal_size((120, 24)).columns
-    fixed_width = sum(widths.values()) + 2 * len(fixed_cols)  # 2-space gutter after each fixed col
-    action_budget = max(20, term_width - fixed_width)
 
-    def _join(values: list[str]) -> str:
-        parts = [v.ljust(widths[col]) for col, v in zip(fixed_cols, values[:-1])]
-        parts.append(values[-1])
-        return "  ".join(parts)
+    def _render_table(label: str, rows: list[dict[str, str]], cols: list[str]) -> None:
+        if not rows:
+            print(f"{label} (0):")
+            print("  (none)")
+            return
+        # Build the rendered row dicts: every field stringified with a default.
+        rendered = []
+        for c in rows:
+            rec = {col: _cell(c, col) for col in cols if col != "Action" and col != "Files"}
+            if "Files" in cols:
+                rec["Files"] = _files_count(c)
+            rec["Action"] = _cell(c, "Action", "")
+            rendered.append(rec)
+        # Compute fixed-col widths from header + content.
+        fixed_cols = [c for c in cols if c != "Action"]
+        widths = {col: max(len(col), max(len(r[col]) for r in rendered)) for col in fixed_cols}
+        fixed_width = sum(widths.values()) + 2 * len(fixed_cols)
+        action_budget = max(20, term_width - fixed_width)
 
-    print(_join([*fixed_cols, "Action"]))
-    for r in rendered:
-        action = r["Action"]
-        if not args.no_trunc and len(action) > action_budget:
-            action = action[: action_budget - 1] + "…"
-        print(_join([r[c] for c in fixed_cols] + [action]))
+        def _join(values: list[str]) -> str:
+            parts = [v.ljust(widths[col]) for col, v in zip(fixed_cols, values[:-1])]
+            parts.append(values[-1])
+            return "  ".join(parts)
+
+        print(f"{label} ({len(rendered)}):")
+        print(_join([*fixed_cols, "Action"]))
+        for r in rendered:
+            action = r["Action"]
+            if not args.no_trunc and len(action) > action_budget:
+                action = action[: action_budget - 1] + "…"
+            print(_join([r[c] for c in fixed_cols] + [action]))
+
+    OPEN_COLS = ["ID", "Issue", "Owner", "Status", "Opened", "Src", "Files", "Action"]
+    CLOSED_COLS = ["ID", "Issue", "Owner", "Opened", "Closed", "Files", "Action"]
+
+    if show_open and show_closed:
+        _render_table("Open", open_rows, OPEN_COLS)
+        print()
+        _render_table("Closed", closed_rows, CLOSED_COLS)
+    elif show_open:
+        _render_table("Open", open_rows, OPEN_COLS)
+    else:
+        _render_table("Closed", closed_rows, CLOSED_COLS)
     return 0
 
 
@@ -706,6 +717,7 @@ def cmd_update(args: argparse.Namespace, path: Path) -> int:
                 "Issue": cells.get("Issue", ""),
                 "Action": cells.get("Action", ""),
                 "Owner": cells.get("Owner", ""),
+                "Opened": cells.get("Opened", ""),
                 "Closed": today(),
                 "Files": cells.get("Files", ""),
                 "Notes": cells.get("Notes", ""),
