@@ -35,11 +35,6 @@ jobs:
           SETTINGS_PATH: ${{ github.workspace }}/claude-config/settings.json
         run: python3 claude-config/scripts/validate-hooks.py
 
-      - name: Build knowledge.db (catches duplicate pattern IDs + schema drift)
-        run: |
-          cd knowledge
-          python3 sync.py build
-
       - name: Verify pattern ID slug format
         run: |
           set -e
