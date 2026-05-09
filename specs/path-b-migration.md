@@ -96,12 +96,12 @@ Each decision was discussed explicitly with the user and locked in before this d
 | Why | Matches user's established sole-validator override of parallel-period gates (per session memory: Phase 6A.2 explicit "I do not want to wait a week"). Heavy test coverage required upfront in lieu of dual-run validation. Existing YAMLs archived to `_archived/` (not deleted) for emergency manual fallback. Rollback = `git revert` of the implementation PR. |
 | How to apply | Implementation PR scope: ~800-1200 LOC. Test coverage requirements specified in §13 (Acceptance criteria). |
 
-### Q7 — Phase 7.2 SSH bridge: separate follow-up
+### Q7 — Phase 7.2 SSH bridge: bundled into the big-bang PR
 
-| Decision | **Pulse v1 (in big-bang PR) is local-only. Pulse v2 (SSH support for jbox06 / et01 / spark / jns-server) is an immediate follow-up PR within ~1 week.** |
+| Decision | **Pulse ships with full SSH support in the big-bang PR.** Includes `lib/host_resolver.py`, SSH read with timeouts, ~5min cache layer, graceful unreachable handling, tests against jbox06/jns-server. **No separate v2 follow-up.** |
 |---|---|
-| Why | Splits scope: v1 is the architectural migration; v2 is host_resolver + SSH error handling + cache layer + tests. Each PR has a clean review surface. Until v2 lands, projects with `host: <non-local>` render with a `⚠ pending pulse v2 SSH support` placeholder gracefully. |
-| How to apply | Pulse v1 reads project frontmatter; if `host == get_host_name()` (or repo path is local), refreshes; otherwise emits `reachable: deferred-pulse-v2` and continues. Pulse v2 follows the design in `specs/cross-device-state.md` §"Phase 7.2 sketch". |
+| Why | Revised after Codex adversarial review (2026-05-08). Original plan separated v1 (local-only) and v2 (SSH); review flagged that retiring `dashboard/`+`review_session/` in v1 while pulse can't reach remote hosts creates a visibility gap during the v1→v2 window for any non-local project. User explicitly stated intent to add `jns-server` projects soon — making the gap not theoretical. Bundling avoids the cutover gap entirely; PR is larger (~1100-1450 LOC) but ships in one atomic unit with no fallback path needed. |
+| How to apply | Pulse reads project frontmatter; if repo path is local, reads directly. If repo lives on a configured remote (per `ssh_writes` in subscription file — see §8), reads via SSH. If the host is unreachable, the prior sidecar's `pulled_at` timestamp ages but other devices' sidecars still serve fresh data via vault sync. Implementation tracks the design specced in `specs/cross-device-state.md` §"Phase 7.2 sketch" — that doc's "v2 follow-up" framing is now superseded by this bundling. |
 
 ### Q8 — Subscription file format: vault-keyed dict
 
@@ -145,12 +145,12 @@ Each decision was discussed explicitly with the user and locked in before this d
 | Why | Overview is "what is this?" — read once per project. Daily review is "where are things right now?" — read every day. Mixing them adds visual clutter to the daily ritual. |
 | How to apply | Daily review template's Dataview queries pull only operational and git-state frontmatter fields. Overview-half content is structurally separated by the `---` rule and never queried by the daily review. |
 
-### Q13 — Git hygiene tracking: per-device frontmatter, simple rendering
+### Q13 — Git hygiene tracking: per-host sidecar files, simple rendering
 
-| Decision | **Pulse on each device collects git state for each subscribed project's repo and writes to `git_state.<this-hostname>` in the project's frontmatter (additive — preserves other devices' entries). The daily review's "Git — needs attention" section renders one line per non-clean project: `**project** · device · summary` (e.g. `**agents** · jns-mac · 3↑ · stale local: 1`). Empty section when everything is clean.** |
+| Decision | **Pulse on each device writes git state to a per-host sidecar file at `<vault>/Projects/_pulse/<project>--<hostname>.md` — never to the human-edited project note's frontmatter. Each pulse owns exactly one sidecar file per (project, host) pair. The daily review's "Git — needs attention" section iterates `_pulse/*.md` and renders one line per non-clean project: `**project** · device · summary`.** |
 |---|---|
-| Why | Underlying multi-device data is preserved (so a richer rendering can be added later if useful). The daily render is intentionally one-line-per-project so the user — or Claude — can scan it in a second and the line itself is an actionable string ("address this"). |
-| How to apply | See §6 for `git_state` schema and pulse commands. See §7 for the Daily review's "Git — needs attention" Dataview list block. The richer per-device-table rendering on a project page is a simple "Git" one-line summary in v1; expand only when needed. |
+| Why | Revised after Codex adversarial review (2026-05-08). Original plan had pulse write to `git_state.<hostname>` in shared project frontmatter; review flagged that even with per-host keys, the underlying `git pull → mutate file → push` flow can race across devices and produce YAML conflict markers in frontmatter that break Dataview rendering. Per-host sidecar files eliminate the shared-write surface entirely: each laptop owns one file per project; concurrent collision impossible. |
+| How to apply | See §6 for sidecar schema, single-writer-per-host convention, and Dataview-join queries. The human-edited project note holds focus/status/blockers/next_steps only; the operational half renders by `FLATTEN`-ing across that project's sidecars. |
 
 ---
 
@@ -255,20 +255,67 @@ Total time: ~30 minutes per onboarding once the pattern is documented.
 
 ---
 
-## Pulse design (v1 local-only)
+## Pulse design (single-PR with SSH bundled)
 
 ### Responsibilities
 
-1. For each subscribed project on each vault this device opens, refresh the corresponding `<vault>/Projects/<name>.md` frontmatter with current repo state.
+1. For each subscribed project on each vault this device opens, refresh the project's per-host sidecar file at `<vault>/Projects/_pulse/<project>--<hostname>.md`.
 2. Compute derived fields: `focus_drift_days`, `commits_24h`, `commits_7d`, `open_actions`, `open_issues`.
-3. Collect per-device git hygiene state into `git_state.<this-hostname>`.
-4. Render reports and digests via the same data.
+3. Read repo state — locally if `host` matches this device, via SSH if this device owns the remote host (per `ssh_writes` config), gracefully skip otherwise.
+4. Provide read commands (`pulse report`, `pulse digest`) and a `pulse audit` subcommand for vault-isolation hygiene.
 
-### Data shape (project frontmatter after pulse refresh)
+**Pulse never writes to the human-edited project note (`Projects/<name>.md`) — that file is owned by the user (or by `project` CLI's frontmatter mutations). Pulse owns one sidecar file per (project, host) it's responsible for; concurrent collision impossible because each pulse owns its own files.**
+
+### File layout (per vault)
+
+```
+<vault>/Projects/
+  agents.md                              ← human-edited only: focus, status, blockers, next_steps, open_questions
+                                          (pulse NEVER touches this file)
+  vital-app-a.md
+  _pulse/                                ← machine-written sidecars; one per (project, host)
+    agents--jns-mac.md                   ← jns-mac's pulse owns this file exclusively
+    vital-app-a--vitalai-laptop.md       ← vitalai-laptop's pulse owns this file
+    vital-app-a--jbox06.md               ← whichever device's `ssh_writes` claims jbox06 owns this file
+```
+
+Each laptop only writes the sidecars matching projects/hosts in its scope (see §8 for `ssh_writes` config). Sidecars sync across devices via vault git; each device sees other devices' sidecars even if it can't directly reach those hosts.
+
+### Sidecar schema (`<project>--<host>.md`)
 
 ```yaml
 ---
-# Manually edited (pulse never touches these)
+project: agents                            # which project this sidecar refers to
+host: jns-mac                              # which host's state this represents
+pulled_at: 2026-05-08T16:30:00Z            # when pulse last wrote this file
+reachable: true                            # false if SSH unreachable last attempt
+
+# Activity rollups
+last_commit_at: 2026-05-08T16:18:35Z
+last_commit_subject: "feat(dashboard,action): split open/closed sections"
+last_commit_sha: "8549609"
+commits_24h: 8
+commits_7d: 14
+open_actions: 1
+closed_actions_24h: 6
+open_issues: 14
+closed_issues_24h: 3
+
+# Git hygiene (this host's local clone)
+branch: main
+ahead_origin: 0
+behind_origin: 0
+dirty: false
+stale_local_branches: []
+unpushed_branches: []
+---
+*(file body unused — sidecars are pure frontmatter)*
+```
+
+### Project note schema (human-edited only)
+
+```yaml
+---
 project: agents
 host: jns-mac                      # which laptop owns the repo
 client: personal                   # personal | vital | tillamook | etc.
@@ -284,39 +331,9 @@ next_steps:
 open_questions:
   - "Should host_resolver cache live longer than 5 min?"
 
-# Pulse-managed (additive; rewritten on every refresh)
-last_commit_at: 2026-05-08T16:18:35Z
-last_commit_subject: "feat(dashboard,action): split open/closed sections"
-last_commit_sha: "8549609"
-commits_24h: 8
-commits_7d: 14
-open_actions: 1
-closed_actions_24h: 6
-open_issues: 14
-closed_issues_24h: 3
-focus_drift_days: 2                # computed: now - status_updated, in days
-pulse_at: 2026-05-08T16:30:00Z
-
-# Per-device git state (additive; preserves other devices' entries)
-git_state:
-  jns-mac:
-    pulled_at: 2026-05-08T16:30:00Z
-    branch: main
-    last_commit: "8549609 — feat(dashboard,action): split open/closed"
-    ahead_origin: 0
-    behind_origin: 0
-    dirty: false
-    stale_local_branches: []
-    unpushed_branches: []
-  vitalai-laptop:                  # written by THAT device's pulse
-    pulled_at: 2026-05-08T08:15:00Z
-    branch: feature/issue-201
-    last_commit: "c8f4d23 — wip: pool exhaustion fix"
-    ahead_origin: 3
-    behind_origin: 0
-    dirty: true
-    stale_local_branches: ["feature/issue-150-host-field"]
-    unpushed_branches: ["feature/issue-201"]
+# Computed by pulse on demand from sidecars (NOT written into this file):
+#   focus_drift_days, latest_pulse_at_any_host, etc.
+# Dataview queries derive these via FLATTEN on sidecar files.
 ---
 ```
 
@@ -367,22 +384,83 @@ pulse digest --window <daily|weekly|monthly|full>
 
 `pulse report` and `pulse digest` are pure-read commands (don't refresh). Refresh is explicit.
 
-### Failure modes (v1)
+### Failure modes
 
 | Mode | Behavior |
 |---|---|
-| Repo not found at expected path | Skip silently; mark `git_state.<host>: { reachable: false, reason: "no-clone" }` |
-| `gh` unauthenticated | Skip GH issue counts; project page renders without those fields |
-| `git` command timeout (>5s) | Skip that field; preserve previous frontmatter value; mark `pulse_at` with the partial-state time |
-| ACTIONS.md missing or malformed | Mark `actions: error` in frontmatter; preserve other fields |
-| Concurrent vault sync write | Obsidian Git plugin's conflict handler; rare since pulse writes are tiny additive frontmatter mutations |
+| Repo not found at local path | Skip silently; sidecar gets `reachable: false, reason: "no-clone"` |
+| SSH host unreachable (off-LAN, tunnel down) | Sidecar's `pulled_at` ages; `reachable: false` with reason; existing data preserved on disk so other devices' Dataview still renders the last-known-good values |
+| `gh` unauthenticated | Skip GH issue counts; sidecar omits `open_issues`/`closed_issues_24h` |
+| `git` command timeout (>5s) | Skip that field; sidecar `pulled_at` gets the partial-state time |
+| ACTIONS.md missing or malformed | Sidecar's `open_actions: -1` flag value; rendering shows "—" |
+| Concurrent collision on a sidecar | **Impossible by design** — single-writer-per-host convention enforced by `ssh_writes` config (see §8) |
 
-### Unreachable hosts (placeholder until pulse v2)
+### SSH host resolution
 
-For projects with `host:` other than `get_host_name()`:
-- Pulse v1 emits `git_state.<remote-host>: { reachable: deferred-pulse-v2 }`.
-- Project page renders "⚠ pending pulse v2 SSH support — see specs/cross-device-state.md §Phase 7.2".
-- No data lost; v2 fills it in.
+Pulse uses `lib/host_resolver.py` for remote reads. The module:
+- Reads each device's `ssh_writes` list (subscription file, see §8) to know which hosts this laptop is responsible for.
+- For each owned remote host, runs the same git/gh commands via `ssh <host>`.
+- Honors `~/.ssh/config` aliases (handles Cloudflare tunnels via existing `jns-remote` alias, etc.).
+- 5-second connect timeout per host; 10-second per command.
+- ~5min in-process cache to avoid SSH cost on rapid successive `pulse refresh` calls.
+- On unreachable host: writes sidecar with `reachable: false, last_reachable_at: <prior pulled_at>` so the daily report can show "stale data: jbox06 unreachable since 2h ago" instead of dropping the project from view.
+
+---
+
+## Client isolation guardrails
+
+Confidentiality cannot rely on convention alone. The vault-per-client topology is the foundation; these mechanisms are the enforcement layer that prevents the "wrong preset / wrong vault / wrong remote" class of leak. Added in response to Codex adversarial review (2026-05-08, Finding 4).
+
+### Mandatory mechanisms (must-have in v1)
+
+| # | Mechanism | LOC est. | What it prevents |
+|---|---|---|---|
+| 1 | **Email-digest preset → vault validation** | ~20 | Before sending, pulse iterates every project mentioned in the rendered digest; fails if any project's `client:` frontmatter doesn't match the preset's expected `client`. Refuses to send with an explicit error pointing at the offending project. |
+| 2 | **`pulse digest --all-vaults` jns-mac-only** | ~5 | Pulse on a non-`jns-mac` device refuses the `--all-vaults` flag with an error. Hardcoded check via `get_host_name() == "jns-mac"`. Prevents accidentally running a cross-vault digest from a client laptop. |
+| 3 | **Pre-send confirmation context line** | ~10 | The interactive y/e/s/n prompt prepends a one-liner: `Sending to ai-coder@vital-enterprises.com (vault: Vital-Work-Vault, project filter: vital-app-a, owner filter: Paul). Confirm?` Visible context per send eliminates "wrong-recipient-by-tab-completion" errors. |
+| 4 | **Per-vault git remote allowlist** | ~10 (in bootstrap) | Each vault's git config lists exactly one valid remote URL. `bootstrap-laptop.sh` enforces; manual `git remote add` to a different account on a vault is detected by `pulse audit` and flagged. Prevents accidental `git push <other-account>:<repo>`. |
+
+Total mandatory LOC: ~45.
+
+### Should-have mechanisms (v1 scope)
+
+| # | Mechanism | LOC est. | Value |
+|---|---|---|---|
+| 5 | **`pulse audit` subcommand** | ~50 | Scans all vaults; verifies every project note in vault X has `client: <X>`; verifies every sidecar's `project:` matches its filename; verifies vault git remotes are on the allowlist. Run on demand and via cron weekly. Catches drift over time. |
+| 6 | **Vault off-boarding script** | ~30 | `pulse vault offboard --vault <name>` moves vault to `~/vaults/_archived/<name>-<date>/`, removes git remote, removes subscription entries, removes digest preset, removes Templater registrations. Single command vs multi-step manual procedure. |
+
+Total should-have LOC: ~80.
+
+### Policy (no code; documented in the spec body)
+
+| # | Policy |
+|---|---|
+| 7 | **FileVault / encrypted-at-rest required.** Any laptop hosting any vault — personal or client — must have full-disk encryption enabled. Documented as a vault prerequisite. Bootstrap script checks (`fdesetup status` on macOS; warning if disabled). On WSL, BitLocker on the Windows volume hosting the vault. |
+
+### Total cost: ~125 LOC + 1 policy line
+
+The mechanisms compose to make a leakage event require multiple simultaneous failures (wrong preset name + wrong project frontmatter + a clean audit + a misconfigured remote — all four). Independently each is unlikely; together, near-zero.
+
+### Practical example: guardrail (1) preventing a typo error
+
+```bash
+$ email-digest preset paul-jason
+[generated preview at ~/.claude/digests/draft/paul-jason-2026-05-08.md]
+
+ERROR: digest scope mismatch.
+  preset paul-jason expects client = "personal"
+  but the rendered digest includes:
+    - project "vital-app-a" with client = "vital"
+
+Likely causes:
+  (a) project vital-app-a's client: field is set incorrectly
+  (b) you meant a different preset (try `email-digest preset list`)
+
+Run `pulse audit --vault Vital-Work-Vault` to investigate (a).
+Refusing to send.
+```
+
+That stops the wrong-recipient class of error cold without the user having to remember anything.
 
 ---
 
@@ -446,33 +524,29 @@ git_state: {}
 
 ## Status (live)
 
-> Last pulse: `<%- tp.frontmatter.pulse_at %>` · Reachable: `<%- tp.frontmatter.git_state[tp.user.host()] ? "✓" : "⚠" %>`
-
 ```dataview
 TABLE WITHOUT ID
   string(this.status).toUpperCase() as "Status",
   this.host as "Host",
-  this.focus as "Focus",
-  string(this.focus_drift_days) + "d" as "Focus Drift"
+  this.focus as "Focus"
 FROM ""
 WHERE file.name = this.file.name
 ```
 
-## Recent activity (7d)
+## Activity (rolled up across all hosts that pulse this project)
 
 ```dataview
-TABLE commits_7d as "Commits", closed_actions_24h as "Closed (24h)", open_actions as "Open Actions"
-FROM ""
-WHERE file.name = this.file.name
+TABLE WITHOUT ID
+  host as "Host",
+  pulled_at as "Last Pulse",
+  last_commit_subject as "Last Commit",
+  commits_7d as "Commits 7d",
+  open_actions as "Open A",
+  open_issues as "Open I"
+FROM "Projects/_pulse"
+WHERE project = this.project
+SORT pulled_at DESC
 ```
-
-## Open work
-
-### Open actions
-*(rendered from <repo>/ACTIONS.md by pulse — see project frontmatter)*
-
-### Open GitHub issues
-*(count surfaced via pulse; full list via `gh issue list -R <slug>`)*
 
 ## Decisions linked
 
@@ -483,8 +557,19 @@ SORT created DESC
 LIMIT 5
 ```
 
-## Git
-*(this device's branch + ahead/behind/dirty/stale, one-line summary)*
+## Git on this device
+
+```dataview
+LIST WITHOUT ID
+  branch + (dirty ? " · dirty" : "") +
+    (ahead_origin > 0 ? " · " + string(ahead_origin) + "↑" : "") +
+    (behind_origin > 0 ? " · " + string(behind_origin) + "↓" : "") +
+    (length(stale_local_branches) > 0 ? " · stale local: " + length(stale_local_branches) : "")
+FROM "Projects/_pulse"
+WHERE project = this.project AND host = "<%= this_host %>"
+```
+
+(Multi-device git state visible in the Activity table above; the "needs attention" rollup across all projects + devices lives in the Daily review.)
 
 ## Notes / journal
 *(your free-form area)*
@@ -538,29 +623,38 @@ created_at: <%= today %>
 
 ### Daily review template (`~/agents/templates/obsidian/Daily.md`)
 
-Auto-fires at 7am via launchd. Fully auto-rendered; user edits the bottom Notes section.
+Auto-fires at 7am via launchd. Fully auto-rendered; user edits the bottom Notes section. Queries scope to the current vault automatically (Dataview's `FROM "Projects"` resolves within the vault hosting the daily note).
 
 ```markdown
 # <%= today %>
 
-> Generated <%= now %> · last pulse: <%- tp.user.last_pulse() %>
+> Generated <%= now %>
 
 ## ⚠ Focus may be stale (>= 5 days)
 
 ```dataview
-TABLE focus, focus_drift_days as "Days", commits_7d as "Commits since"
+TABLE focus, (date(today) - date(status_updated)).days as "Days", status_updated as "Set"
 FROM "Projects"
-WHERE status = "active" AND focus_drift_days >= 5
-SORT focus_drift_days DESC
+WHERE status = "active" AND (date(today) - date(status_updated)).days >= 5
+SORT (date(today) - date(status_updated)).days DESC
 ```
 
-## Active projects — recent activity (24h)
+## Active projects — recent activity (latest pulse, 24h rollup)
+
+For each active project in this vault, show the freshest sidecar (any host).
 
 ```dataview
-TABLE host, focus, last_commit_subject as "Last commit", commits_24h as "↑24h", open_actions as "Open"
-FROM "Projects"
-WHERE status = "active" AND contains(this.subscribed, file.name)
-SORT last_commit_at DESC
+TABLE WITHOUT ID
+  project as "Project",
+  host as "Host",
+  last_commit_subject as "Last commit",
+  commits_24h as "↑24h",
+  open_actions as "Open A",
+  open_issues as "Open I"
+FROM "Projects/_pulse"
+SORT pulled_at DESC
+GROUP BY project
+LIMIT 10
 ```
 
 ## Today's tasks
@@ -572,11 +666,16 @@ sort by priority, due
 
 ## Yesterday's activity
 
+One line per project with activity (any host).
+
 ```dataview
 LIST WITHOUT ID
-  "**" + file.link + "** — " + closed_actions_24h + " actions closed, " + commits_24h + " commits"
-FROM "Projects"
-WHERE closed_actions_24h > 0 OR commits_24h > 0
+  "**" + project + "** · " + host + " — " + 
+    string(closed_actions_24h) + " actions closed, " + 
+    string(commits_24h) + " commits"
+FROM "Projects/_pulse"
+WHERE (closed_actions_24h > 0 OR commits_24h > 0) AND pulled_at >= dateadd(date(today), -1, "days")
+SORT pulled_at DESC
 ```
 
 ## Decisions this week
@@ -589,33 +688,30 @@ SORT created_at DESC
 
 ## Git — needs attention
 
-One line per project that's not clean on the device that last touched it. Format: `**project** · device · summary` so you can hand the line to Claude as-is ("clean these up").
+One line per (project, host) sidecar that's not clean. Format: `**project** · host · summary` so you can hand the line to Claude as-is ("clean these up").
 
 ```dataview
 LIST WITHOUT ID
-  "**" + file.link + "** · " + device + " · " +
-    (state.dirty ? "dirty · " : "") +
-    (state.ahead_origin > 0 ? string(state.ahead_origin) + "↑ · " : "") +
-    (state.behind_origin > 0 ? string(state.behind_origin) + "↓ · " : "") +
-    (length(state.stale_local_branches) > 0 ? "stale local: " + length(state.stale_local_branches) : "")
-FROM "Projects"
-FLATTEN this.git_state as state, key(this.git_state) as device
-WHERE state.dirty = true
-   OR state.ahead_origin > 0
-   OR state.behind_origin > 0
-   OR length(state.stale_local_branches) > 0
-SORT state.pulled_at DESC
+  "**" + project + "** · " + host + " · " +
+    (dirty ? "dirty · " : "") +
+    (ahead_origin > 0 ? string(ahead_origin) + "↑ · " : "") +
+    (behind_origin > 0 ? string(behind_origin) + "↓ · " : "") +
+    (length(stale_local_branches) > 0 ? "stale local: " + length(stale_local_branches) : "")
+FROM "Projects/_pulse"
+WHERE dirty = true OR ahead_origin > 0 OR behind_origin > 0 OR length(stale_local_branches) > 0
+SORT pulled_at DESC
 ```
 
-When this section is empty, all subscribed projects are clean on every device that's pulsed recently. When a line appears, you can copy-paste it into Claude with "address this" and the agent has enough to act.
+When empty, every project is clean on every device that's pulsed recently. When a line appears, copy-paste it into Claude with "address this" and the agent has enough to act.
 
-## Reachability (last pulse)
+## Reachability — sidecars stale or unreachable
 
 ```dataview
-TABLE pulse_at, host
-FROM "Projects"
-WHERE status = "active" AND contains(this.subscribed, file.name)
-SORT pulse_at DESC
+LIST WITHOUT ID
+  "**" + project + "** · " + host + " · " +
+    (reachable = false ? "unreachable since " + last_reachable_at : "stale: " + pulled_at)
+FROM "Projects/_pulse"
+WHERE reachable = false OR pulled_at < dateadd(date(today), -1, "days")
 ```
 
 ---
@@ -642,19 +738,38 @@ Bootstrap script installs these via the Obsidian community-plugins API.
 
 ```json
 {
-  "JNS-Personal-Vault": ["agents", "buddy", "paul-jason"],
-  "Vital-Work-Vault": ["vital-app-a"],
-  "Tillamook-Work-Vault": ["tillamook-app-x"]
+  "JNS-Personal-Vault": {
+    "subscribed": ["agents", "buddy", "paul-jason"],
+    "ssh_writes": ["jns-server"]
+  },
+  "Vital-Work-Vault": {
+    "subscribed": ["vital-app-a"],
+    "ssh_writes": ["jbox06", "et01", "spark"]
+  },
+  "Tillamook-Work-Vault": {
+    "subscribed": ["tillamook-app-x"],
+    "ssh_writes": []
+  }
 }
 ```
 
-**Per-machine** (not synced; each device has its own scope).
+**Two fields per vault:**
+- `subscribed`: which projects pulse refreshes for this vault on this device. Drives sidecar refresh scope.
+- `ssh_writes`: which remote hosts THIS device is the canonical writer for. Implements the single-writer-per-host convention from Finding 3 — prevents two laptops from racing on `_pulse/<project>--<host>.md` for the same remote host. Per-device declaration; if no device claims a host, that host's sidecar simply doesn't get refreshed.
 
-**Backwards compatibility**: if pulse encounters a legacy `{"subscribed": [...]}` shape on first read, it auto-rewrites as `{"JNS-Personal-Vault": [...]}` on next write.
+**Per-machine** (not synced; each device has its own scope and its own SSH-write claims).
 
-**Single-vault devices** (e.g. `vitalai-laptop`): the JSON may have other vault keys (left over from sync of subscription edits made on jns-mac); pulse only consults the active vault key. No leakage.
+**Backwards compatibility**: if pulse encounters a legacy `{"subscribed": [...]}` flat shape on first read, it auto-rewrites as the new vault-keyed dict format with `ssh_writes: []` defaulted. Migration runs once; idempotent.
 
-**Mutation**: `project <name> --subscribe` (vault implied by current cwd or active Obsidian vault); `project <name> --unsubscribe` to remove. The `dashboard-subscriptions.json` is the source of truth.
+**Single-vault devices** (e.g. `vitalai-laptop`): the JSON may have other vault keys; pulse only consults the active vault's key. No cross-vault leakage.
+
+**Mutation**:
+- `project <name> --subscribe` (vault implied by cwd or active Obsidian vault) — adds to `subscribed`
+- `project <name> --unsubscribe` — removes from `subscribed`
+- `project --claim-ssh-host <vault> <hostname>` — adds to `ssh_writes`
+- `project --release-ssh-host <vault> <hostname>` — removes from `ssh_writes`
+
+`dashboard-subscriptions.json` is the source of truth.
 
 ---
 
@@ -743,7 +858,7 @@ email-digest sent --since <d>             # list recently sent digests
 
 ---
 
-## Migration plan (big-bang single PR)
+## Migration plan (big-bang single PR with SSH bundled)
 
 ### Implementation PR scope
 
@@ -751,21 +866,24 @@ email-digest sent --since <d>             # list recently sent digests
 specs/path-b-migration.md                # this spec (already merged)
 
 # New
-~/agents/pulse/cli.py                    # pulse v1 (local-only)
+~/agents/pulse/cli.py                    # full pulse with SSH support
 ~/agents/pulse/tests/test_cli.py
+~/agents/lib/host_resolver.py            # SSH read + cache
+~/agents/lib/tests/test_host_resolver.py
 ~/agents/templates/obsidian/Project.md
 ~/agents/templates/obsidian/Decision.md
 ~/agents/templates/obsidian/Daily.md
 ~/agents/templates/sync-templates.sh
 ~/agents/bootstrap-laptop.sh             # one-time per device
+~/agents/scripts/migration-manifest.py   # pre-flight dry-run; outputs manifest for PR review
 ~/.claude/digest-config.yaml.example     # template; user copies + edits
 
 # Reshaped
-~/agents/project/cli.py                  # mutate Obsidian frontmatter
+~/agents/project/cli.py                  # mutate Obsidian frontmatter; new --claim-ssh-host / --release-ssh-host flags
 ~/agents/project/tests/test_cli.py       # update for new I/O
 ~/agents/decision/cli.py                 # mutate Obsidian frontmatter
 ~/agents/decision/tests/test_cli.py      # update for new I/O
-~/agents/email-digest/cli.py             # add preset + interactive flow
+~/agents/email-digest/cli.py             # add preset + interactive flow + vault validation guardrail
 
 # Archived (git mv to _archived/)
 ~/agents/dashboard/                      # retire entirely
@@ -777,33 +895,53 @@ specs/path-b-migration.md                # this spec (already merged)
 ~/agents/CLAUDE.md                       # reflect new architecture
 ~/agents/PLAN.md                         # mark Path B complete
 ~/agents/specs/knowledge-surfaces.md     # update for projects/decisions migration
-~/agents/specs/cross-device-state.md     # update Phase 7.2 status (now pulse v2)
-~/agents/lib/project_resolver.py         # legacy subscription auto-migrate
+~/agents/specs/cross-device-state.md     # mark Phase 7.2 superseded by pulse with SSH bundled
+~/agents/lib/project_resolver.py         # legacy subscription auto-migrate to vault-keyed dict + ssh_writes
 ```
 
 ### Migration steps (in PR order)
 
-1. **Branch** from `origin/main`. Rename to `feature/issue-XXX-path-b-implementation`.
-2. **Vault scaffold** for JNS-Personal-Vault (manual: `mkdir ~/vaults/jns-personal && obsidian://createVault`). Other vaults follow per-engagement.
-3. **One-shot script** converts `knowledge/projects/*.yaml` → `<vault>/Projects/*.md` (frontmatter + body skeleton). Body's overview half left blank for user / Claude to populate; operational half includes Dataview placeholders.
-4. **Archive** old YAMLs: `git mv knowledge/projects _archived/projects-pre-pathb`, `git mv knowledge/decisions _archived/decisions-pre-pathb`.
-5. **New code**: pulse v1 + new email-digest preset/interactive flow + reshaped project/decision CLIs.
-6. **Templates**: copy templates to `~/agents/templates/obsidian/`. Run `sync-templates.sh` to populate vaults.
-7. **Bootstrap**: write `bootstrap-laptop.sh` for one-time device setup.
-8. **Archive retired CLIs**: `git mv dashboard _archived/dashboard`, `git mv review_session _archived/review_session`.
-9. **Update docs**: CLAUDE.md, PLAN.md, knowledge-surfaces.md, cross-device-state.md.
-10. **Tests**: full suite green (project + action + email-digest + pulse). Smoke against real data on jns-mac.
-11. **Open PR**, code review, merge.
+1. **Branch** from `origin/main`. Name: `feature/issue-XXX-path-b-implementation`.
+2. **Pre-flight dry-run** — run `migration-manifest.py` to generate `_archived/migration-manifest-<date>.md`. Manifest shows source-YAML → destination-Obsidian mapping for every project, field-by-field. **Commit the manifest in the implementation PR** so reviewers can inspect mappings before merge. Catches bad mappings before they're applied.
+3. **Vault scaffold** for JNS-Personal-Vault (manual: `mkdir ~/vaults/jns-personal && obsidian://createVault`). Other vaults follow per-engagement.
+4. **One-shot migration** converts `knowledge/projects/*.yaml` → `<vault>/Projects/*.md` per the manifest. Body's overview half is the minimal starter (Purpose / Stack / Repository / optional Client); auto-populated from each project's `<repo>/CLAUDE.md` if present. Operational half references the `_pulse/` sidecar files (which don't exist yet — pulse creates them on first run).
+5. **Archive** old YAMLs: `git mv knowledge/projects _archived/projects-pre-pathb`, `git mv knowledge/decisions _archived/decisions-pre-pathb`.
+6. **New code**: pulse with SSH (host_resolver + cache + tests) + new email-digest preset/interactive flow with vault validation + reshaped project/decision CLIs + `pulse audit` subcommand + vault off-boarding script.
+7. **Templates**: copy templates to `~/agents/templates/obsidian/`. Run `sync-templates.sh` to populate vaults.
+8. **Bootstrap**: write `bootstrap-laptop.sh` for one-time device setup (handles macOS, Linux, WSL with symlink; FileVault check).
+9. **Archive retired CLIs**: `git mv dashboard _archived/dashboard`, `git mv review_session _archived/review_session`.
+10. **Update docs**: CLAUDE.md, PLAN.md, knowledge-surfaces.md, cross-device-state.md (mark §Phase 7.2 superseded).
+11. **Tests**: full suite green (project + action + email-digest + pulse + lib/host_resolver). Smoke pulse against real data on jns-mac (local) AND against jns-server (Cloudflare-tunneled SSH) to verify SSH path. Smoke `pulse audit` against current vaults.
+12. **Open PR**, code review (manifest is the centerpiece), merge.
 
 ### Rollback procedure
 
-The implementation PR is a single squash-merge commit. Rollback = `git revert <commit-sha>`. After revert:
-- YAMLs restored from `_archived/`
-- Retired CLIs restored from `_archived/`
-- Existing per-repo ACTIONS.md still works (action CLI unchanged)
-- Vault data is preserved (lives outside the agents repo, in `~/vaults/`)
+Big-bang means a single squash-merge commit. Recovery has three layers:
 
-Loss on revert: pulse-populated frontmatter on Obsidian project notes is now stale; manual cleanup or re-run pulse after fix-forward.
+**Layer 1: agents repo state (`git revert`)**
+```bash
+git -C ~/agents revert <implementation-commit-sha>
+```
+This restores: `knowledge/projects/*.yaml`, `knowledge/decisions/*.yaml`, the retired CLIs (`dashboard/`, `review_session/`), and the prior `lib/project_resolver.py`. Existing per-repo `ACTIONS.md` files unchanged.
+
+**Layer 2: vault state (manual)**
+Vaults at `~/vaults/<name>/` live outside the agents repo and are not affected by `git revert`. To remove them:
+```bash
+mkdir -p ~/vaults/_rollback-$(date +%Y-%m-%d)
+mv ~/vaults/jns-personal ~/vaults/_rollback-$(date +%Y-%m-%d)/jns-personal
+# repeat for each vault that was created during the migration
+```
+The vault directories are preserved (not deleted) so any hand-edits made during the rollback window aren't lost.
+
+**Layer 3: subscription file (manual)**
+```bash
+cp ~/agents/_archived/dashboard-subscriptions.json ~/.claude/dashboard-subscriptions.json
+```
+Restores the legacy flat-list format that the now-restored `lib/project_resolver.py` expects.
+
+After all three layers: restart Obsidian (it will note the missing vaults; that's expected). Confirm `pytest project/ action/ decision/` passes against the reverted state. The original `dashboard` and `review-session` CLIs work as before.
+
+**Rollback isn't free** — it discards any focus updates / decisions / notes you made in Obsidian during the migration window. The pre-flight manifest is the primary safety mechanism; rollback is the secondary safety net for catastrophic bugs.
 
 ---
 
@@ -811,7 +949,6 @@ Loss on revert: pulse-populated frontmatter on Obsidian project notes is now sta
 
 | Item | Reason |
 |---|---|
-| **Pulse v2 SSH bridge** | Separate PR within ~1 week of implementation PR (Q7). Spec for SSH support already exists in `cross-device-state.md` §Phase 7.2. |
 | **iPad / iPhone sync** | Requires Obsidian Sync ($96/yr); deferred until mobile capture friction is felt. v1 is desktop-only via Obsidian Git plugin. |
 | **A-020 SessionStart → YAML pattern reader** | Independent piece of work (specs/knowledge-surfaces.md follow-up); doesn't depend on Path B. |
 | **Migrating existing 9 decisions** | Archived only; not migrated (Q9). Old decisions stay in `_archived/decisions-pre-pathb/`. |
@@ -819,6 +956,8 @@ Loss on revert: pulse-populated frontmatter on Obsidian project notes is now sta
 | **Auto-emailing on a schedule** | v1 is manual trigger only with review-before-send (Q10). Cron-based scheduling can be added later. |
 | **Obsidian Sync purchase** | User chose git backup for v1; revisit when iPad capture is wanted. |
 | **Auto-update GH issue ↔ action linkage** | Out of scope; remains a manual `--issue` flag on `action --new`. Could be a follow-up if the gap is felt. |
+| **Post-merge migration validation script** | Considered (Codex Finding 5); rejected as low-ROI for a one-shot migration. Pre-flight manifest is sufficient. |
+| **Scripted vault rollback** | Considered (Codex Finding 5); rejected as premature. Manual rollback procedure is documented; if rollback ever needed, the manual steps are 5 lines. |
 
 ---
 
@@ -826,66 +965,95 @@ Loss on revert: pulse-populated frontmatter on Obsidian project notes is now sta
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Pulse v1 has a bug that scrambles frontmatter | Medium | Low (frontmatter is regenerable; body is user-edited and preserved) | Pulse writes are atomic (tmpfile + os.replace); test coverage on additive frontmatter merging; manual `pulse refresh --project X` in case |
-| Obsidian Git plugin merge conflict on a project frontmatter | Low | Medium (could lose a focus update) | Pulse mutates additively (one device writes one `git_state.<host>:` key; other devices preserved); user-edited fields rarely change concurrently |
-| Migration script misformats a project YAML → Obsidian markdown | Low | Medium | Spec'd in §"Migration steps"; one-shot script tested on copy of YAMLs; easy fix-forward |
+| Pulse has a bug that scrambles a sidecar | Medium | Low (sidecar is regenerable on next refresh; the human-edited project note is untouched) | Pulse writes are atomic (tmpfile + os.replace); each pulse owns its own sidecar files (no shared writes); test coverage on the sidecar-write path |
+| Two devices both claim `ssh_writes` on the same host | Low | Low (sidecar gets overwritten by last writer) | `pulse audit` flags duplicate `ssh_writes` claims across vaults; documented "single-writer-per-host" convention; spec §8 calls this out |
+| Migration script misformats a project YAML → Obsidian markdown | Low | Medium | Pre-flight manifest committed in PR for review BEFORE merge (Codex Finding 5); reviewers see source→destination mapping field-by-field; one-shot script tested on copy of YAMLs |
 | Templater + Dataview update breaks a query | Medium | Low (queries fail silently or render empty) | Pin plugin versions; document upgrade procedure |
-| User accidentally types client work into wrong vault | Low | High (confidentiality) | Vault status visible in Obsidian title bar; templates display vault name in note frontmatter |
+| User accidentally sends a client digest to the wrong recipient | Low | **High (confidentiality)** | Email-digest preset → vault validation refuses to send if any project's `client:` doesn't match preset (Codex Finding 4 / spec §6.5 mechanism 1); pre-send confirmation context line; `pulse audit` weekly catches drift |
+| User accidentally types client work into wrong vault | Low | High (confidentiality) | Vault title bar; preset name; `pulse audit` flags client-mismatch projects; FileVault-at-rest reduces blast radius if a laptop is lost |
+| Wrong git remote on a vault → push to wrong account | Low | High | Per-vault git remote allowlist enforced in bootstrap (spec §6.5 mechanism 4); `pulse audit` flags off-allowlist remotes |
 | WSL symlink across `/mnt/c/` boundary breaks | Low | Medium | Bootstrap script tests symlink at install time; documented troubleshooting steps |
-| pulse v1 + git hygiene queries are slow on large vaults | Low | Low | Vault size is small (10s of project notes); negligible |
+| Vault git plugin merge conflict (concurrent user edit on focus from two laptops) | Low | Medium (could lose a focus update) | Single human writer per moment; Obsidian Git plugin's conflict UI handles the rare collision; spec §6 separates pulse-written sidecars from human-written project note so machine state never collides |
+| Pulse + git hygiene queries are slow on large vaults | Low | Low | Vault size is small (10s of project notes); Dataview FLATTEN over `_pulse/` is fast under 100 sidecars |
 
 ### Off-boarding flow (data preservation)
 
-When a client engagement ends:
-1. Disable Obsidian Git on client laptop for that vault.
-2. Move vault on jns-mac to `~/vaults/_archived/<client>-<date>/`.
-3. Mark frozen: `git tag <client>-final-<date>` on the vault repo.
-4. Remove subscription entries.
-5. Optional: delete client laptop's local vault per client policy.
+Use the off-boarding script (spec §6.5 mechanism 6):
+```bash
+pulse vault offboard --vault <name>
+```
+Which executes:
+1. Disable Obsidian Git plugin on this device for that vault.
+2. Move vault to `~/vaults/_archived/<vault-name>-<date>/`.
+3. `git tag <vault>-final-<date>` on the archived vault repo.
+4. Remove vault entries from `~/.claude/dashboard-subscriptions.json` and `~/.claude/digest-config.yaml`.
+5. Print follow-up checklist: which other devices need to repeat steps 1-2; whether to delete the GitHub remote.
+
+Manual fallback if the script isn't available: same five steps, executed by hand.
 
 ---
 
 ## Acceptance criteria
 
-For the **implementation PR** that follows:
+For the **implementation PR**:
 
-- [ ] `~/agents/pulse/cli.py` exists with `refresh`, `report`, `digest` subcommands
-- [ ] `pulse refresh` updates project frontmatter with the schema in §6 (last_commit, commits_24h/7d, open_actions, open_issues, focus_drift_days, git_state.<host>)
-- [ ] Templater templates exist at `~/agents/templates/obsidian/{Project,Decision,Daily}.md`
-- [ ] `~/agents/templates/sync-templates.sh` copies masters into each vault's `_templates/`
-- [ ] `bootstrap-laptop.sh` covers macOS, native Linux, and WSL (with symlink for the latter)
-- [ ] `project --focus`, `--status`, `--blocker`, `--unblock`, `--next`, `--done`, `--question`, `--unquestion`, `--subscribe`, `--unsubscribe` all reshape to mutate Obsidian frontmatter
+### Pre-flight
+- [ ] `~/agents/scripts/migration-manifest.py` exists; running it produces a markdown manifest at `_archived/migration-manifest-<date>.md`
+- [ ] The manifest is committed in the implementation PR for reviewer inspection BEFORE merge
+
+### Code present
+- [ ] `~/agents/pulse/cli.py` with `refresh`, `report`, `digest`, `audit` subcommands
+- [ ] `~/agents/lib/host_resolver.py` with `is_reachable`, `read_remote`, ~5min cache
+- [ ] `~/agents/templates/obsidian/{Project,Decision,Daily}.md` exist
+- [ ] `~/agents/templates/sync-templates.sh` exists and works
+- [ ] `~/agents/bootstrap-laptop.sh` exists (macOS / Linux / WSL — with symlink + FileVault check on macOS)
+- [ ] `~/agents/scripts/vault-offboard.sh` (or equivalent `pulse vault offboard` subcommand) exists
+
+### Behavior
+- [ ] `pulse refresh` writes a sidecar at `<vault>/Projects/_pulse/<project>--<host>.md` per (project, host) it owns
+- [ ] Pulse never modifies the human-edited project note (`<vault>/Projects/<name>.md`)
+- [ ] Pulse SSH-reads remote hosts listed in this device's `ssh_writes` config; gracefully marks unreachable with `reachable: false, last_reachable_at: <prior>` when SSH fails
+- [ ] `project --focus`, `--status`, `--blocker`, `--unblock`, `--next`, `--done`, `--question`, `--unquestion`, `--subscribe`, `--unsubscribe`, `--claim-ssh-host`, `--release-ssh-host` all reshape to mutate Obsidian frontmatter
 - [ ] `decision --new`, `--outcome`, `--add-pattern`, `--add-pr`, `--add-issue`, `--add-related` all reshape to mutate Obsidian frontmatter
 - [ ] `email-digest preset <name>` interactive flow (y/e/s/n) works end-to-end against Microsoft Graph
+- [ ] `email-digest preset` rejects send when any project's `client:` doesn't match the preset's expected client (Codex Finding 4 / spec §6.5 mechanism 1)
+- [ ] `pulse digest --all-vaults` refuses to run on a non-`jns-mac` device with an explicit error
+- [ ] `pulse audit` scans all vaults; flags client-mismatch projects, sidecar/filename mismatches, off-allowlist git remotes
 - [ ] `~/.claude/digest-config.yaml.example` shipped with paul-jason + personal-archive presets
-- [ ] Existing 7 project YAMLs migrated to `<vault>/Projects/<name>.md`
-- [ ] Existing 9 decision YAMLs archived to `_archived/decisions-pre-pathb/`
+
+### Migration
+- [ ] Existing 7 project YAMLs migrated to `<vault>/Projects/<name>.md` per the manifest
+- [ ] Existing 9 decision YAMLs archived to `_archived/decisions-pre-pathb/` (NOT migrated; per Q9)
 - [ ] `dashboard/` and `review_session/` archived to `_archived/`
+- [ ] Subscription file auto-migrates from legacy `{"subscribed": [...]}` to `{<vault>: {subscribed: [...], ssh_writes: [...]}}` on first write
+
+### Smoke
+- [ ] Daily review renders on jns-mac with the agents project showing live data from sidecar files
+- [ ] `email-digest preset paul-jason` previews correctly and sends successfully (test mode)
+- [ ] `pulse refresh` populates `_pulse/agents--jns-mac.md` correctly (branch / dirty / ahead / behind / stale / commits_7d / open_actions / open_issues)
+- [ ] `pulse refresh` SSH-reads jns-server (Cloudflare-tunneled host) and writes `_pulse/agents--jns-server.md` (smoke test for SSH path)
+- [ ] `pulse audit` returns clean against current vaults
+- [ ] No leaked data — `~/.claude/dashboard-subscriptions.json` content as expected; no rogue files in any vault
+
+### Documentation
 - [ ] CLAUDE.md, PLAN.md, knowledge-surfaces.md, cross-device-state.md updated
-- [ ] All tests green: `pytest project/ action/ decision/ pulse/ email-digest/ -q`
-- [ ] Smoke: full daily-review render on jns-mac with the agents project showing live data
-- [ ] Smoke: `email-digest preset paul-jason` previews and (test mode) sends successfully
-- [ ] Smoke: `git_state.jns-mac` populated correctly with current branch / dirty / ahead / behind / stale
-- [ ] Subscription file auto-migrates from legacy `{"subscribed": [...]}` to `{"JNS-Personal-Vault": [...]}` on first write
-- [ ] No leaked data — `~/.claude/dashboard-subscriptions.json` content unchanged otherwise; no rogue files in any vault
-
-For the **pulse v2 PR** (separate, within ~1 week):
-
-- [ ] `lib/host_resolver.py` exists per `cross-device-state.md` §Phase 7.2 sketch
-- [ ] Pulse SSH-reads project state from non-`get_host_name()` hosts
-- [ ] Cache layer (~5 min TTL) prevents per-render SSH cost
-- [ ] Graceful degradation when host unreachable (renders placeholder, doesn't crash)
-- [ ] Per-device `git_state.<remote-host>` populated correctly via SSH
-- [ ] Tests cover: reachable, unreachable, timeout, malformed config
+- [ ] `cross-device-state.md` §Phase 7.2 marked superseded by pulse with SSH bundled into Path B
+- [ ] All tests green: `pytest project/ action/ decision/ pulse/ email-digest/ lib/tests/ -q`
 
 ---
 
 ## Sign-off
 
-This is a **decision-only spec PR**. No implementation code in this PR. The implementation big-bang PR follows after this spec merges, with full test coverage and a single-commit revert path for rollback.
+This is a **decision-only spec PR**. No implementation code in this PR. The implementation big-bang PR follows after this spec merges, with full test coverage and a multi-layer rollback path (§11).
+
+This spec was revised after a Codex adversarial review (2026-05-08) surfaced 5 findings:
+- **F1 (subscription rendering):** subscriptions removed from Daily-review filtering; daily filters by `status` on existing project frontmatter only.
+- **F2 (SSH cutover gap):** SSH support bundled into the big-bang PR (was previously deferred to a v2 follow-up).
+- **F3 (concurrent frontmatter writes):** pulse model changed from shared-frontmatter writes to per-host sidecar files in `_pulse/` subfolder; each pulse owns exactly one file per (project, host) it's responsible for; concurrent collision impossible by design.
+- **F4 (client isolation guardrails):** added §6.5 with 7 mechanisms (digest-preset → vault validation, `--all-vaults` jns-mac-only, pre-send confirmation context, per-vault git remote allowlist, `pulse audit`, off-boarding script, FileVault policy).
+- **F5 (rollback story):** added pre-flight migration manifest committed in the implementation PR + 3-layer rollback procedure documented in §11.
 
 After Path B implementation lands:
-- Pulse v2 (SSH bridge) follows within ~1 week
 - A-020 (SessionStart pattern reader) remains independent in queue
 - Future client onboardings (Tillamook etc.) follow §"Client onboarding procedure"
 - Future architecture decisions go to `<vault>/Decisions/D-NNN.md` instead of `knowledge/decisions/*.yaml`
