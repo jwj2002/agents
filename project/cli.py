@@ -1,98 +1,85 @@
 #!/usr/bin/env python3
-"""project — view or update a project's tracker YAML.
+"""project — view or update a project's Obsidian note.
 
-Reads/writes ~/agents/knowledge/projects/<name>.yaml directly. Replaces
-the /project skill's calls to mcp__knowledge__get_project_context and
-mcp__knowledge__update_project_context (Phase 6B port; see
-specs/phase6b-mcp-audit.md).
+Reads/writes ``<vault>/Projects/<name>.md`` directly. The frontmatter is the
+manually-edited project tracker (focus, status, blockers, next_steps,
+open_questions, etc.); the markdown body is the user's freeform area
+(Purpose / Stack / Repository / Notes / journal). Pulse never writes to
+this file — pulse owns ``_pulse/<project>--<host>.md`` sidecars (Codex F3).
 
-This CLI does NOT auto-commit. Project YAML changes are less frequent
-than ACTIONS.md mutations; user commits manually on whatever cadence
-suits them. (The action CLI's auto-commit / multi-device-safety design
-from #121 can be extracted into lib/git_ops.py in a follow-up if this
-becomes a real pain point.)
+Vault resolution: by default, the vault is looked up from
+``~/.claude/dashboard-subscriptions.json``. The first vault whose
+``subscribed`` list contains the project name wins; ambiguous matches
+error.
 
-Update paths owned elsewhere:
-- decisions journal:       knowledge/decisions/*.yaml (hand-edit)
-- subscriptions:           --subscribe / --unsubscribe (machine-local;
-                           writes ~/.claude/dashboard-subscriptions.json)
+This CLI does NOT auto-commit. Project frontmatter changes are infrequent;
+user commits manually on whatever cadence suits them.
 
-Alias: `alias project='python3 ~/agents/project/cli.py'`
+Subscription model (Path B):
+- ``--subscribe`` / ``--unsubscribe``: machine-local; preserves the on-disk
+  format (legacy flat or vault-keyed). New ``--subscribe`` calls on a
+  vault-keyed file route to the default vault (``AGENTS_DEFAULT_VAULT``
+  env var, fallback "JNS-Personal-Vault").
+- ``--claim-ssh-host VAULT HOSTNAME`` / ``--release-ssh-host VAULT HOSTNAME``:
+  per-machine declaration that this device is the SSH writer for the
+  given (vault, remote-host) pair. Implements the single-writer-per-host
+  convention from spec §6 (Codex F3 fix).
+
+Alias: ``alias project='python3 ~/agents/project/cli.py'``
 """
 from __future__ import annotations
 
 import argparse
-import os
-import re
 import shutil
 import sys
-import tempfile
 from datetime import date
 from pathlib import Path
 
-import yaml
-
 # Repo root for lib imports (works whether invoked directly or via wrapper)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib import obsidian_md  # noqa: E402
 from lib import project_resolver  # noqa: E402
 from lib.project_resolver import (  # noqa: E402
     ProjectResolutionError,
     add_subscription,
+    claim_ssh_host,
     get_host_name,
-    project_yaml_path,
+    project_md_path,
     register_project,
+    release_ssh_host,
     remove_subscription,
     resolve_with_picker,
     set_host_name,
 )
 
 ALLOWED_STATUS = ("active", "paused", "blocked", "done")
+
+# Frontmatter field order for project notes (spec §6 / §7 destination schema).
+# Pulse-managed fields live in per-host sidecars, not here (Codex F3).
 PROJECT_FIELDS_ORDER = [
-    "schema_version",
-    "project", "host", "status", "focus", "next_steps", "blockers",
-    "open_questions", "specs", "dependencies", "updated_at", "updated_by",
+    "project", "host", "client", "kind", "status", "focus", "status_updated",
+    "blockers", "next_steps", "open_questions",
+    "stack", "repo_path", "repo_remote",
 ]
-DEFAULT_OWNER = "jason"
 
 
 class ProjectError(Exception):
     """Single-line user-facing error → stderr + exit 1."""
 
 
-# ---------- YAML I/O ----------
+# ---------- I/O ----------
 
-def load_yaml(path: Path) -> dict:
-    if not path.exists():
-        raise ProjectError(f"project YAML not found: {path}")
-    data = yaml.safe_load(path.read_text()) or {}
-    if not isinstance(data, dict):
-        raise ProjectError(f"{path}: top-level YAML must be a mapping, got {type(data).__name__}")
-    return data
-
-
-def write_yaml(path: Path, data: dict) -> None:
-    """Atomic write of project YAML with stable field order."""
-    ordered: dict = {}
-    for k in PROJECT_FIELDS_ORDER:
-        if k in data:
-            ordered[k] = data[k]
-    for k, v in data.items():
-        if k not in ordered:
-            ordered[k] = v
-    text = yaml.safe_dump(
-        ordered, sort_keys=False, default_flow_style=False,
-        allow_unicode=True, width=80,
-    )
-    fd, tmp_str = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
-    tmp = Path(tmp_str)
+def load_project(path: Path) -> tuple[dict, str]:
+    """Load project note. Returns (frontmatter, body)."""
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
-        os.replace(tmp, path)
-    except Exception:
-        if tmp.exists():
-            tmp.unlink()
-        raise
+        return obsidian_md.load(path)
+    except obsidian_md.ObsidianMdError as e:
+        raise ProjectError(str(e)) from e
+
+
+def write_project(path: Path, frontmatter: dict, body: str) -> None:
+    """Atomic write of the project note, preserving body content."""
+    obsidian_md.write(path, frontmatter, body, field_order=PROJECT_FIELDS_ORDER)
 
 
 # ---------- mutations ----------
@@ -116,17 +103,15 @@ def add_to_list(data: dict, key: str, item: str) -> None:
 
 
 def remove_from_list_by_match(data: dict, key: str, query: str) -> str:
-    """Remove the first item matching `query` (case-insensitive substring or exact).
+    """Remove the first item matching ``query`` (case-insensitive substring or exact).
 
     Returns the removed string, or raises ProjectError if no match.
     """
     items = _ensure_list(data, key)
     q = query.lower()
-    # Prefer exact match if present.
     for i, item in enumerate(items):
         if item == query:
             return items.pop(i)
-    # Fall back to substring match.
     matches = [i for i, item in enumerate(items) if q in str(item).lower()]
     if not matches:
         raise ProjectError(f'no item matching "{query}" in {key}')
@@ -139,9 +124,9 @@ def remove_from_list_by_match(data: dict, key: str, query: str) -> str:
 
 
 def apply_updates(data: dict, args: argparse.Namespace) -> list[str]:
-    """Apply mutations from args. Returns a list of human-readable change descriptions.
+    """Apply mutations to the frontmatter dict. Returns human-readable change list.
 
-    Caller bumps updated_at + updated_by once at the end if the list is non-empty.
+    Caller bumps ``status_updated`` to today if any change is made.
     """
     changes: list[str] = []
 
@@ -199,7 +184,7 @@ def render(data: dict) -> str:
     width = max(70, min(_term_width(), 110))
     name = data.get("project", "?")
     status = (data.get("status") or "?").upper()
-    updated = data.get("updated_at", "?")
+    updated = data.get("status_updated", "?")
     host = data.get("host") or "?"
     lines = [
         f"PROJECT: {name}",
@@ -236,7 +221,7 @@ def render(data: dict) -> str:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="project",
-        description="View or update a project's tracker YAML.",
+        description="View or update a project's Obsidian note.",
     )
     p.add_argument("name", nargs="?", default=None,
                    help="Project name (default: cwd-detect)")
@@ -259,10 +244,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--unsubscribe", action="store_true",
                    help="Remove from ~/.claude/dashboard-subscriptions.json.")
     p.add_argument("--set-host", dest="set_host", default=None,
-                   help="Set the project's host: field (e.g., jns-mac, vitalai-laptop, jbox06).")
+                   help="Set the project's host: frontmatter field "
+                        "(e.g., jns-mac, vitalai-laptop, jbox06).")
     p.add_argument("--register-host", dest="register_host", default=None, metavar="HOSTNAME",
                    help="Write ~/.claude/host-name with the canonical name for THIS machine. "
                         "Does not require a project name.")
+    p.add_argument("--claim-ssh-host", dest="claim_ssh_host", default=None,
+                   nargs=2, metavar=("VAULT", "HOSTNAME"),
+                   help="Add HOSTNAME to vault.ssh_writes — this device claims to be the "
+                        "SSH writer for that remote host (single-writer-per-host convention). "
+                        "Does not require a project name.")
+    p.add_argument("--release-ssh-host", dest="release_ssh_host", default=None,
+                   nargs=2, metavar=("VAULT", "HOSTNAME"),
+                   help="Remove HOSTNAME from vault.ssh_writes. Does not require a project name.")
     p.add_argument("--no-prompt", action="store_true", default=False,
                    help="Skip interactive picker; error if name is missing/unknown.")
     return p.parse_args(argv)
@@ -276,8 +270,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = parse_args(argv)
 
-        # Short-circuit: --register-host writes ~/.claude/host-name and exits.
-        # No project name required.
+        # Project-name-free flags handled first.
         if args.register_host is not None:
             set_host_name(args.register_host)
             print(f"this machine is now registered as host: {args.register_host}")
@@ -285,12 +278,23 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  current autodetect: {get_host_name()}")
             return 0
 
+        if args.claim_ssh_host is not None:
+            vault, host = args.claim_ssh_host
+            claim_ssh_host(vault, host)
+            print(f"claimed ssh host: {host} → vault {vault}")
+            return 0
+
+        if args.release_ssh_host is not None:
+            vault, host = args.release_ssh_host
+            release_ssh_host(vault, host)
+            print(f"released ssh host: {host} from vault {vault}")
+            return 0
+
         # Resolve project name (cwd / explicit / picker / auto-register).
         name = resolve_with_picker(args.name, no_prompt=args.no_prompt)
 
-        path = project_yaml_path(name)
+        path = project_md_path(name)
 
-        # Determine if any mutation flags were passed.
         write_flags = any([
             args.focus is not None,
             args.status is not None,
@@ -302,34 +306,29 @@ def main(argv: list[str] | None = None) -> int:
         sub_flags = args.subscribe or args.unsubscribe
 
         if not write_flags and not sub_flags and not host_flag:
-            # Read mode.
-            data = load_yaml(path)
+            data, _ = load_project(path)
             sys.stdout.write(render(data))
             return 0
 
-        # Write mode — apply YAML mutations first (if any).
         applied: list[str] = []
+
         if write_flags:
-            data = load_yaml(path)
+            data, body = load_project(path)
             applied = apply_updates(data, args)
             if applied:
-                data["updated_at"] = today_iso()
-                data["updated_by"] = data.get("updated_by") or DEFAULT_OWNER
-                write_yaml(path, data)
+                data["status_updated"] = today_iso()
+                write_project(path, data, body)
 
-        # --set-host is operational (which host owns this project), not content.
-        # No updated_at bump — same precedent as --subscribe.
         if host_flag:
-            data = load_yaml(path)
+            data, body = load_project(path)
             old_host = data.get("host")
             if old_host == args.set_host:
                 applied.append(f"host already {args.set_host} for {name} (no-op)")
             else:
                 data["host"] = args.set_host
-                write_yaml(path, data)
+                write_project(path, data, body)
                 applied.append(f"host: {old_host or '(unset)'} → {args.set_host}")
 
-        # Subscription flags (machine-local; never touch the YAML).
         if args.subscribe:
             add_subscription(name)
             applied.append(f"subscribed to {name} on this machine")
@@ -347,8 +346,7 @@ def main(argv: list[str] | None = None) -> int:
             display_path = "~/" + str(path.relative_to(Path.home()))
         except ValueError:
             display_path = str(path)
-        print(f"updated {display_path} — commit & push manually:")
-        print(f"  git -C ~/agents add knowledge/projects/{name}.yaml && git commit -m 'chore(project): update {name}' && git push")
+        print(f"updated {display_path}")
         return 0
 
     except (ProjectError, ProjectResolutionError) as e:

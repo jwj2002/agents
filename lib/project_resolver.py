@@ -267,8 +267,9 @@ def add_subscription(name: str) -> None:
     """Subscribe ``name`` (machine-local). Preserves on-disk format.
 
     - Empty/missing/legacy file: writes legacy shape with ``name`` appended.
-    - Vault-keyed file: appends to default vault's ``subscribed`` list.
-    Idempotent — re-adding ``name`` is a no-op.
+    - Vault-keyed file: no-op if already subscribed in any vault; otherwise
+      appends to default vault's ``subscribed`` list.
+    Idempotent — re-adding ``name`` is a no-op regardless of which vault holds it.
     """
     raw = _read_raw_subscriptions()
     if not raw or _is_legacy_format(raw):
@@ -276,8 +277,12 @@ def add_subscription(name: str) -> None:
         if name not in subs:
             subs.append(name)
         _write_raw_subscriptions({"subscribed": subs})
-    else:
-        add_subscription_to_vault(default_vault(), name)
+        return
+    # Vault-keyed: only add if not already subscribed somewhere
+    data = _normalize_vault_keyed(raw)
+    if any(name in vdata["subscribed"] for vdata in data.values()):
+        return
+    add_subscription_to_vault(default_vault(), name)
 
 
 def remove_subscription(name: str) -> None:
