@@ -1,388 +1,348 @@
-"""Tests for decision/cli.py — view/list/new/update + index management."""
+"""Tests for decision/cli.py — Obsidian decision-record mutation."""
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
-# Repo root on path.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-import decision.cli as cli  # noqa: E402
+import decision.cli as cli
+from lib import obsidian_md
+from lib import project_resolver as pr
 
 
 # ---------- fixtures ----------
 
-_D042 = """\
-schema_version: 1
-id: D-042
-date: '2026-03-28'
-project: docketiq
-topic: auth
-title: Redis session cache for docketiq
-context: docketiq has SSR; high-frequency reads make DB sessions too slow.
-decision: Use Redis-backed sessions for SSR.
-alternatives:
-- option: JWT
-  rejected_because: Need server-side state.
-- option: Database sessions
-  rejected_because: Too slow.
-reasoning: Redis is fast; SSR needs server state.
-outcome: Deployed; <1ms reads.
-linked:
-  patterns:
-  - pat-auth-redis-sessions
-  issues: []
-  prs: []
-  related_decisions:
-  - D-015
-created_at: '2026-03-28'
-"""
-
-_D098_LEGACY = """\
-schema_version: 1
-id: D-098
-date: '2026-04-08'
-project: flotilla
-topic: architecture
-title: Federated flotilla instances
-context: Designing for team expansion.
-decision: "Federation: each developer owns their flotilla."
-alternatives:
-- option: Centralized
-  rejected_because: Bottleneck.
-reasoning: Federation preserves autonomy.
-outcome: null
-linked_patterns: []
-linked_issues:
-- "#21-27"
-linked_prs: []
-related_decisions:
-- D-096
-created_at: '2026-04-08'
-"""
-
-_INDEX = """\
-by_project:
-  docketiq:
-    - id: D-042
-      topic: auth
-      title: Redis session cache for docketiq
-      date: '2026-03-28'
-by_topic:
-  auth:
-    - D-042
-by_pattern:
-  pat-auth-redis-sessions:
-    - D-042
-"""
+def _decision_md(decision_id: str, **overrides) -> str:
+    """Render a minimal decision MD with the given frontmatter overrides."""
+    fm = {
+        "schema_version": 1,
+        "id": decision_id,
+        "date": "2026-01-01",
+        "project": "testproj",
+        "topic": "architecture",
+        "title": f"{decision_id} title",
+        "status": "proposed",
+        "linked": {k: [] for k in cli.LINKED_FIELDS_ORDER},
+        "created_at": "2026-01-01",
+    }
+    fm.update(overrides)
+    body = (
+        f"# {decision_id} — {fm['title']}\n\n"
+        "## Context\nctx text\n\n"
+        "## Decision\ndec text\n\n"
+        "## Alternatives considered\n- A: y\n- B: z\n\n"
+        "## Reasoning\nreas text\n\n"
+        "## Outcome\n*(filled in later)*\n\n"
+        "## Linked\n- Patterns: \n- PRs: \n- Issues: \n- Related decisions: \n"
+    )
+    return obsidian_md.dump(fm, body, field_order=cli.DECISION_FIELDS_ORDER)
 
 
-def _wire(monkeypatch, tmp_path: Path, *, register: tuple[str, ...] = ("docketiq", "agents")):
-    """Redirect DECISIONS_DIR + KNOWLEDGE_PROJECTS_DIR + INDEX_PATH to tmp."""
-    decisions_dir = tmp_path / "knowledge" / "decisions"
-    decisions_dir.mkdir(parents=True)
-    projects_dir = tmp_path / "knowledge" / "projects"
-    projects_dir.mkdir(parents=True)
+def _wire_vaults(
+    monkeypatch,
+    tmp_path: Path,
+    *,
+    project: str = "testproj",
+    decisions: dict[str, dict] | None = None,
+    multi_vault: bool = False,
+) -> dict[str, Path]:
+    """Set up a vault layout with optional pre-existing decision files.
+
+    Pass ``_vault`` in a decision's overrides dict to place it in a non-default
+    vault (only takes effect when ``multi_vault=True``).
+
+    Returns a dict mapping decision_id → its path on disk.
+    """
+    vaults_root = tmp_path / "vaults"
+    main_vault = "TestVault"
+    main_decisions = vaults_root / main_vault / "Decisions"
+    main_decisions.mkdir(parents=True)
+
+    paths: dict[str, Path] = {}
+    if decisions:
+        for did, overrides in decisions.items():
+            target_dir = main_decisions
+            if multi_vault and overrides.get("_vault"):
+                target_dir = vaults_root / overrides["_vault"] / "Decisions"
+                target_dir.mkdir(parents=True, exist_ok=True)
+                overrides = {k: v for k, v in overrides.items() if k != "_vault"}
+            path = target_dir / f"{did}.md"
+            path.write_text(_decision_md(did, **overrides))
+            paths[did] = path
+
+    subs = {main_vault: {"subscribed": [project], "ssh_writes": []}}
+    if multi_vault:
+        subs["OtherVault"] = {"subscribed": ["other-proj"], "ssh_writes": []}
     subs_file = tmp_path / "subs.json"
+    subs_file.write_text(json.dumps(subs))
 
-    monkeypatch.setattr(cli, "DECISIONS_DIR", decisions_dir)
-    monkeypatch.setattr(cli, "INDEX_PATH", decisions_dir / "index.yaml")
-    monkeypatch.setattr(cli.project_resolver, "KNOWLEDGE_PROJECTS_DIR", projects_dir)
-    monkeypatch.setattr(cli.project_resolver, "SUBSCRIPTIONS_PATH", subs_file)
-
-    for name in register:
-        (projects_dir / f"{name}.yaml").write_text(
-            f"schema_version: 1\nproject: {name}\nstatus: active\nfocus: ''\n"
-        )
-    return decisions_dir
+    monkeypatch.setattr(pr, "VAULTS_BASE", vaults_root)
+    monkeypatch.setattr(pr, "SUBSCRIPTIONS_PATH", subs_file)
+    monkeypatch.setattr(cli, "resolve_with_picker", lambda n, no_prompt=False: project)
+    return paths
 
 
-# ---------- view mode ----------
+def _read_fm(path: Path) -> dict:
+    fm, _ = obsidian_md.load(path)
+    return fm
 
-def test_view_canonical_decision(monkeypatch, tmp_path, capsys):
-    d = _wire(monkeypatch, tmp_path)
-    (d / "D-042.yaml").write_text(_D042)
-    rc = cli.main(["D-042", "--no-prompt"])
+
+def _read_body(path: Path) -> str:
+    _, body = obsidian_md.load(path)
+    return body
+
+
+# ---------- view ----------
+
+def test_view_renders_madr_sections(monkeypatch, tmp_path, capsys):
+    _wire_vaults(monkeypatch, tmp_path, decisions={"D-042": {"title": "Use JWT"}})
+    rc = cli.main(["D-042"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "DECISION D-042" in out
-    assert "docketiq" in out
-    assert "Redis session cache" in out
-    assert "pat-auth-redis-sessions" in out
-
-
-def test_view_normalizes_legacy_schema(monkeypatch, tmp_path, capsys):
-    """D-098-style top-level linked_* keys are folded into linked: on read."""
-    d = _wire(monkeypatch, tmp_path)
-    (d / "D-098.yaml").write_text(_D098_LEGACY)
-    rc = cli.main(["D-098", "--no-prompt"])
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "DECISION D-098" in out
-    assert "#21-27" in out  # was at top level under linked_issues
-    assert "D-096" in out   # was at top level under related_decisions
+    assert "Title:    Use JWT" in out
+    assert "Context:" in out
+    assert "ctx text" in out
+    assert "dec text" in out
+    assert "reas text" in out
 
 
 def test_view_missing_errors(monkeypatch, tmp_path, capsys):
-    _wire(monkeypatch, tmp_path)
-    rc = cli.main(["D-999", "--no-prompt"])
+    _wire_vaults(monkeypatch, tmp_path)
+    rc = cli.main(["D-999"])
     assert rc == 1
-    err = capsys.readouterr().err
-    assert "not found" in err
+    assert "not found" in capsys.readouterr().err
 
 
 def test_view_invalid_id_errors(monkeypatch, tmp_path, capsys):
-    _wire(monkeypatch, tmp_path)
-    rc = cli.main(["bogus-id", "--no-prompt"])
+    _wire_vaults(monkeypatch, tmp_path)
+    rc = cli.main(["bogus"])
     assert rc == 1
-    assert "invalid decision id" in capsys.readouterr().err
+    assert "expected form D-NNN" in capsys.readouterr().err
 
 
-# ---------- list mode ----------
+# ---------- list ----------
 
 def test_list_all(monkeypatch, tmp_path, capsys):
-    d = _wire(monkeypatch, tmp_path)
-    (d / "D-042.yaml").write_text(_D042)
-    (d / "D-098.yaml").write_text(_D098_LEGACY)
-    rc = cli.main(["--list", "--no-prompt"])
+    _wire_vaults(monkeypatch, tmp_path, decisions={
+        "D-001": {"date": "2026-01-01"},
+        "D-002": {"date": "2026-02-01"},
+    })
+    rc = cli.main(["--list"])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "D-042" in out and "D-098" in out
-    # Sorted newest first (D-098 is 2026-04-08, D-042 is 2026-03-28).
-    assert out.index("D-098") < out.index("D-042")
+    assert "D-001" in out
+    assert "D-002" in out
+    # newest first
+    assert out.index("D-002") < out.index("D-001")
 
 
 def test_list_filter_by_project(monkeypatch, tmp_path, capsys):
-    d = _wire(monkeypatch, tmp_path)
-    (d / "D-042.yaml").write_text(_D042)
-    (d / "D-098.yaml").write_text(_D098_LEGACY)
-    rc = cli.main(["--list", "--project", "docketiq", "--no-prompt"])
+    _wire_vaults(monkeypatch, tmp_path, decisions={
+        "D-001": {"project": "alpha"},
+        "D-002": {"project": "beta"},
+    })
+    rc = cli.main(["--list", "--project", "alpha"])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "D-042" in out
-    assert "D-098" not in out
+    assert "D-001" in out
+    assert "D-002" not in out
 
 
 def test_list_filter_by_topic(monkeypatch, tmp_path, capsys):
-    d = _wire(monkeypatch, tmp_path)
-    (d / "D-042.yaml").write_text(_D042)
-    (d / "D-098.yaml").write_text(_D098_LEGACY)
-    rc = cli.main(["--list", "--topic", "architecture", "--no-prompt"])
+    _wire_vaults(monkeypatch, tmp_path, decisions={
+        "D-001": {"topic": "auth"},
+        "D-002": {"topic": "database"},
+    })
+    rc = cli.main(["--list", "--topic", "auth"])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "D-098" in out
-    assert "D-042" not in out
+    assert "D-001" in out
+    assert "D-002" not in out
 
 
 def test_list_empty(monkeypatch, tmp_path, capsys):
-    _wire(monkeypatch, tmp_path)
-    rc = cli.main(["--list", "--no-prompt"])
+    _wire_vaults(monkeypatch, tmp_path)
+    rc = cli.main(["--list"])
     assert rc == 0
     assert "no decisions match" in capsys.readouterr().out
 
 
-# ---------- new mode ----------
+def test_list_aggregates_across_vaults(monkeypatch, tmp_path, capsys):
+    _wire_vaults(monkeypatch, tmp_path, multi_vault=True, decisions={
+        "D-001": {},
+        "D-002": {"_vault": "OtherVault"},
+    })
+    rc = cli.main(["--list"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "D-001" in out
+    assert "D-002" in out
+
+
+# ---------- new ----------
 
 def test_new_assigns_next_id(monkeypatch, tmp_path):
-    d = _wire(monkeypatch, tmp_path)
-    (d / "D-042.yaml").write_text(_D042)
-    (d / "D-098.yaml").write_text(_D098_LEGACY)
+    paths = _wire_vaults(monkeypatch, tmp_path, decisions={
+        "D-001": {}, "D-002": {}, "D-005": {},
+    })
     rc = cli.main([
-        "--new",
-        "--title", "Test",
-        "--decision", "Do X.",
-        "--project", "agents",
-        "--topic", "infrastructure",
-        "--no-prompt",
+        "--new", "--title", "Next one",
+        "--project", "testproj", "--topic", "architecture",
+        "--decision", "do this", "--no-prompt",
     ])
     assert rc == 0
-    new_path = d / "D-099.yaml"
+    new_path = paths["D-001"].parent / "D-006.md"
     assert new_path.exists()
-    data = yaml.safe_load(new_path.read_text())
-    assert data["id"] == "D-099"
-    assert data["schema_version"] == 1
-    assert data["project"] == "agents"
-    assert data["topic"] == "infrastructure"
-    assert data["title"] == "Test"
-    assert data["decision"] == "Do X."
-    assert data["alternatives"] == []
-    assert data["outcome"] is None
-    assert data["linked"] == {"patterns": [], "issues": [], "prs": [], "related_decisions": []}
-
-
-def test_new_writes_to_index_by_project_and_topic(monkeypatch, tmp_path):
-    d = _wire(monkeypatch, tmp_path)
-    (d / "D-042.yaml").write_text(_D042)
-    rc = cli.main([
-        "--new",
-        "--title", "Migration",
-        "--decision", "Switch to X.",
-        "--project", "agents",
-        "--topic", "infrastructure",
-        "--no-prompt",
-    ])
-    assert rc == 0
-    idx = yaml.safe_load((d / "index.yaml").read_text())
-    assert "D-043" in [e["id"] for e in idx["by_project"]["agents"]]
-    assert "D-043" in idx["by_topic"]["infrastructure"]
+    assert _read_fm(new_path)["id"] == "D-006"
 
 
 def test_new_no_existing_files_assigns_d001(monkeypatch, tmp_path):
-    d = _wire(monkeypatch, tmp_path)
+    _wire_vaults(monkeypatch, tmp_path)
     rc = cli.main([
-        "--new",
-        "--title", "First",
-        "--decision", "Y.",
-        "--project", "agents",
-        "--topic", "auth",
+        "--new", "--title", "First",
+        "--project", "testproj", "--topic", "architecture",
+        "--decision", "do this", "--no-prompt",
+    ])
+    assert rc == 0
+    out_path = tmp_path / "vaults" / "TestVault" / "Decisions" / "D-001.md"
+    assert out_path.exists()
+
+
+def test_new_renders_madr_body_sections(monkeypatch, tmp_path):
+    _wire_vaults(monkeypatch, tmp_path)
+    rc = cli.main([
+        "--new", "--title", "MADR test",
+        "--project", "testproj", "--topic", "architecture",
+        "--context", "the why",
+        "--decision", "the what",
+        "--reasoning", "the because",
         "--no-prompt",
     ])
     assert rc == 0
-    assert (d / "D-001.yaml").exists()
+    out_path = tmp_path / "vaults" / "TestVault" / "Decisions" / "D-001.md"
+    body = _read_body(out_path)
+    assert obsidian_md.get_section(body, "Context").strip() == "the why"
+    assert obsidian_md.get_section(body, "Decision").strip() == "the what"
+    assert obsidian_md.get_section(body, "Reasoning").strip() == "the because"
+    assert "filled in later" in obsidian_md.get_section(body, "Outcome")
+    assert obsidian_md.has_section(body, "Alternatives considered")
+    assert obsidian_md.has_section(body, "Linked")
 
 
 def test_new_requires_title_and_decision(monkeypatch, tmp_path, capsys):
-    _wire(monkeypatch, tmp_path)
-    rc = cli.main([
-        "--new",
-        "--project", "agents",
-        "--topic", "auth",
-        "--no-prompt",
-    ])
+    _wire_vaults(monkeypatch, tmp_path)
+    rc = cli.main(["--new", "--title", "X", "--no-prompt"])
     assert rc == 1
-    assert "--new requires --title and --decision" in capsys.readouterr().err
+    assert "requires --title and --decision" in capsys.readouterr().err
 
 
 def test_new_no_prompt_requires_topic(monkeypatch, tmp_path, capsys):
-    _wire(monkeypatch, tmp_path)
+    _wire_vaults(monkeypatch, tmp_path)
     rc = cli.main([
-        "--new",
-        "--title", "T",
-        "--decision", "D.",
-        "--project", "agents",
-        "--no-prompt",
+        "--new", "--title", "X", "--decision", "Y",
+        "--project", "testproj", "--no-prompt",
     ])
     assert rc == 1
-    assert "topic required" in capsys.readouterr().err.lower()
+    assert "--topic required" in capsys.readouterr().err
 
 
 def test_new_atomic_no_temp_left(monkeypatch, tmp_path):
-    d = _wire(monkeypatch, tmp_path)
+    _wire_vaults(monkeypatch, tmp_path)
     cli.main([
-        "--new",
-        "--title", "T",
-        "--decision", "D.",
-        "--project", "agents",
-        "--topic", "auth",
+        "--new", "--title", "X", "--decision", "Y",
+        "--project", "testproj", "--topic", "architecture",
         "--no-prompt",
     ])
-    leftover = list(d.glob("*.tmp*"))
-    assert leftover == []
+    decisions_dir = tmp_path / "vaults" / "TestVault" / "Decisions"
+    assert not list(decisions_dir.glob("*.tmp*"))
 
 
-# ---------- update mode ----------
+def test_next_id_scans_across_vaults(monkeypatch, tmp_path):
+    """Cross-vault uniqueness — counter advances past max in any vault."""
+    _wire_vaults(monkeypatch, tmp_path, multi_vault=True, decisions={
+        "D-005": {},
+        "D-100": {"_vault": "OtherVault"},
+    })
+    assert cli.next_id() == "D-101"
 
-def test_update_outcome_only(monkeypatch, tmp_path):
-    d = _wire(monkeypatch, tmp_path)
-    (d / "D-042.yaml").write_text(_D042)
-    rc = cli.main(["D-042", "--outcome", "Shipped to prod, working great", "--no-prompt"])
+
+# ---------- update ----------
+
+def test_update_outcome_writes_to_body_section(monkeypatch, tmp_path):
+    paths = _wire_vaults(monkeypatch, tmp_path, decisions={"D-042": {}})
+    rc = cli.main(["D-042", "--outcome", "Shipped 2026-05-01"])
     assert rc == 0
-    data = yaml.safe_load((d / "D-042.yaml").read_text())
-    assert data["outcome"] == "Shipped to prod, working great"
+    body = _read_body(paths["D-042"])
+    assert obsidian_md.get_section(body, "Outcome") == "Shipped 2026-05-01"
 
 
-def test_update_add_pattern_updates_index(monkeypatch, tmp_path):
-    d = _wire(monkeypatch, tmp_path)
-    (d / "D-042.yaml").write_text(_D042)
-    (d / "index.yaml").write_text(_INDEX)
-    rc = cli.main(["D-042", "--add-pattern", "pat-fastapi-auth-wiring", "--no-prompt"])
+def test_update_add_pattern(monkeypatch, tmp_path):
+    paths = _wire_vaults(monkeypatch, tmp_path, decisions={"D-042": {}})
+    rc = cli.main(["D-042", "--add-pattern", "pat-X"])
     assert rc == 0
-    data = yaml.safe_load((d / "D-042.yaml").read_text())
-    assert "pat-fastapi-auth-wiring" in data["linked"]["patterns"]
-    idx = yaml.safe_load((d / "index.yaml").read_text())
-    assert "D-042" in idx["by_pattern"]["pat-fastapi-auth-wiring"]
+    fm = _read_fm(paths["D-042"])
+    assert "pat-X" in fm["linked"]["patterns"]
 
 
 def test_update_add_pr_normalizes_hash(monkeypatch, tmp_path):
-    d = _wire(monkeypatch, tmp_path)
-    (d / "D-042.yaml").write_text(_D042)
-    rc = cli.main(["D-042", "--add-pr", "147", "--no-prompt"])
-    assert rc == 0
-    data = yaml.safe_load((d / "D-042.yaml").read_text())
-    assert "#147" in data["linked"]["prs"]
+    paths = _wire_vaults(monkeypatch, tmp_path, decisions={"D-042": {}})
+    cli.main(["D-042", "--add-pr", "147"])
+    cli.main(["D-042", "--add-pr", "#148"])
+    prs = _read_fm(paths["D-042"])["linked"]["prs"]
+    assert "#147" in prs
+    assert "#148" in prs
 
 
-def test_update_add_issue_keeps_hash_if_provided(monkeypatch, tmp_path):
-    d = _wire(monkeypatch, tmp_path)
-    (d / "D-042.yaml").write_text(_D042)
-    rc = cli.main(["D-042", "--add-issue", "#148", "--no-prompt"])
-    assert rc == 0
-    data = yaml.safe_load((d / "D-042.yaml").read_text())
-    assert data["linked"]["issues"] == ["#148"]
+def test_update_add_issue_keeps_hash(monkeypatch, tmp_path):
+    paths = _wire_vaults(monkeypatch, tmp_path, decisions={"D-042": {}})
+    cli.main(["D-042", "--add-issue", "#42"])
+    assert "#42" in _read_fm(paths["D-042"])["linked"]["issues"]
 
 
 def test_update_add_related(monkeypatch, tmp_path):
-    d = _wire(monkeypatch, tmp_path)
-    (d / "D-042.yaml").write_text(_D042)
-    rc = cli.main(["D-042", "--add-related", "D-091", "--no-prompt"])
-    assert rc == 0
-    data = yaml.safe_load((d / "D-042.yaml").read_text())
-    # D-015 was already there; D-091 appended without dupes
-    assert data["linked"]["related_decisions"] == ["D-015", "D-091"]
+    paths = _wire_vaults(monkeypatch, tmp_path, decisions={"D-042": {}})
+    cli.main(["D-042", "--add-related", "D-091"])
+    assert "D-091" in _read_fm(paths["D-042"])["linked"]["related_decisions"]
 
 
 def test_update_idempotent_on_dup(monkeypatch, tmp_path, capsys):
-    d = _wire(monkeypatch, tmp_path)
-    (d / "D-042.yaml").write_text(_D042)
-    rc = cli.main(["D-042", "--add-related", "D-015", "--no-prompt"])  # already there
+    paths = _wire_vaults(monkeypatch, tmp_path, decisions={"D-042": {}})
+    cli.main(["D-042", "--add-pattern", "pat-X"])
+    capsys.readouterr()
+    rc = cli.main(["D-042", "--add-pattern", "pat-X"])
     assert rc == 0
-    out = capsys.readouterr().out
-    assert "no changes" in out
+    assert "no changes" in capsys.readouterr().out
+    patterns = _read_fm(paths["D-042"])["linked"]["patterns"]
+    assert patterns.count("pat-X") == 1
 
 
-# ---------- schema normalization on write ----------
-
-def test_legacy_schema_normalized_on_write(monkeypatch, tmp_path):
-    """Loading a D-098-style record and writing it back produces D-042-style nested form."""
-    d = _wire(monkeypatch, tmp_path)
-    (d / "D-098.yaml").write_text(_D098_LEGACY)
-    # Trigger a write via update
-    rc = cli.main(["D-098", "--add-pattern", "pat-x", "--no-prompt"])
-    assert rc == 0
-    text = (d / "D-098.yaml").read_text()
-    # Old top-level keys gone
-    assert "linked_patterns:" not in text
-    assert "linked_issues:" not in text
-    # Nested form present
-    data = yaml.safe_load(text)
-    assert "linked" in data
-    assert data["linked"]["issues"] == ["#21-27"]
-    assert "pat-x" in data["linked"]["patterns"]
-    assert data["linked"]["related_decisions"] == ["D-096"]
-
-
-# ---------- field order ----------
+# ---------- frontmatter shape ----------
 
 def test_field_order_preserved(monkeypatch, tmp_path):
-    d = _wire(monkeypatch, tmp_path)
-    (d / "D-042.yaml").write_text(_D042)
-    cli.main(["D-042", "--outcome", "Updated", "--no-prompt"])
-    text = (d / "D-042.yaml").read_text()
-    schema_idx = text.index("schema_version:")
-    id_idx = text.index("id:")
-    project_idx = text.index("project:")
-    title_idx = text.index("title:")
-    linked_idx = text.index("linked:")
-    assert schema_idx < id_idx < project_idx < title_idx < linked_idx
+    paths = _wire_vaults(monkeypatch, tmp_path, decisions={"D-042": {}})
+    cli.main(["D-042", "--add-pattern", "pat-X"])
+    text = paths["D-042"].read_text()
+    indices = [text.index(f"{k}:") for k in cli.DECISION_FIELDS_ORDER]
+    assert indices == sorted(indices), "frontmatter field order broken"
 
 
-# ---------- argparse smoke ----------
+def test_body_preserved_across_frontmatter_mutation(monkeypatch, tmp_path):
+    paths = _wire_vaults(monkeypatch, tmp_path, decisions={"D-042": {}})
+    original_body = _read_body(paths["D-042"])
+    cli.main(["D-042", "--add-pattern", "pat-Y"])
+    cli.main(["D-042", "--add-pr", "9"])
+    assert _read_body(paths["D-042"]) == original_body
+
+
+# ---------- argparse ----------
 
 def test_parse_args_defaults():
-    a = cli.parse_args(["D-042", "--no-prompt"])
-    assert a.id == "D-042"
-    assert a.list is False
-    assert a.new is False
-    assert a.outcome is None
+    args = cli.parse_args(["D-042"])
+    assert args.id == "D-042"
+    assert args.list is False
+    assert args.new is False
+    assert args.outcome is None
