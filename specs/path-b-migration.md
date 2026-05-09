@@ -131,12 +131,12 @@ Each decision was discussed explicitly with the user and locked in before this d
 | Why | Configure once per recipient; trigger many times. Interactive prompt mirrors the action CLI's `-i` mode and the `--register-host` command (consistent UX). Drafts/sent folders provide audit trail. |
 | How to apply | See §9 for full schema and command surface. |
 
-### Q11 — Project page structure: single page, two halves
+### Q11 — Project page structure: single page, two halves, minimal starter
 
-| Decision | **One project note per project at `<vault>/Projects/<name>.md`. Body has two halves separated by `---`:**<br>• **Top half (overview)** — manually written + Claude-assisted, auto-populated from `<repo>/CLAUDE.md` when present. Near-static.<br>• **Bottom half (operational)** — pulse + Dataview rendered. Live data. |
+| Decision | **One project note per project at `<vault>/Projects/<name>.md`. Body has two halves separated by `---`:**<br>• **Top half (overview)** — minimal starter (Purpose, Stack, Repository, optional Client block); add sections only when a real need emerges. Manually written or Claude-assisted. CLAUDE.md is the source of truth for AI-agent-onboarding context — **not** duplicated here.<br>• **Bottom half (operational)** — pulse + Dataview rendered. Live data. |
 |---|---|
-| Why | Single source of truth per project. Open `[[agents]]` → see purpose → scroll to see live state. No navigation cost. Pulse never touches the overview half (additive frontmatter writes only). |
-| How to apply | Templater "New Project" command generates a templated page with both halves. CLAUDE.md auto-populate (best-effort regex extraction of stack/setup sections). See §7 for full template. |
+| Why | Single source of truth per project. Open `[[agents]]` → see purpose → scroll to see live state. No navigation cost. Starting with a minimal overview prevents premature template bloat; richer sections are added one-at-a-time when felt. Pulse never touches the overview half (additive frontmatter writes only). |
+| How to apply | Templater "New Project" command generates the page with the minimal starter shape. Auto-population from CLAUDE.md is best-effort and only fills fields that map cleanly (e.g. stack). See §7 for the template body verbatim. |
 
 ### Q12 — Daily review scope: operational + git hygiene only
 
@@ -145,12 +145,12 @@ Each decision was discussed explicitly with the user and locked in before this d
 | Why | Overview is "what is this?" — read once per project. Daily review is "where are things right now?" — read every day. Mixing them adds visual clutter to the daily ritual. |
 | How to apply | Daily review template's Dataview queries pull only operational and git-state frontmatter fields. Overview-half content is structurally separated by the `---` rule and never queried by the daily review. |
 
-### Q13 — Git hygiene tracking: per-device frontmatter
+### Q13 — Git hygiene tracking: per-device frontmatter, simple rendering
 
-| Decision | **Pulse on each device collects git state for each subscribed project's repo and writes to `git_state.<this-hostname>` in the project's frontmatter (additive — preserves other devices' entries). Daily review surfaces non-clean states across all devices via a "Git hygiene" Dataview block.** |
+| Decision | **Pulse on each device collects git state for each subscribed project's repo and writes to `git_state.<this-hostname>` in the project's frontmatter (additive — preserves other devices' entries). The daily review's "Git — needs attention" section renders one line per non-clean project: `**project** · device · summary` (e.g. `**agents** · jns-mac · 3↑ · stale local: 1`). Empty section when everything is clean.** |
 |---|---|
-| Why | Multi-device git cleanliness is a real ongoing concern. Showing per-device branch / ahead / behind / dirty / stale-local-branches surfaces "I committed on vitalai-laptop but never pushed; jns-mac is now N behind" as a punch list of cleanup actions. |
-| How to apply | See §6 for `git_state` schema and pulse commands. See §7 for the Daily review's Git hygiene Dataview block. |
+| Why | Underlying multi-device data is preserved (so a richer rendering can be added later if useful). The daily render is intentionally one-line-per-project so the user — or Claude — can scan it in a second and the line itself is an actionable string ("address this"). |
+| How to apply | See §6 for `git_state` schema and pulse commands. See §7 for the Daily review's "Git — needs attention" Dataview list block. The richer per-device-table rendering on a project page is a simple "Git" one-line summary in v1; expand only when needed. |
 
 ---
 
@@ -425,78 +425,22 @@ git_state: {}
 # <%= name %>
 
 ## Purpose
-*(one sentence — what is this for?)*
+*(one sentence)*
 
-## Why it exists
-*(1-3 paragraphs — origin, problem, goals)*
-
-## Stack & dependencies
-- Language(s): <%= stack_languages %>
-- Key libs:
-- External:
+## Stack
+*(languages, frameworks)*
 
 ## Repository
 - Path: `<%= repo_path %>`
 - Remote: `<%= repo_remote %>`
-- Branch model:
-- CI:
-
-## Conventions
-*(commit format, test layout, deployment, etc.)*
-
-## Setup / quickstart
-```bash
-*(clone, install, run)*
-```
-
-## Common commands
-| Task | Command |
-|---|---|
-
-## Architecture notes
-*(high-level — major components, key decisions, trade-offs)*
-
-## Onboarding for AI agents working here
-- [ ] Read [CLAUDE.md](<%= repo_path %>/CLAUDE.md) at repo root
-- [ ] Run tests to confirm clean state
-- [ ] Check `ACTIONS.md` for current open work
-
-## Reference links
-*(specs, related repos, docs)*
 
 <%* if (kind === "client-work") { %>
-## Client info
-- **Client**: <%= client %>
-- **Engagement**: 
-- **Primary contact**: 
-- **My role**: 
-
-## Key dates
-- Kickoff: 
-- Major milestones: 
-- Contract end / renewal: 
-
-## Access requirements
-- VPN: 
-- SSH host: 
-- GitHub account context: 
-- Special credentials: *(meta only — never the creds themselves)*
-
-## Communication channels
-- Slack:
-- Standup cadence:
+## Client
+- Contact: 
+- Engagement: 
 <%* } %>
 
-<%* if (kind === "personal") { %>
-## Audience / users
-*(who uses this?)*
-
-## Distribution
-*(where it ships)*
-
-## Roadmap
-*(high-level direction)*
-<%* } %>
+*(Add more sections — conventions, setup, key dates, contacts, etc. — only when a real need emerges. CLAUDE.md in the repo holds AI-agent-onboarding context; this page is for the project narrative as YOU need it.)*
 
 ---
 
@@ -539,21 +483,8 @@ SORT created DESC
 LIMIT 5
 ```
 
-## Git state across devices
-
-```dataview
-TABLE WITHOUT ID
-  key as "Device",
-  value.pulled_at as "Pulled",
-  value.branch as "Branch",
-  string(value.ahead_origin) + "↑ / " + string(value.behind_origin) + "↓" as "↑↓",
-  value.dirty as "Dirty",
-  join(value.stale_local_branches, ", ") as "Stale"
-FROM ""
-WHERE file.name = this.file.name
-FLATTEN this.git_state as state
-GROUP BY state
-```
+## Git
+*(this device's branch + ahead/behind/dirty/stale, one-line summary)*
 
 ## Notes / journal
 *(your free-form area)*
@@ -656,16 +587,17 @@ WHERE created_at >= dateadd(date(today), -7, "days")
 SORT created_at DESC
 ```
 
-## Git hygiene — needs attention
+## Git — needs attention
+
+One line per project that's not clean on the device that last touched it. Format: `**project** · device · summary` so you can hand the line to Claude as-is ("clean these up").
 
 ```dataview
-TABLE WITHOUT ID
-  file.link as "Project",
-  device as "Device",
-  state.branch as "Branch",
-  (string(state.ahead_origin) + "↑ " + string(state.behind_origin) + "↓") as "↑↓",
-  state.dirty as "Dirty",
-  join(state.stale_local_branches, ", ") as "Stale"
+LIST WITHOUT ID
+  "**" + file.link + "** · " + device + " · " +
+    (state.dirty ? "dirty · " : "") +
+    (state.ahead_origin > 0 ? string(state.ahead_origin) + "↑ · " : "") +
+    (state.behind_origin > 0 ? string(state.behind_origin) + "↓ · " : "") +
+    (length(state.stale_local_branches) > 0 ? "stale local: " + length(state.stale_local_branches) : "")
 FROM "Projects"
 FLATTEN this.git_state as state, key(this.git_state) as device
 WHERE state.dirty = true
@@ -674,6 +606,8 @@ WHERE state.dirty = true
    OR length(state.stale_local_branches) > 0
 SORT state.pulled_at DESC
 ```
+
+When this section is empty, all subscribed projects are clean on every device that's pulsed recently. When a line appears, you can copy-paste it into Claude with "address this" and the agent has enough to act.
 
 ## Reachability (last pulse)
 
