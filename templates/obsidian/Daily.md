@@ -69,10 +69,11 @@ One line per (project, host) sidecar that's not clean.
 ```dataview
 LIST WITHOUT ID
   "**" + project + "** · " + host + " · " +
-    (dirty ? "dirty · " : "") +
-    (ahead_origin > 0 ? string(ahead_origin) + "↑ · " : "") +
-    (behind_origin > 0 ? string(behind_origin) + "↓ · " : "") +
-    (length(stale_local_branches) > 0 ? "stale local: " + length(stale_local_branches) : "")
+    choice(dirty, "dirty · ", "") +
+    choice(ahead_origin > 0, string(ahead_origin) + "↑ · ", "") +
+    choice(behind_origin > 0, string(behind_origin) + "↓ · ", "") +
+    choice(length(stale_local_branches) > 0,
+           "stale local: " + string(length(stale_local_branches)), "")
 FROM "Projects/_pulse"
 WHERE dirty = true OR ahead_origin > 0 OR behind_origin > 0 OR length(stale_local_branches) > 0
 SORT pulled_at DESC
@@ -83,7 +84,9 @@ SORT pulled_at DESC
 ```dataview
 LIST WITHOUT ID
   "**" + project + "** · " + host + " · " +
-    (reachable = false ? "unreachable since " + last_reachable_at : "stale: " + pulled_at)
+    choice(reachable = false,
+           "unreachable since " + last_reachable_at,
+           "stale: " + pulled_at)
 FROM "Projects/_pulse"
 WHERE reachable = false OR pulled_at < dateadd(date(today), -1, "days")
 ```

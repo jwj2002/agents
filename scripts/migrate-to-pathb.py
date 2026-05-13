@@ -123,7 +123,7 @@ _BODY_TEMPLATE = """# {name}
 
 ```dataview
 TABLE WITHOUT ID
-  string(this.status).toUpperCase() as "Status",
+  upper(string(this.status)) as "Status",
   this.host as "Host",
   this.focus as "Focus"
 FROM ""
@@ -158,10 +158,12 @@ LIMIT 5
 
 ```dataview
 LIST WITHOUT ID
-  branch + (dirty ? " · dirty" : "") +
-    (ahead_origin > 0 ? " · " + string(ahead_origin) + "↑" : "") +
-    (behind_origin > 0 ? " · " + string(behind_origin) + "↓" : "") +
-    (length(stale_local_branches) > 0 ? " · stale local: " + length(stale_local_branches) : "")
+  branch +
+    choice(dirty, " · dirty", "") +
+    choice(ahead_origin > 0, " · " + string(ahead_origin) + "↑", "") +
+    choice(behind_origin > 0, " · " + string(behind_origin) + "↓", "") +
+    choice(length(stale_local_branches) > 0,
+           " · stale local: " + string(length(stale_local_branches)), "")
 FROM "Projects/_pulse"
 WHERE project = this.project AND host = this.host
 ```
