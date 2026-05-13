@@ -638,3 +638,253 @@ def test_main_digest_all_vaults_refused_on_non_jns_mac(monkeypatch, tmp_path, ca
                    "--vaults-base", str(tmp_path / "vaults")])
     assert rc == 1
     assert "jns-mac-only" in capsys.readouterr().err
+
+
+# ---------- audit: vault-yaml-map loader ----------
+
+def test_load_vault_yaml_map_basic(tmp_path):
+    cfg = tmp_path / "x.yaml"
+    cfg.write_text("V1: personal\nV2: vital\n# a comment\n\nV3: 'tillamook'\n")
+    out = cli._load_vault_yaml_map(cfg)
+    assert out == {"V1": "personal", "V2": "vital", "V3": "tillamook"}
+
+
+def test_load_vault_yaml_map_missing(tmp_path):
+    assert cli._load_vault_yaml_map(tmp_path / "missing.yaml") == {}
+
+
+# ---------- audit: client match ----------
+
+def test_audit_client_match_all_correct(monkeypatch, tmp_path):
+    vaults_base = _setup(
+        monkeypatch, tmp_path,
+        vaults={"V": {"subscribed": ["a"], "ssh_writes": []}},
+        projects=[("V", "a", "jns-mac")],
+    )
+    findings = cli.audit_client_match("V", vaults_base / "V", "personal")
+    assert findings == []
+
+
+def test_audit_client_match_detects_mismatch(monkeypatch, tmp_path):
+    vaults_base = tmp_path / "vaults"
+    (vaults_base / "V" / "Projects").mkdir(parents=True)
+    obsidian_md.write(vaults_base / "V" / "Projects" / "wrong.md", {
+        "project": "wrong", "client": "personal",
+    }, "body\n")
+    findings = cli.audit_client_match("V", vaults_base / "V", "vital")
+    assert len(findings) == 1
+    assert findings[0].level == cli.LEVEL_ERROR
+    assert findings[0].check == "client-mismatch"
+    assert "personal" in findings[0].message
+    assert "vital" in findings[0].message
+
+
+def test_audit_client_match_flags_missing_client(tmp_path):
+    vaults_base = tmp_path / "vaults"
+    (vaults_base / "V" / "Projects").mkdir(parents=True)
+    obsidian_md.write(vaults_base / "V" / "Projects" / "x.md", {
+        "project": "x",
+    }, "body\n")
+    findings = cli.audit_client_match("V", vaults_base / "V", "personal")
+    assert any(f.check == "client-missing" for f in findings)
+
+
+# ---------- audit: sidecar consistency ----------
+
+def test_audit_sidecar_consistency_clean(tmp_path):
+    vault_dir = tmp_path / "V"
+    pulse = vault_dir / "Projects" / "_pulse"
+    pulse.mkdir(parents=True)
+    obsidian_md.write(pulse / "agents--jns-mac.md", {
+        "project": "agents", "host": "jns-mac",
+    }, cli.SIDECAR_BODY)
+    findings = cli.audit_sidecar_consistency("V", vault_dir)
+    assert findings == []
+
+
+def test_audit_sidecar_project_mismatch(tmp_path):
+    vault_dir = tmp_path / "V"
+    pulse = vault_dir / "Projects" / "_pulse"
+    pulse.mkdir(parents=True)
+    obsidian_md.write(pulse / "agents--jns-mac.md", {
+        "project": "WRONG", "host": "jns-mac",
+    }, cli.SIDECAR_BODY)
+    findings = cli.audit_sidecar_consistency("V", vault_dir)
+    assert any(f.check == "sidecar-project-mismatch" for f in findings)
+    assert all(f.level == cli.LEVEL_ERROR for f in findings)
+
+
+def test_audit_sidecar_host_mismatch(tmp_path):
+    vault_dir = tmp_path / "V"
+    pulse = vault_dir / "Projects" / "_pulse"
+    pulse.mkdir(parents=True)
+    obsidian_md.write(pulse / "agents--jns-mac.md", {
+        "project": "agents", "host": "WRONG",
+    }, cli.SIDECAR_BODY)
+    findings = cli.audit_sidecar_consistency("V", vault_dir)
+    assert any(f.check == "sidecar-host-mismatch" for f in findings)
+
+
+def test_audit_sidecar_bad_filename(tmp_path):
+    vault_dir = tmp_path / "V"
+    pulse = vault_dir / "Projects" / "_pulse"
+    pulse.mkdir(parents=True)
+    obsidian_md.write(pulse / "no-double-dash.md", {
+        "project": "x", "host": "jns-mac",
+    }, cli.SIDECAR_BODY)
+    findings = cli.audit_sidecar_consistency("V", vault_dir)
+    assert any(f.check == "sidecar-bad-name" for f in findings)
+
+
+# ---------- audit: git remote allowlist ----------
+
+def test_audit_git_remote_matches(tmp_path):
+    import subprocess
+    vault_dir = tmp_path / "V"
+    vault_dir.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=vault_dir, check=True)
+    subprocess.run(
+        ["git", "-C", str(vault_dir), "remote", "add", "origin",
+         "git@example.com:right.git"],
+        check=True,
+    )
+    findings = cli.audit_git_remote_allowlist("V", vault_dir, "git@example.com:right.git")
+    assert findings == []
+
+
+def test_audit_git_remote_mismatch(tmp_path):
+    import subprocess
+    vault_dir = tmp_path / "V"
+    vault_dir.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=vault_dir, check=True)
+    subprocess.run(
+        ["git", "-C", str(vault_dir), "remote", "add", "origin",
+         "git@example.com:wrong.git"],
+        check=True,
+    )
+    findings = cli.audit_git_remote_allowlist("V", vault_dir, "git@example.com:right.git")
+    assert any(f.check == "remote-mismatch" and f.level == cli.LEVEL_ERROR
+               for f in findings)
+
+
+def test_audit_git_remote_no_repo(tmp_path):
+    vault_dir = tmp_path / "V"
+    vault_dir.mkdir()
+    findings = cli.audit_git_remote_allowlist("V", vault_dir, "git@example.com:x.git")
+    assert any(f.check == "no-git" and f.level == cli.LEVEL_INFO for f in findings)
+
+
+# ---------- audit: subscription vs disk ----------
+
+def test_audit_subscription_vs_disk_clean(monkeypatch, tmp_path):
+    vaults_base = _setup(
+        monkeypatch, tmp_path,
+        vaults={"V": {"subscribed": [], "ssh_writes": []}},
+        projects=[],
+    )
+    # _setup only creates vault dirs implicitly via project notes; make sure V exists
+    (vaults_base / "V").mkdir(parents=True, exist_ok=True)
+    findings = cli.audit_subscription_vs_disk(vaults_base)
+    assert findings == []
+
+
+def test_audit_subscription_vs_disk_stale(monkeypatch, tmp_path):
+    """Vault in subscriptions but no dir on disk → warning."""
+    vaults_base = tmp_path / "vaults"
+    vaults_base.mkdir()
+    subs_file = tmp_path / "subs.json"
+    subs_file.write_text(json.dumps({
+        "Ghost": {"subscribed": [], "ssh_writes": []},
+    }))
+    monkeypatch.setattr(pr, "VAULTS_BASE", vaults_base)
+    monkeypatch.setattr(pr, "SUBSCRIPTIONS_PATH", subs_file)
+    findings = cli.audit_subscription_vs_disk(vaults_base)
+    assert any(f.check == "stale-subscription" for f in findings)
+
+
+# ---------- audit_all ----------
+
+def test_audit_all_clean(monkeypatch, tmp_path):
+    vaults_base = _setup(
+        monkeypatch, tmp_path,
+        vaults={"V": {"subscribed": ["a"], "ssh_writes": []}},
+        projects=[("V", "a", "jns-mac")],
+    )
+    # All info-level (no clients/remotes config) — should pass
+    findings = cli.audit_all(
+        vaults_base=vaults_base,
+        vault_clients_path=tmp_path / "no-clients.yaml",
+        vault_remotes_path=tmp_path / "no-remotes.yaml",
+    )
+    # Should only have info findings about missing config
+    assert all(f.level == cli.LEVEL_INFO for f in findings)
+
+
+def test_audit_all_with_config_detects_mismatch(monkeypatch, tmp_path):
+    vaults_base = _setup(
+        monkeypatch, tmp_path,
+        vaults={"V": {"subscribed": ["a"], "ssh_writes": []}},
+        projects=[("V", "a", "jns-mac")],
+    )
+    clients = tmp_path / "clients.yaml"
+    clients.write_text("V: vital\n")  # but the project note has client=personal
+    findings = cli.audit_all(
+        vaults_base=vaults_base,
+        vault_clients_path=clients,
+        vault_remotes_path=tmp_path / "no-remotes.yaml",
+    )
+    assert any(f.check == "client-mismatch" for f in findings)
+
+
+# ---------- render_audit ----------
+
+def test_render_audit_clean():
+    out = cli.render_audit([])
+    assert "clean" in out
+
+
+def test_render_audit_groups_by_vault():
+    findings = [
+        cli.AuditFinding(cli.LEVEL_ERROR, "V1", "test", "msg1"),
+        cli.AuditFinding(cli.LEVEL_WARNING, "V2", "test", "msg2"),
+        cli.AuditFinding(cli.LEVEL_INFO, "V1", "test", "msg3"),
+    ]
+    out = cli.render_audit(findings)
+    assert "▸ V1" in out
+    assert "▸ V2" in out
+    assert "errors=1" in out
+    assert "warnings=1" in out
+    assert "info=1" in out
+
+
+# ---------- main() audit ----------
+
+def test_main_audit_returns_zero_when_no_errors(monkeypatch, tmp_path, capsys):
+    vaults_base = _setup(
+        monkeypatch, tmp_path,
+        vaults={"V": {"subscribed": ["a"], "ssh_writes": []}},
+        projects=[("V", "a", "jns-mac")],
+    )
+    rc = cli.main(["audit",
+                   "--vaults-base", str(vaults_base),
+                   "--vault-clients", str(tmp_path / "missing.yaml"),
+                   "--vault-remotes", str(tmp_path / "missing.yaml")])
+    # info-only findings → rc=0
+    assert rc == 0
+
+
+def test_main_audit_returns_nonzero_on_errors(monkeypatch, tmp_path, capsys):
+    vaults_base = _setup(
+        monkeypatch, tmp_path,
+        vaults={"V": {"subscribed": ["a"], "ssh_writes": []}},
+        projects=[("V", "a", "jns-mac")],
+    )
+    clients = tmp_path / "clients.yaml"
+    clients.write_text("V: vital\n")  # mismatch — project has client=personal
+    rc = cli.main(["audit",
+                   "--vaults-base", str(vaults_base),
+                   "--vault-clients", str(clients),
+                   "--vault-remotes", str(tmp_path / "missing.yaml")])
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "client-mismatch" in out

@@ -460,6 +460,242 @@ def render_all_vaults_digest(
     return "\n".join(parts)
 
 
+# ---------- audit ----------
+#
+# Cross-vault hygiene scan (spec §6.5 #5). Read-only.
+#
+# Checks:
+# - vault → client mapping (opt-in via ~/.claude/vault-clients.yaml): every
+#   project note in vault V has client: <expected> matching the config
+# - sidecar filename consistency: <project>--<host>.md must have frontmatter
+#   project: and host: that match the filename
+# - subscription file vs on-disk: every vault key has a real directory
+# - git remote allowlist (opt-in via ~/.claude/vault-remotes.yaml from #164):
+#   vault's origin URL must match the configured value
+
+from dataclasses import dataclass  # noqa: E402
+
+LEVEL_INFO = "info"
+LEVEL_WARNING = "warning"
+LEVEL_ERROR = "error"
+_LEVEL_RANK = {LEVEL_INFO: 0, LEVEL_WARNING: 1, LEVEL_ERROR: 2}
+
+VAULT_CLIENTS_PATH = Path.home() / ".claude" / "vault-clients.yaml"
+VAULT_REMOTES_PATH = Path.home() / ".claude" / "vault-remotes.yaml"
+
+
+@dataclass
+class AuditFinding:
+    level: str  # info | warning | error
+    vault: str  # "" for global findings
+    check: str  # short identifier
+    message: str
+
+
+def _load_vault_yaml_map(path: Path) -> dict[str, str]:
+    """Parse a simple ``key: value`` YAML file. Lines starting with ``#`` or blank are skipped."""
+    if not path.is_file():
+        return {}
+    out: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if ":" not in stripped:
+            continue
+        k, v = stripped.split(":", 1)
+        out[k.strip()] = v.strip().strip('"').strip("'")
+    return out
+
+
+def audit_client_match(
+    vault: str, vault_dir: Path, expected_client: str,
+) -> list[AuditFinding]:
+    """Every project note in vault must have client: <expected>."""
+    findings: list[AuditFinding] = []
+    projects_dir = vault_dir / "Projects"
+    if not projects_dir.is_dir():
+        return findings
+    for note in sorted(projects_dir.glob("*.md")):
+        try:
+            fm, _ = obsidian_md.load(note)
+        except obsidian_md.ObsidianMdError:
+            findings.append(AuditFinding(
+                LEVEL_WARNING, vault, "unreadable-note",
+                f"could not parse {note.name}",
+            ))
+            continue
+        actual = fm.get("client")
+        if not actual:
+            findings.append(AuditFinding(
+                LEVEL_WARNING, vault, "client-missing",
+                f"{note.name} has no `client:` field (expected {expected_client!r})",
+            ))
+        elif actual != expected_client:
+            findings.append(AuditFinding(
+                LEVEL_ERROR, vault, "client-mismatch",
+                f"{note.name} has client={actual!r}, expected {expected_client!r}",
+            ))
+    return findings
+
+
+def audit_sidecar_consistency(vault: str, vault_dir: Path) -> list[AuditFinding]:
+    """Each <project>--<host>.md sidecar's frontmatter must agree with its filename."""
+    findings: list[AuditFinding] = []
+    pulse_dir = vault_dir / "Projects" / "_pulse"
+    if not pulse_dir.is_dir():
+        return findings
+    for sidecar in sorted(pulse_dir.glob("*.md")):
+        stem = sidecar.stem
+        if "--" not in stem:
+            findings.append(AuditFinding(
+                LEVEL_WARNING, vault, "sidecar-bad-name",
+                f"{sidecar.name} doesn't match <project>--<host>.md naming",
+            ))
+            continue
+        expected_project, expected_host = stem.split("--", 1)
+        try:
+            fm, _ = obsidian_md.load(sidecar)
+        except obsidian_md.ObsidianMdError:
+            findings.append(AuditFinding(
+                LEVEL_WARNING, vault, "sidecar-unreadable",
+                f"could not parse {sidecar.name}",
+            ))
+            continue
+        actual_project = fm.get("project")
+        actual_host = fm.get("host")
+        if actual_project != expected_project:
+            findings.append(AuditFinding(
+                LEVEL_ERROR, vault, "sidecar-project-mismatch",
+                f"{sidecar.name}: filename says {expected_project!r}, "
+                f"frontmatter says {actual_project!r}",
+            ))
+        if actual_host != expected_host:
+            findings.append(AuditFinding(
+                LEVEL_ERROR, vault, "sidecar-host-mismatch",
+                f"{sidecar.name}: filename says {expected_host!r}, "
+                f"frontmatter says {actual_host!r}",
+            ))
+    return findings
+
+
+def audit_git_remote_allowlist(
+    vault: str, vault_dir: Path, expected_remote: str,
+) -> list[AuditFinding]:
+    """Vault's git remote must match the configured allowlist URL."""
+    findings: list[AuditFinding] = []
+    if not (vault_dir / ".git").exists():
+        # Vault is not a git repo yet — not an error, just informational
+        findings.append(AuditFinding(
+            LEVEL_INFO, vault, "no-git",
+            f"{vault} is not a git repository (skipping remote check)",
+        ))
+        return findings
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(vault_dir), "remote", "get-url", "origin"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (subprocess.SubprocessError, OSError) as e:
+        findings.append(AuditFinding(
+            LEVEL_WARNING, vault, "git-error",
+            f"could not read git remote: {e}",
+        ))
+        return findings
+    if r.returncode != 0:
+        findings.append(AuditFinding(
+            LEVEL_WARNING, vault, "no-origin",
+            f"{vault} has no `origin` remote configured (expected {expected_remote!r})",
+        ))
+        return findings
+    actual = r.stdout.strip()
+    if actual != expected_remote:
+        findings.append(AuditFinding(
+            LEVEL_ERROR, vault, "remote-mismatch",
+            f"{vault} origin is {actual!r}, expected {expected_remote!r}",
+        ))
+    return findings
+
+
+def audit_subscription_vs_disk(
+    vaults_base: Path,
+) -> list[AuditFinding]:
+    """Every vault in the subscription file should have a directory on disk."""
+    findings: list[AuditFinding] = []
+    subs = pr.read_subscriptions_dict()
+    for vault in subs:
+        if not (vaults_base / vault).is_dir():
+            findings.append(AuditFinding(
+                LEVEL_WARNING, vault, "stale-subscription",
+                f"vault listed in subscriptions but {vaults_base / vault} not on disk",
+            ))
+    return findings
+
+
+def audit_all(
+    *,
+    vaults_base: Path | None = None,
+    vault_clients_path: Path | None = None,
+    vault_remotes_path: Path | None = None,
+) -> list[AuditFinding]:
+    """Run every check across every subscribed vault. Returns findings list."""
+    base = vaults_base if vaults_base is not None else _vaults_base()
+    clients = _load_vault_yaml_map(
+        vault_clients_path if vault_clients_path is not None else VAULT_CLIENTS_PATH
+    )
+    remotes = _load_vault_yaml_map(
+        vault_remotes_path if vault_remotes_path is not None else VAULT_REMOTES_PATH
+    )
+
+    findings: list[AuditFinding] = []
+    findings.extend(audit_subscription_vs_disk(base))
+
+    subs = pr.read_subscriptions_dict()
+    for vault in subs:
+        vault_dir = base / vault
+        if not vault_dir.is_dir():
+            continue  # already flagged by audit_subscription_vs_disk
+        if vault in clients:
+            findings.extend(audit_client_match(vault, vault_dir, clients[vault]))
+        else:
+            findings.append(AuditFinding(
+                LEVEL_INFO, vault, "no-client-mapping",
+                f"no entry in vault-clients.yaml for {vault} — skipping client check",
+            ))
+        findings.extend(audit_sidecar_consistency(vault, vault_dir))
+        if vault in remotes:
+            findings.extend(audit_git_remote_allowlist(vault, vault_dir, remotes[vault]))
+        else:
+            findings.append(AuditFinding(
+                LEVEL_INFO, vault, "no-remote-mapping",
+                f"no entry in vault-remotes.yaml for {vault} — skipping remote check",
+            ))
+    return findings
+
+
+def render_audit(findings: list[AuditFinding]) -> str:
+    """Format findings for terminal output. Groups by vault, then by level."""
+    if not findings:
+        return "pulse audit: clean ✓\n"
+    lines = ["pulse audit findings:", ""]
+    by_vault: dict[str, list[AuditFinding]] = {}
+    for f in findings:
+        by_vault.setdefault(f.vault or "(global)", []).append(f)
+    for vault in sorted(by_vault):
+        lines.append(f"▸ {vault}")
+        # Sort within a vault: errors first, then warnings, then info
+        for f in sorted(by_vault[vault], key=lambda x: -_LEVEL_RANK[x.level]):
+            marker = {"error": "✗", "warning": "⚠", "info": "·"}.get(f.level, "?")
+            lines.append(f"  {marker} [{f.level}] {f.check}: {f.message}")
+        lines.append("")
+    errs = sum(1 for f in findings if f.level == LEVEL_ERROR)
+    warns = sum(1 for f in findings if f.level == LEVEL_WARNING)
+    infos = sum(1 for f in findings if f.level == LEVEL_INFO)
+    lines.append(f"summary: errors={errs} warnings={warns} info={infos}")
+    return "\n".join(lines) + "\n"
+
+
 # ---------- argparse + main ----------
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -491,6 +727,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         choices=["daily", "weekly", "monthly", "full"],
                         help="Window scope (v1 always emits 24h+7d commit counts)")
     digest.add_argument("--vaults-base", default=None)
+
+    audit = sub.add_parser("audit", help="Cross-vault hygiene scan (spec §6.5 #5)")
+    audit.add_argument("--vaults-base", default=None)
+    audit.add_argument("--vault-clients", default=None,
+                       help="Path to vault→client mapping YAML (default: ~/.claude/vault-clients.yaml)")
+    audit.add_argument("--vault-remotes", default=None,
+                       help="Path to vault→remote URL mapping YAML (default: ~/.claude/vault-remotes.yaml)")
 
     return p.parse_args(argv)
 
@@ -526,6 +769,16 @@ def main(argv: list[str] | None = None) -> int:
                     args.vault, vaults_base=vaults_base, window=args.window,
                 ))
             return 0
+
+        if args.cmd == "audit":
+            findings = audit_all(
+                vaults_base=vaults_base,
+                vault_clients_path=Path(args.vault_clients) if args.vault_clients else None,
+                vault_remotes_path=Path(args.vault_remotes) if args.vault_remotes else None,
+            )
+            sys.stdout.write(render_audit(findings))
+            # Exit non-zero on any errors so cron surfaces them.
+            return 1 if any(f.level == LEVEL_ERROR for f in findings) else 0
 
         raise PulseError(f"unknown subcommand: {args.cmd}")
     except (PulseError, pr.ProjectResolutionError) as e:
