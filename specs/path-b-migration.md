@@ -156,6 +156,17 @@ Each decision was discussed explicitly with the user and locked in before this d
 
 ## Vault topology + git remotes
 
+> **Gotcha (2026-05-13 manual smoke)**: In Obsidian, open **each vault
+> subdirectory** (e.g. `~/vaults/JNS-Personal-Vault/`) as its own vault.
+> Do **not** open the parent `~/vaults/` directory — Dataview's `FROM
+> "Projects/_pulse"` queries assume the per-vault dir is the vault root.
+> Opening the parent silently breaks every Dataview block (Activity,
+> Decisions linked, Git on this device, Daily review queries) because the
+> path becomes `~/vaults/Projects/_pulse/` which doesn't exist. Symptom:
+> "No results to show for table query" everywhere. Fix: close that
+> mis-opened vault and re-open the correct per-vault subdirectory.
+
+
 ```
                   ┌────────────────────────────────────────┐
                   │   ~/agents/  (GitHub: jwj2002, all     │
