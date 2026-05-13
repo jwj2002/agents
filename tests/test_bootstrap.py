@@ -269,6 +269,138 @@ def test_allowlist_skipped_without_config(tmp_path):
     assert "allowlist enforcement is opt-in" in r.stdout
 
 
+# ---------- subscription recovery (Codex 2026-05-13 #2) ----------
+
+def _write_project_note(path: Path, project: str) -> None:
+    """Minimal Path B project note used by recovery tests."""
+    path.write_text(
+        "---\n"
+        f"project: {project}\n"
+        "host: jns-mac\n"
+        "client: personal\n"
+        "kind: personal\n"
+        "status: active\n"
+        "---\n\n"
+        f"# {project}\n"
+    )
+
+
+def test_recovery_rebuilds_subscriptions_from_vaults(tmp_path):
+    """Fresh device: vault has project notes, no subscription file → recovery writes it."""
+    (tmp_path / "vaults" / "JNS-Personal-Vault" / "Projects").mkdir(parents=True)
+    for project in ("agents", "buddy", "paul-jason"):
+        _write_project_note(
+            tmp_path / "vaults" / "JNS-Personal-Vault" / "Projects" / f"{project}.md",
+            project,
+        )
+
+    r = _run("--noninteractive", "--host-name", "test",
+             home=tmp_path, os_override="linux")
+    assert r.returncode == 0, r.stderr
+
+    subs_file = tmp_path / ".claude" / "dashboard-subscriptions.json"
+    assert subs_file.exists()
+    data = json.loads(subs_file.read_text())
+    assert "JNS-Personal-Vault" in data
+    assert data["JNS-Personal-Vault"]["subscribed"] == ["agents", "buddy", "paul-jason"]
+    assert data["JNS-Personal-Vault"]["ssh_writes"] == []
+    assert "recovered: 1 vault(s), 3 project subscription(s)" in r.stdout
+
+
+def test_recovery_preserves_populated_subscriptions(tmp_path):
+    """If subscription file already has entries, recovery is a no-op."""
+    (tmp_path / ".claude").mkdir()
+    existing = {"User-Vault": {"subscribed": ["agents"], "ssh_writes": ["jbox06"]}}
+    (tmp_path / ".claude" / "dashboard-subscriptions.json").write_text(json.dumps(existing))
+    # Also create vaults that recovery WOULD discover if it ran
+    (tmp_path / "vaults" / "DiscoverMe" / "Projects").mkdir(parents=True)
+    _write_project_note(
+        tmp_path / "vaults" / "DiscoverMe" / "Projects" / "new.md", "new"
+    )
+
+    r = _run("--noninteractive", "--host-name", "test",
+             home=tmp_path, os_override="linux")
+    assert r.returncode == 0
+    # File unchanged
+    after = json.loads((tmp_path / ".claude" / "dashboard-subscriptions.json").read_text())
+    assert after == existing
+    assert "already populated" in r.stdout
+
+
+def test_recovery_rebuilds_when_file_is_empty(tmp_path):
+    """If subscription file exists but has no populated vaults, recovery rebuilds."""
+    (tmp_path / ".claude").mkdir()
+    # Empty / no-entries shape
+    (tmp_path / ".claude" / "dashboard-subscriptions.json").write_text("{}\n")
+    (tmp_path / "vaults" / "V" / "Projects").mkdir(parents=True)
+    _write_project_note(tmp_path / "vaults" / "V" / "Projects" / "agents.md", "agents")
+
+    r = _run("--noninteractive", "--host-name", "test",
+             home=tmp_path, os_override="linux")
+    assert r.returncode == 0
+    data = json.loads((tmp_path / ".claude" / "dashboard-subscriptions.json").read_text())
+    assert data == {"V": {"subscribed": ["agents"], "ssh_writes": []}}
+
+
+def test_recovery_skipped_when_no_vaults_base(tmp_path):
+    """No ~/vaults/ dir → recovery gracefully skips."""
+    r = _run("--noninteractive", "--host-name", "test",
+             home=tmp_path, os_override="linux")
+    assert r.returncode == 0
+    assert "no" in r.stdout and "vaults" in r.stdout
+
+
+def test_recovery_ignores_archived_and_dot_dirs(tmp_path):
+    """Recovery must skip _archived/ and .hidden/ under ~/vaults/."""
+    base = tmp_path / "vaults"
+    # Real vault
+    (base / "Real" / "Projects").mkdir(parents=True)
+    _write_project_note(base / "Real" / "Projects" / "agents.md", "agents")
+    # Archived — must be ignored
+    (base / "_archived" / "OldVault" / "Projects").mkdir(parents=True)
+    _write_project_note(base / "_archived" / "OldVault" / "Projects" / "ghost.md", "ghost")
+    # Hidden — must be ignored
+    (base / ".hidden" / "Projects").mkdir(parents=True)
+    _write_project_note(base / ".hidden" / "Projects" / "x.md", "x")
+
+    r = _run("--noninteractive", "--host-name", "test",
+             home=tmp_path, os_override="linux")
+    assert r.returncode == 0
+    data = json.loads((tmp_path / ".claude" / "dashboard-subscriptions.json").read_text())
+    assert list(data.keys()) == ["Real"]
+
+
+def test_recovery_handles_vault_with_no_projects_dir(tmp_path):
+    """A vault dir that doesn't have Projects/ yet is skipped silently."""
+    base = tmp_path / "vaults"
+    (base / "Empty").mkdir(parents=True)  # no Projects/
+    (base / "Real" / "Projects").mkdir(parents=True)
+    _write_project_note(base / "Real" / "Projects" / "a.md", "a")
+
+    r = _run("--noninteractive", "--host-name", "test",
+             home=tmp_path, os_override="linux")
+    assert r.returncode == 0
+    data = json.loads((tmp_path / ".claude" / "dashboard-subscriptions.json").read_text())
+    assert list(data.keys()) == ["Real"]
+
+
+def test_recovery_idempotent_across_two_runs(tmp_path):
+    """Run twice; second run sees populated subscriptions and no-ops."""
+    (tmp_path / "vaults" / "V" / "Projects").mkdir(parents=True)
+    _write_project_note(tmp_path / "vaults" / "V" / "Projects" / "agents.md", "agents")
+
+    first = _run("--noninteractive", "--host-name", "test",
+                  home=tmp_path, os_override="linux")
+    assert first.returncode == 0
+    first_data = json.loads((tmp_path / ".claude" / "dashboard-subscriptions.json").read_text())
+
+    second = _run("--noninteractive", home=tmp_path, os_override="linux")
+    assert second.returncode == 0
+    assert "already populated" in second.stdout
+    after = json.loads((tmp_path / ".claude" / "dashboard-subscriptions.json").read_text())
+    assert after == first_data  # unchanged
+
+
 # ---------- help ----------
 
 def test_help_flag(tmp_path):

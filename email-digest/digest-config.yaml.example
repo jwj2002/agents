@@ -14,22 +14,26 @@
 #
 # Optional fields:
 #   description        — shown in `email-digest preset list`
-#   project            — "*" for all projects in vault, or specific name
-#   owner_filter       — owner string to annotate in digest header
+#   project            — "*" for all projects in vault (only "*" supported in v1;
+#                        a preset with a specific name is refused at runtime
+#                        because pulse digest doesn't filter by project yet —
+#                        rendering the whole vault would silently include
+#                        sibling projects the confirmation line doesn't mention)
+#   owner_filter       — informational annotation in digest header (no filtering)
 #   default_window     — daily | weekly | monthly | full (override with --window)
 
 sender: jjob@vital-enterprises.com
 
 presets:
   paul-jason:
-    description: "Weekly 1:1 prep digest for Paul"
+    description: "Weekly 1:1 prep digest for Paul (vault-wide until pulse gains --project filter)"
     vault: JNS-Personal-Vault
     client: personal
-    project: paul-jason
+    project: "*"
     owner_filter: Paul
     default_window: weekly
     recipient: ai-coder@vital-enterprises.com
-    subject_template: "Weekly status — paul-jason {date}"
+    subject_template: "Weekly status — JNS personal {date}"
 
   personal-archive:
     description: "Self-send for personal archival"

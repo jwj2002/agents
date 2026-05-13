@@ -169,6 +169,73 @@ setup_wsl_vaults_symlink() {
   echo "  symlinked: ~/vaults → $target"
 }
 
+# ---------- subscription recovery ----------
+#
+# On a fresh device the user typically has a vault (e.g. via Obsidian Sync
+# or a git clone of the vault repo) but no ~/.claude/dashboard-subscriptions.json.
+# After Path B's lib/project_resolver legacy-format removal, the resolver
+# can't find any projects without that file — the picker and project CLIs
+# break. This step scans existing vaults and rebuilds the subscription
+# file when it's missing/empty. Idempotent: never overrides a populated
+# subscription file (user's scope is authoritative once they've curated it).
+
+recover_subscriptions() {
+  subs="$HOME/.claude/dashboard-subscriptions.json"
+  vaults_base="$HOME/vaults"
+
+  if [ -f "$subs" ]; then
+    if SUBS_PATH="$subs" python3 - <<'PYEOF'
+import json, os, sys
+try:
+    data = json.load(open(os.environ["SUBS_PATH"]))
+    has_content = any(
+        isinstance(v, dict) and v.get("subscribed")
+        for v in (data or {}).values()
+    )
+except Exception:
+    has_content = False
+sys.exit(0 if has_content else 1)
+PYEOF
+    then
+      echo "  skip: $subs already populated"
+      return 0
+    fi
+  fi
+
+  if [ ! -d "$vaults_base" ]; then
+    echo "  skip: no $vaults_base — nothing to recover from"
+    return 0
+  fi
+
+  SUBS_PATH="$subs" VAULTS_BASE="$vaults_base" python3 - <<'PYEOF'
+import json, os
+from pathlib import Path
+
+vaults_base = Path(os.environ["VAULTS_BASE"])
+subs_path = Path(os.environ["SUBS_PATH"])
+out = {}
+for vault_dir in sorted(vaults_base.iterdir()):
+    if not vault_dir.is_dir():
+        continue
+    if vault_dir.name.startswith("_") or vault_dir.name.startswith("."):
+        continue
+    projects_dir = vault_dir / "Projects"
+    if not projects_dir.is_dir():
+        continue
+    projects = sorted(p.stem for p in projects_dir.glob("*.md"))
+    if projects:
+        out[vault_dir.name] = {"subscribed": projects, "ssh_writes": []}
+
+if not out:
+    print("  no vaults with project notes — nothing to recover")
+else:
+    subs_path.parent.mkdir(parents=True, exist_ok=True)
+    subs_path.write_text(json.dumps(out, indent=2) + "\n")
+    total = sum(len(v["subscribed"]) for v in out.values())
+    print(f"  recovered: {len(out)} vault(s), {total} project subscription(s)")
+PYEOF
+}
+
 # ---------- Obsidian community plugins ----------
 
 PLUGINS_JSON='["obsidian-tasks-plugin","dataview","templater-obsidian","calendar","obsidian-git"]'
@@ -298,6 +365,10 @@ main() {
       echo "  unknown OS — skipping platform-specific setup" >&2
       ;;
   esac
+
+  echo
+  echo "▸ subscription file (rebuild from vaults if missing)"
+  recover_subscriptions
 
   echo
   echo "▸ Obsidian community plugins"

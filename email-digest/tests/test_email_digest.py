@@ -135,14 +135,62 @@ def test_render_preset_digest_window_override(monkeypatch, tmp_path):
     assert "daily" in out
 
 
-def test_render_preset_digest_annotates_project_and_owner(monkeypatch, tmp_path):
+def test_render_preset_digest_annotates_owner_filter(monkeypatch, tmp_path):
     vaults_base = _setup_vault(monkeypatch, tmp_path, projects=[("a", "personal")])
     preset = {"vault": "V", "client": "personal", "recipient": "x@y",
               "subject_template": "{date}", "default_window": "daily",
-              "project": "a", "owner_filter": "Paul"}
+              "project": "*", "owner_filter": "Paul"}
     out = cli.render_preset_digest(preset, vaults_base=vaults_base)
-    assert "project: a" in out
     assert "owner filter: Paul" in out
+
+
+def test_render_preset_digest_refuses_project_scoped_preset(monkeypatch, tmp_path):
+    """Codex 2026-05-13 finding #1: a preset with `project: <name>` (not "*")
+    must be refused rather than rendering the whole vault — otherwise sibling
+    projects in the same vault get silently included even though the
+    confirmation line presented a narrower scope.
+    """
+    vaults_base = _setup_vault(monkeypatch, tmp_path,
+                                projects=[("a", "personal"), ("b", "personal")])
+    preset = {"vault": "V", "client": "personal", "recipient": "x@y",
+              "subject_template": "{date}", "default_window": "daily",
+              "project": "a"}
+    with pytest.raises(cli.DigestError, match="project-level filtering is not yet"):
+        cli.render_preset_digest(preset, vaults_base=vaults_base)
+
+
+def test_project_scoped_preset_never_leaks_sibling_projects(monkeypatch, tmp_path):
+    """End-to-end regression for the leakage scenario Codex flagged: vault has
+    same-client projects a + b; a preset that says `project: a` must NOT
+    produce any output containing b. The runtime refusal accomplishes this
+    by raising before render — assert the raise here.
+    """
+    vaults_base = _setup_vault(monkeypatch, tmp_path,
+                                projects=[("a", "personal"), ("b", "personal")])
+    preset = {"vault": "V", "client": "personal", "recipient": "x@y",
+              "subject_template": "{date}", "default_window": "daily",
+              "project": "a"}
+    with pytest.raises(cli.DigestError):
+        cli.render_preset_digest(preset, vaults_base=vaults_base)
+
+
+def test_render_preset_digest_wildcard_project_allowed(monkeypatch, tmp_path):
+    vaults_base = _setup_vault(monkeypatch, tmp_path,
+                                projects=[("a", "personal"), ("b", "personal")])
+    preset = {"vault": "V", "client": "personal", "recipient": "x@y",
+              "subject_template": "{date}", "default_window": "daily",
+              "project": "*"}
+    out = cli.render_preset_digest(preset, vaults_base=vaults_base)
+    assert "## a" in out
+    assert "## b" in out
+
+
+def test_render_preset_digest_no_project_field_treated_as_wildcard(monkeypatch, tmp_path):
+    vaults_base = _setup_vault(monkeypatch, tmp_path, projects=[("a", "personal")])
+    preset = {"vault": "V", "client": "personal", "recipient": "x@y",
+              "subject_template": "{date}", "default_window": "daily"}
+    out = cli.render_preset_digest(preset, vaults_base=vaults_base)
+    assert "## a" in out
 
 
 def test_render_preset_digest_invalid_window_errors(monkeypatch, tmp_path):

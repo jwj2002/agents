@@ -109,28 +109,41 @@ def render_preset_digest(
 ) -> str:
     """Render markdown digest body for a preset.
 
-    Calls ``pulse.cli.render_vault_digest`` for the preset's vault, then
-    applies the preset's ``project`` and ``owner_filter`` (currently
-    informational — pulse v1 doesn't filter by these, so we annotate the
-    digest header instead).
+    Calls ``pulse.cli.render_vault_digest`` for the preset's vault. The
+    rendered digest is the full vault — ``pulse digest`` v1 does not
+    support project-level filtering, so a preset with ``project`` set to
+    anything other than ``"*"`` is **refused** rather than silently
+    including sibling projects (Codex adversarial review, 2026-05-13:
+    project-level confidentiality leakage within a single-client vault
+    when the confirmation line presents a narrower scope than the payload).
+
+    ``owner_filter`` is informational only; pulse v1 doesn't filter by
+    owner. The annotation lands in the digest header so the recipient can
+    see the intended scope.
     """
     vault = preset["vault"]
     w = window or preset.get("default_window") or "daily"
     if w not in ALLOWED_WINDOWS:
         raise DigestError(f"invalid window {w!r}; allowed: {', '.join(ALLOWED_WINDOWS)}")
-    body = pulse_cli.render_vault_digest(vault, vaults_base=vaults_base, window=w)
 
     proj = preset.get("project") or "*"
-    owner = preset.get("owner_filter") or ""
-    header_tag = []
     if proj != "*":
-        header_tag.append(f"project: {proj}")
+        raise DigestError(
+            f"preset {proj!r} project-level filtering is not yet enforced — "
+            f"`pulse digest` v1 renders the whole vault.\n"
+            f"  Refusing rather than silently emailing sibling projects in vault "
+            f"{vault!r}.\n"
+            f"  Workaround: set `project: \"*\"` in this preset to send the full "
+            f"vault digest, or wait for `pulse digest --project NAME` filtering."
+        )
+
+    body = pulse_cli.render_vault_digest(vault, vaults_base=vaults_base, window=w)
+
+    owner = preset.get("owner_filter") or ""
     if owner:
-        header_tag.append(f"owner filter: {owner}")
-    if header_tag:
         body = body.replace(
             f"# {vault} —",
-            f"# {vault} (" + ", ".join(header_tag) + ") —",
+            f"# {vault} (owner filter: {owner}) —",
             1,
         )
     return body
