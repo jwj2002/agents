@@ -31,7 +31,6 @@ TABLE WITHOUT ID
   open_issues as "Open I"
 FROM "Projects/_pulse"
 SORT pulled_at DESC
-GROUP BY project
 LIMIT 10
 ```
 
@@ -50,7 +49,7 @@ LIST WITHOUT ID
     string(closed_actions_24h) + " actions closed, " +
     string(commits_24h) + " commits"
 FROM "Projects/_pulse"
-WHERE (closed_actions_24h > 0 OR commits_24h > 0) AND pulled_at >= dateadd(date(today), -1, "days")
+WHERE (closed_actions_24h > 0 OR commits_24h > 0) AND pulled_at >= date(today) - dur("1 day")
 SORT pulled_at DESC
 ```
 
@@ -58,7 +57,7 @@ SORT pulled_at DESC
 
 ```dataview
 LIST FROM "Decisions"
-WHERE created_at >= dateadd(date(today), -7, "days")
+WHERE created_at >= date(today) - dur("7 days")
 SORT created_at DESC
 ```
 
@@ -88,7 +87,7 @@ LIST WITHOUT ID
            "unreachable since " + last_reachable_at,
            "stale: " + pulled_at)
 FROM "Projects/_pulse"
-WHERE reachable = false OR pulled_at < dateadd(date(today), -1, "days")
+WHERE reachable = false OR pulled_at < date(today) - dur("1 day")
 ```
 
 ---
