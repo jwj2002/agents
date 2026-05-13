@@ -391,3 +391,250 @@ def test_main_no_subcommand_errors():
     with pytest.raises(SystemExit) as exc:
         cli.main([])
     assert exc.value.code == 2
+
+
+# ---------- list_sidecars ----------
+
+def test_list_sidecars_returns_all_hosts_for_project(monkeypatch, tmp_path):
+    vaults_base = _setup(
+        monkeypatch, tmp_path,
+        vaults={"V": {"subscribed": ["x"], "ssh_writes": []}},
+        projects=[("V", "x", "jns-mac")],
+    )
+    # Drop two sidecars for the same project on different hosts
+    pulse_dir = vaults_base / "V" / "Projects" / "_pulse"
+    pulse_dir.mkdir(parents=True)
+    for host in ("jns-mac", "jbox06"):
+        obsidian_md.write(pulse_dir / f"x--{host}.md", {
+            "project": "x", "host": host, "pulled_at": "2026-05-13T10:00:00Z",
+            "reachable": True, "branch": "main",
+        }, cli.SIDECAR_BODY)
+    out = cli.list_sidecars("V", "x", vaults_base=vaults_base)
+    hosts = [fm["host"] for _, fm in out]
+    assert hosts == ["jbox06", "jns-mac"]
+
+
+def test_list_sidecars_filters_to_project(monkeypatch, tmp_path):
+    vaults_base = _setup(
+        monkeypatch, tmp_path,
+        vaults={"V": {"subscribed": ["x", "y"], "ssh_writes": []}},
+        projects=[],
+    )
+    pulse_dir = vaults_base / "V" / "Projects" / "_pulse"
+    pulse_dir.mkdir(parents=True)
+    for p, h in [("x", "jns-mac"), ("y", "jns-mac")]:
+        obsidian_md.write(pulse_dir / f"{p}--{h}.md", {
+            "project": p, "host": h, "pulled_at": "2026-05-13T10:00:00Z",
+            "reachable": True,
+        }, cli.SIDECAR_BODY)
+    out = cli.list_sidecars("V", "x", vaults_base=vaults_base)
+    assert len(out) == 1
+    assert out[0][1]["project"] == "x"
+
+
+def test_list_sidecars_empty_when_no_pulse_dir(monkeypatch, tmp_path):
+    vaults_base = _setup(monkeypatch, tmp_path, vaults={"V": {}}, projects=[])
+    assert cli.list_sidecars("V", "anything", vaults_base=vaults_base) == []
+
+
+# ---------- render_report ----------
+
+def test_render_report_basic(monkeypatch, tmp_path):
+    vaults_base = _setup(
+        monkeypatch, tmp_path,
+        vaults={"V": {"subscribed": ["agents"], "ssh_writes": []}},
+        projects=[("V", "agents", "jns-mac")],
+    )
+    pulse_dir = vaults_base / "V" / "Projects" / "_pulse"
+    pulse_dir.mkdir(parents=True)
+    obsidian_md.write(pulse_dir / "agents--jns-mac.md", {
+        "project": "agents", "host": "jns-mac",
+        "pulled_at": "2026-05-13T17:00:00Z",
+        "reachable": True,
+        "last_commit_subject": "feat: x",
+        "commits_24h": 4, "commits_7d": 12,
+        "open_actions": 1, "open_issues": 5,
+        "branch": "main", "ahead_origin": 0, "behind_origin": 0,
+        "dirty": False, "stale_local_branches": [], "unpushed_branches": [],
+    }, cli.SIDECAR_BODY)
+
+    out = cli.render_report("V", "agents", vaults_base=vaults_base)
+    assert "# agents" in out
+    assert "**Status**: ACTIVE" in out
+    assert "**Focus**: test focus" in out
+    assert "## Activity (per host)" in out
+    assert "feat: x" in out
+    assert "jns-mac" in out
+
+
+def test_render_report_missing_note(monkeypatch, tmp_path):
+    vaults_base = _setup(monkeypatch, tmp_path, vaults={"V": {}}, projects=[])
+    out = cli.render_report("V", "ghost", vaults_base=vaults_base)
+    assert "ghost" in out
+    assert "Project note not found" in out
+
+
+def test_render_report_no_sidecars_yet(monkeypatch, tmp_path):
+    vaults_base = _setup(
+        monkeypatch, tmp_path,
+        vaults={"V": {"subscribed": ["x"], "ssh_writes": []}},
+        projects=[("V", "x", "jns-mac")],
+    )
+    out = cli.render_report("V", "x", vaults_base=vaults_base)
+    assert "no sidecars yet" in out
+
+
+def test_render_report_includes_blockers_and_questions(monkeypatch, tmp_path):
+    vaults_base = tmp_path / "vaults"
+    (vaults_base / "V" / "Projects").mkdir(parents=True)
+    obsidian_md.write(vaults_base / "V" / "Projects" / "x.md", {
+        "project": "x", "host": "jns-mac", "status": "blocked",
+        "focus": "stuck",
+        "blockers": ["waiting on infra"],
+        "next_steps": ["call infra"],
+        "open_questions": ["which region?"],
+    }, "body\n")
+    monkeypatch.setattr(pr, "VAULTS_BASE", vaults_base)
+    out = cli.render_report("V", "x", vaults_base=vaults_base)
+    assert "## Blockers" in out
+    assert "waiting on infra" in out
+    assert "## Next steps" in out
+    assert "call infra" in out
+    assert "## Open questions" in out
+    assert "which region?" in out
+
+
+def test_render_report_git_hygiene_section_appears(monkeypatch, tmp_path):
+    vaults_base = _setup(
+        monkeypatch, tmp_path,
+        vaults={"V": {"subscribed": ["x"], "ssh_writes": []}},
+        projects=[("V", "x", "jns-mac")],
+    )
+    pulse_dir = vaults_base / "V" / "Projects" / "_pulse"
+    pulse_dir.mkdir(parents=True)
+    obsidian_md.write(pulse_dir / "x--jns-mac.md", {
+        "project": "x", "host": "jns-mac", "pulled_at": "2026-05-13T17:00:00Z",
+        "reachable": True, "branch": "main",
+        "dirty": True, "ahead_origin": 3, "behind_origin": 0,
+        "stale_local_branches": ["old"], "unpushed_branches": [],
+    }, cli.SIDECAR_BODY)
+    out = cli.render_report("V", "x", vaults_base=vaults_base)
+    assert "## Git — needs attention" in out
+    assert "dirty" in out
+    assert "3↑" in out
+    assert "stale local: 1" in out
+
+
+# ---------- render_vault_digest ----------
+
+def test_render_vault_digest_lists_projects(monkeypatch, tmp_path):
+    vaults_base = _setup(
+        monkeypatch, tmp_path,
+        vaults={"V": {"subscribed": ["a", "b"], "ssh_writes": []}},
+        projects=[("V", "a", "jns-mac"), ("V", "b", "jns-mac")],
+    )
+    pulse_dir = vaults_base / "V" / "Projects" / "_pulse"
+    pulse_dir.mkdir(parents=True)
+    for p in ("a", "b"):
+        obsidian_md.write(pulse_dir / f"{p}--jns-mac.md", {
+            "project": p, "host": "jns-mac",
+            "pulled_at": "2026-05-13T17:00:00Z", "reachable": True,
+            "last_commit_subject": f"latest in {p}",
+            "commits_24h": 1, "commits_7d": 5,
+            "open_actions": 0, "open_issues": 2,
+        }, cli.SIDECAR_BODY)
+
+    out = cli.render_vault_digest("V", vaults_base=vaults_base, window="weekly")
+    assert "# V — digest (weekly" in out
+    assert "## a — active" in out
+    assert "## b — active" in out
+    assert "latest in a" in out
+    assert "latest in b" in out
+
+
+def test_render_vault_digest_handles_missing_subscription(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path, vaults={"V": {}}, projects=[])
+    out = cli.render_vault_digest("Other", vaults_base=tmp_path / "vaults", window="daily")
+    assert "Vault not in subscription" in out
+
+
+def test_render_vault_digest_no_subscribed_projects(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path, vaults={"V": {"subscribed": [], "ssh_writes": []}}, projects=[])
+    out = cli.render_vault_digest("V", vaults_base=tmp_path / "vaults", window="daily")
+    assert "No subscribed projects" in out
+
+
+# ---------- render_all_vaults_digest ----------
+
+def test_all_vaults_digest_jns_mac_only(monkeypatch, tmp_path):
+    _setup(
+        monkeypatch, tmp_path,
+        vaults={"V1": {"subscribed": [], "ssh_writes": []}},
+        projects=[],
+        local_host="vitalai-laptop",
+    )
+    with pytest.raises(cli.PulseError, match="jns-mac-only"):
+        cli.render_all_vaults_digest(vaults_base=tmp_path / "vaults")
+
+
+def test_all_vaults_digest_concats_on_jns_mac(monkeypatch, tmp_path):
+    vaults_base = _setup(
+        monkeypatch, tmp_path,
+        vaults={
+            "V1": {"subscribed": ["a"], "ssh_writes": []},
+            "V2": {"subscribed": ["b"], "ssh_writes": []},
+        },
+        projects=[("V1", "a", "jns-mac"), ("V2", "b", "jns-mac")],
+        local_host="jns-mac",
+    )
+    out = cli.render_all_vaults_digest(vaults_base=vaults_base)
+    assert "# V1 —" in out
+    assert "# V2 —" in out
+
+
+# ---------- main() report + digest ----------
+
+def test_main_report_renders(monkeypatch, tmp_path, capsys):
+    vaults_base = _setup(
+        monkeypatch, tmp_path,
+        vaults={"V": {"subscribed": ["x"], "ssh_writes": []}},
+        projects=[("V", "x", "jns-mac")],
+    )
+    rc = cli.main(["report", "--project", "x", "--vault", "V",
+                   "--vaults-base", str(vaults_base)])
+    assert rc == 0
+    assert "# x" in capsys.readouterr().out
+
+
+def test_main_report_auto_resolves_vault(monkeypatch, tmp_path, capsys):
+    vaults_base = _setup(
+        monkeypatch, tmp_path,
+        vaults={"V": {"subscribed": ["x"], "ssh_writes": []}},
+        projects=[("V", "x", "jns-mac")],
+    )
+    rc = cli.main(["report", "--project", "x", "--vaults-base", str(vaults_base)])
+    assert rc == 0
+
+
+def test_main_digest_vault(monkeypatch, tmp_path, capsys):
+    vaults_base = _setup(
+        monkeypatch, tmp_path,
+        vaults={"V": {"subscribed": ["x"], "ssh_writes": []}},
+        projects=[("V", "x", "jns-mac")],
+    )
+    rc = cli.main(["digest", "--vault", "V", "--vaults-base", str(vaults_base)])
+    assert rc == 0
+    assert "# V —" in capsys.readouterr().out
+
+
+def test_main_digest_all_vaults_refused_on_non_jns_mac(monkeypatch, tmp_path, capsys):
+    _setup(
+        monkeypatch, tmp_path,
+        vaults={"V": {"subscribed": [], "ssh_writes": []}},
+        projects=[],
+        local_host="vitalai-laptop",
+    )
+    rc = cli.main(["digest", "--all-vaults",
+                   "--vaults-base", str(tmp_path / "vaults")])
+    assert rc == 1
+    assert "jns-mac-only" in capsys.readouterr().err

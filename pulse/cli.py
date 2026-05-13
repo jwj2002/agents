@@ -253,12 +253,219 @@ def refresh_all(
     return summary
 
 
+# ---------- sidecar reading ----------
+
+def list_sidecars(
+    vault: str, project: str, *, vaults_base: Path | None = None,
+) -> list[tuple[Path, dict]]:
+    """Return [(path, frontmatter), ...] for every <project>--<host>.md sidecar."""
+    base = vaults_base if vaults_base is not None else _vaults_base()
+    pulse_dir = base / vault / "Projects" / "_pulse"
+    if not pulse_dir.is_dir():
+        return []
+    out = []
+    for p in sorted(pulse_dir.glob(f"{project}--*.md")):
+        try:
+            fm, _ = obsidian_md.load(p)
+        except obsidian_md.ObsidianMdError:
+            continue
+        out.append((p, fm))
+    return out
+
+
+# ---------- report ----------
+
+def render_report(
+    vault: str, project: str, *, vaults_base: Path | None = None,
+) -> str:
+    """Markdown report for one project: frontmatter summary + per-host sidecar table."""
+    note = project_note_path(vault, project, vaults_base=vaults_base)
+    if not note.exists():
+        return f"# {project}\n\n_Project note not found at_ `{note}`\n"
+    fm, _ = obsidian_md.load(note)
+    lines = [
+        f"# {project}",
+        "",
+        f"**Status**: {(fm.get('status') or '?').upper()} · "
+        f"**Host**: {fm.get('host', '?')} · "
+        f"**Updated**: {fm.get('status_updated', '?')}",
+        "",
+        f"**Focus**: {fm.get('focus') or '_(not set)_'}",
+        "",
+    ]
+
+    blockers = fm.get("blockers") or []
+    if blockers:
+        lines.append("## Blockers")
+        for b in blockers:
+            lines.append(f"- {b}")
+        lines.append("")
+
+    next_steps = fm.get("next_steps") or []
+    if next_steps:
+        lines.append("## Next steps")
+        for i, s in enumerate(next_steps, 1):
+            lines.append(f"{i}. {s}")
+        lines.append("")
+
+    questions = fm.get("open_questions") or []
+    if questions:
+        lines.append("## Open questions")
+        for q in questions:
+            lines.append(f"- {q}")
+        lines.append("")
+
+    sidecars = list_sidecars(vault, project, vaults_base=vaults_base)
+    if sidecars:
+        lines.append("## Activity (per host)")
+        lines.append("")
+        lines.append("| Host | Last pulse | Last commit | 24h | 7d | Open A | Open I |")
+        lines.append("|---|---|---|---:|---:|---:|---:|")
+        for _, sfm in sidecars:
+            actions = sfm.get("open_actions")
+            actions_cell = "—" if actions in (None, -1) else str(actions)
+            issues = sfm.get("open_issues")
+            issues_cell = "—" if issues is None else str(issues)
+            commit = sfm.get("last_commit_subject") or "—"
+            if len(commit) > 50:
+                commit = commit[:47] + "…"
+            lines.append(
+                f"| {sfm.get('host', '?')} | "
+                f"{sfm.get('pulled_at', '?')} | "
+                f"{commit} | "
+                f"{sfm.get('commits_24h', 0)} | "
+                f"{sfm.get('commits_7d', 0)} | "
+                f"{actions_cell} | "
+                f"{issues_cell} |"
+            )
+        lines.append("")
+
+        # Git hygiene block — one line per host with non-clean state
+        hygiene_lines = []
+        for _, sfm in sidecars:
+            parts = []
+            if sfm.get("dirty"):
+                parts.append("dirty")
+            ahead = sfm.get("ahead_origin", 0) or 0
+            behind = sfm.get("behind_origin", 0) or 0
+            if ahead:
+                parts.append(f"{ahead}↑")
+            if behind:
+                parts.append(f"{behind}↓")
+            stale = sfm.get("stale_local_branches") or []
+            if stale:
+                parts.append(f"stale local: {len(stale)}")
+            unpushed = sfm.get("unpushed_branches") or []
+            if unpushed:
+                parts.append(f"unpushed: {len(unpushed)}")
+            if not sfm.get("reachable", True):
+                parts.append("UNREACHABLE")
+            if parts:
+                hygiene_lines.append(f"- **{sfm.get('host', '?')}**: " + " · ".join(parts))
+        if hygiene_lines:
+            lines.append("## Git — needs attention")
+            lines.extend(hygiene_lines)
+            lines.append("")
+    else:
+        lines.append("_(no sidecars yet — run `pulse refresh` first)_")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+# ---------- digest ----------
+
+def render_vault_digest(
+    vault: str, *, vaults_base: Path | None = None, window: str = "daily",
+) -> str:
+    """Cross-project digest for one vault, suitable for terminal or email body."""
+    subs = pr.read_subscriptions_dict()
+    if vault not in subs:
+        return f"# {vault}\n\n_Vault not in subscription file._\n"
+    base = vaults_base if vaults_base is not None else _vaults_base()
+    today = hr.utc_now_iso().split("T")[0]
+    lines = [
+        f"# {vault} — digest ({window}, {today})",
+        "",
+    ]
+
+    projects = subs[vault].get("subscribed", [])
+    if not projects:
+        lines.append("_No subscribed projects in this vault._")
+        return "\n".join(lines) + "\n"
+
+    for project in projects:
+        note = base / vault / "Projects" / f"{project}.md"
+        if not note.exists():
+            lines.append(f"## {project} — _(no project note)_")
+            lines.append("")
+            continue
+        try:
+            fm, _ = obsidian_md.load(note)
+        except obsidian_md.ObsidianMdError:
+            lines.append(f"## {project} — _(unreadable project note)_")
+            lines.append("")
+            continue
+        status = (fm.get("status") or "?").lower()
+        lines.append(f"## {project} — {status}")
+        focus = fm.get("focus") or ""
+        if focus:
+            lines.append(f"**Focus**: {focus}")
+        # Activity from sidecars
+        sidecars = list_sidecars(vault, project, vaults_base=base)
+        if sidecars:
+            for _, sfm in sidecars:
+                host = sfm.get("host", "?")
+                commit = sfm.get("last_commit_subject") or "_(no commit)_"
+                if len(commit) > 60:
+                    commit = commit[:57] + "…"
+                c24 = sfm.get("commits_24h", 0)
+                c7 = sfm.get("commits_7d", 0)
+                actions = sfm.get("open_actions")
+                actions_cell = "—" if actions in (None, -1) else str(actions)
+                issues = sfm.get("open_issues")
+                issues_cell = "—" if issues is None else str(issues)
+                reach = "" if sfm.get("reachable", True) else " · UNREACHABLE"
+                lines.append(
+                    f"- **{host}**: {commit} · "
+                    f"{c24}c/24h · {c7}c/7d · "
+                    f"{actions_cell}A · {issues_cell}I{reach}"
+                )
+        # Blockers
+        blockers = fm.get("blockers") or []
+        if blockers:
+            lines.append("**Blockers**: " + "; ".join(str(b) for b in blockers))
+        lines.append("")
+
+    lines.append("---")
+    lines.append(f"Generated: {hr.utc_now_iso()}")
+    return "\n".join(lines) + "\n"
+
+
+def render_all_vaults_digest(
+    *, vaults_base: Path | None = None, window: str = "daily",
+) -> str:
+    """Cross-vault digest. jns-mac only (Codex F4 guardrail)."""
+    local_host = pr.get_host_name()
+    if local_host != "jns-mac":
+        raise PulseError(
+            f"--all-vaults is jns-mac-only (this device is '{local_host}'). "
+            f"Refusing to render cross-vault digest on a client laptop "
+            f"(spec §6.5 #2 / Codex F4)."
+        )
+    subs = pr.read_subscriptions_dict()
+    parts = []
+    for vault in subs:
+        parts.append(render_vault_digest(vault, vaults_base=vaults_base, window=window))
+    return "\n".join(parts)
+
+
 # ---------- argparse + main ----------
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="pulse",
-        description="Refresh per-host project sidecars (Path B).",
+        description="Refresh / report / digest per-host project sidecars (Path B).",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -270,6 +477,21 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     refresh.add_argument("--no-cache", action="store_true",
                          help="Bypass the host_resolver 5-min cache")
 
+    report = sub.add_parser("report", help="Single-project markdown report")
+    report.add_argument("--project", required=True, help="Project name")
+    report.add_argument("--vault", help="Vault (default: auto-resolve from subscription)")
+    report.add_argument("--vaults-base", default=None)
+
+    digest = sub.add_parser("digest", help="Cross-project markdown digest")
+    g = digest.add_mutually_exclusive_group(required=True)
+    g.add_argument("--vault", help="Render one vault's digest")
+    g.add_argument("--all-vaults", action="store_true",
+                   help="Render every vault's digest (jns-mac only)")
+    digest.add_argument("--window", default="daily",
+                        choices=["daily", "weekly", "monthly", "full"],
+                        help="Window scope (v1 always emits 24h+7d commit counts)")
+    digest.add_argument("--vaults-base", default=None)
+
     return p.parse_args(argv)
 
 
@@ -278,16 +500,35 @@ def main(argv: list[str] | None = None) -> int:
         argv = sys.argv[1:]
     try:
         args = parse_args(argv)
+        vaults_base = Path(args.vaults_base) if args.vaults_base else None
+
         if args.cmd == "refresh":
             refresh_all(
                 vault_filter=args.vault,
                 project_filter=args.project,
-                vaults_base=Path(args.vaults_base) if args.vaults_base else None,
+                vaults_base=vaults_base,
                 use_cache=not args.no_cache,
             )
             return 0
+
+        if args.cmd == "report":
+            vault = args.vault or pr.resolve_vault_for_project(args.project)
+            sys.stdout.write(render_report(vault, args.project, vaults_base=vaults_base))
+            return 0
+
+        if args.cmd == "digest":
+            if args.all_vaults:
+                sys.stdout.write(render_all_vaults_digest(
+                    vaults_base=vaults_base, window=args.window,
+                ))
+            else:
+                sys.stdout.write(render_vault_digest(
+                    args.vault, vaults_base=vaults_base, window=args.window,
+                ))
+            return 0
+
         raise PulseError(f"unknown subcommand: {args.cmd}")
-    except PulseError as e:
+    except (PulseError, pr.ProjectResolutionError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
