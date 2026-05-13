@@ -95,18 +95,24 @@ def project_dir_exists(name: str) -> bool:
 
 
 def list_known_projects() -> list[str]:
-    """All registered project YAMLs, filtered by this machine's subscriptions if non-empty.
+    """Projects known to this machine, sorted.
 
-    Falls back to all registered yamls if subscriptions file is missing or empty.
+    Source of truth depends on what's present:
+    - If the legacy YAML registry has entries, filter them by subscriptions
+      (legacy behavior — used by the test fixtures that monkeypatch
+      KNOWLEDGE_PROJECTS_DIR to a tmp dir).
+    - If the registry is empty or missing (Path B post-archival), return the
+      subscription list directly (aggregated across all vaults).
     """
-    if not KNOWLEDGE_PROJECTS_DIR.exists():
-        return []
-    all_registered = sorted(p.stem for p in KNOWLEDGE_PROJECTS_DIR.glob("*.yaml"))
     subs = read_subscriptions()
-    if not subs:
-        return all_registered
-    filtered = [p for p in all_registered if p in subs]
-    return filtered if filtered else all_registered
+    if KNOWLEDGE_PROJECTS_DIR.exists():
+        all_registered = sorted(p.stem for p in KNOWLEDGE_PROJECTS_DIR.glob("*.yaml"))
+        if all_registered:
+            if not subs:
+                return all_registered
+            filtered = [p for p in all_registered if p in subs]
+            return filtered if filtered else all_registered
+    return sorted(subs)
 
 
 def register_project(name: str, owner: str = "jason", host: str | None = None) -> Path:
