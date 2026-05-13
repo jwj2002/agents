@@ -78,17 +78,14 @@ def test_read_subscriptions_dict_empty(subs_file):
     assert pr.read_subscriptions_dict() == {}
 
 
-def test_read_subscriptions_dict_legacy_synthesizes_default_vault(subs_file):
+def test_read_subscriptions_dict_legacy_format_refused(subs_file):
+    """Legacy {"subscribed": [...]} is no longer supported — Path B migrated it.
+
+    Encountering it on read raises a clear error pointing at the migration script.
+    """
     subs_file.write_text(json.dumps({"subscribed": ["agents", "buddy"]}))
-    out = pr.read_subscriptions_dict()
-    assert out == {pr.DEFAULT_VAULT_FALLBACK: {"subscribed": ["agents", "buddy"], "ssh_writes": []}}
-
-
-def test_read_subscriptions_dict_legacy_does_not_rewrite_file(subs_file):
-    subs_file.write_text(json.dumps({"subscribed": ["agents"]}))
-    pr.read_subscriptions_dict()
-    on_disk = json.loads(subs_file.read_text())
-    assert "subscribed" in on_disk  # still legacy shape
+    with pytest.raises(pr.ProjectResolutionError, match="legacy flat format"):
+        pr.read_subscriptions_dict()
 
 
 def test_read_subscriptions_dict_vault_keyed(subs_file):
@@ -109,12 +106,7 @@ def test_read_subscriptions_dict_normalizes_missing_keys(subs_file):
     assert out["V1"] == {"subscribed": ["a"], "ssh_writes": []}
 
 
-# ---------- read_subscriptions (legacy aggregator over both formats) ----------
-
-def test_read_subscriptions_legacy_format(subs_file):
-    subs_file.write_text(json.dumps({"subscribed": ["a", "b"]}))
-    assert pr.read_subscriptions() == ["a", "b"]
-
+# ---------- read_subscriptions (vault-keyed aggregator) ----------
 
 def test_read_subscriptions_aggregates_across_vaults(subs_file):
     subs_file.write_text(json.dumps({
@@ -132,22 +124,16 @@ def test_read_subscriptions_dedups_across_vaults(subs_file):
     assert sorted(pr.read_subscriptions()) == ["extra", "shared"]
 
 
-# ---------- add/remove subscription preserves on-disk format ----------
+# ---------- add/remove subscription ----------
 
-def test_add_subscription_legacy_stays_legacy(subs_file):
-    subs_file.write_text(json.dumps({"subscribed": ["a"]}))
-    pr.add_subscription("b")
-    on_disk = json.loads(subs_file.read_text())
-    assert on_disk == {"subscribed": ["a", "b"]}
-
-
-def test_add_subscription_to_empty_writes_legacy(subs_file):
+def test_add_subscription_to_empty_writes_vault_keyed(subs_file, monkeypatch):
+    monkeypatch.setenv(pr.DEFAULT_VAULT_ENV, "DV")
     pr.add_subscription("a")
     on_disk = json.loads(subs_file.read_text())
-    assert on_disk == {"subscribed": ["a"]}
+    assert on_disk == {"DV": {"subscribed": ["a"], "ssh_writes": []}}
 
 
-def test_add_subscription_vault_keyed_routes_to_default_vault(subs_file, monkeypatch):
+def test_add_subscription_routes_to_default_vault(subs_file, monkeypatch):
     monkeypatch.setenv(pr.DEFAULT_VAULT_ENV, "DV")
     subs_file.write_text(json.dumps({
         "DV": {"subscribed": ["a"], "ssh_writes": []},
@@ -157,11 +143,17 @@ def test_add_subscription_vault_keyed_routes_to_default_vault(subs_file, monkeyp
     assert on_disk["DV"]["subscribed"] == ["a", "b"]
 
 
-def test_remove_subscription_legacy_stays_legacy(subs_file):
-    subs_file.write_text(json.dumps({"subscribed": ["a", "b"]}))
-    pr.remove_subscription("a")
+def test_add_subscription_idempotent_across_vaults(subs_file, monkeypatch):
+    """If `name` is already subscribed in any vault, add_subscription is a no-op."""
+    monkeypatch.setenv(pr.DEFAULT_VAULT_ENV, "DV")
+    subs_file.write_text(json.dumps({
+        "Other": {"subscribed": ["existing"], "ssh_writes": []},
+    }))
+    pr.add_subscription("existing")
     on_disk = json.loads(subs_file.read_text())
-    assert on_disk == {"subscribed": ["b"]}
+    # No DV vault created — existing entry honored
+    assert "DV" not in on_disk
+    assert on_disk["Other"]["subscribed"] == ["existing"]
 
 
 def test_remove_subscription_vault_keyed_drops_from_all_vaults(subs_file):
@@ -175,19 +167,7 @@ def test_remove_subscription_vault_keyed_drops_from_all_vaults(subs_file):
     assert "shared" not in on_disk["V2"]["subscribed"]
 
 
-# ---------- vault-aware ops migrate legacy on first write ----------
-
-def test_add_subscription_to_vault_migrates_legacy(subs_file, monkeypatch):
-    monkeypatch.setenv(pr.DEFAULT_VAULT_ENV, "DV")
-    subs_file.write_text(json.dumps({"subscribed": ["existing"]}))
-    pr.add_subscription_to_vault("NewVault", "fresh")
-    on_disk = json.loads(subs_file.read_text())
-    # Legacy entries land in DV
-    assert on_disk["DV"]["subscribed"] == ["existing"]
-    # New vault has the new entry
-    assert on_disk["NewVault"]["subscribed"] == ["fresh"]
-    assert on_disk["NewVault"]["ssh_writes"] == []
-
+# ---------- vault-aware ops ----------
 
 def test_add_subscription_to_vault_idempotent(subs_file):
     pr.add_subscription_to_vault("V", "p")
@@ -232,15 +212,6 @@ def test_claim_ssh_host_idempotent(subs_file):
     assert on_disk["V"]["ssh_writes"] == ["jbox06"]
 
 
-def test_claim_ssh_host_migrates_legacy(subs_file, monkeypatch):
-    monkeypatch.setenv(pr.DEFAULT_VAULT_ENV, "DV")
-    subs_file.write_text(json.dumps({"subscribed": ["a"]}))
-    pr.claim_ssh_host("V", "h1")
-    on_disk = json.loads(subs_file.read_text())
-    assert on_disk["DV"]["subscribed"] == ["a"]
-    assert on_disk["V"]["ssh_writes"] == ["h1"]
-
-
 def test_release_ssh_host(subs_file):
     pr.claim_ssh_host("V", "h1")
     pr.claim_ssh_host("V", "h2")
@@ -275,12 +246,6 @@ def test_resolve_vault_for_project_multiple_match_errors(subs_file):
     pr.add_subscription_to_vault("V2", "shared")
     with pytest.raises(pr.ProjectResolutionError, match="multiple vaults"):
         pr.resolve_vault_for_project("shared")
-
-
-def test_resolve_vault_for_project_legacy_routes_to_default(subs_file, monkeypatch):
-    monkeypatch.setenv(pr.DEFAULT_VAULT_ENV, "DV")
-    subs_file.write_text(json.dumps({"subscribed": ["agents"]}))
-    assert pr.resolve_vault_for_project("agents") == "DV"
 
 
 # ---------- write_subscriptions_dict ----------

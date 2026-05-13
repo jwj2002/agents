@@ -27,10 +27,14 @@ Public API (Path B vault-aware additions):
 - claim_ssh_host(vault, host) / release_ssh_host(vault, host)
 - default_vault() -> str
 
-The subscription file supports two on-disk shapes during the Path B
-transition: the legacy flat ``{"subscribed": [...]}`` and the new
-``{<vault>: {"subscribed": [...], "ssh_writes": [...]}}``. Legacy ops
-preserve the legacy shape; vault-aware ops migrate it on first write.
+On-disk shape (Path B, canonical):
+
+    {"<vault>": {"subscribed": [...], "ssh_writes": [...]}, ...}
+
+Legacy flat ``{"subscribed": [...]}`` is no longer supported —
+``scripts/migrate-to-pathb.py`` migrated it during the Path B cutover.
+A file detected in legacy shape raises ``ProjectResolutionError``
+pointing at the migration script.
 
 All failure modes raise ProjectResolutionError; callers translate to
 their own user-facing error type.
@@ -180,14 +184,15 @@ def set_host_name(name: str) -> None:
 
 # ---------- subscriptions ----------
 #
-# The subscription file at ~/.claude/dashboard-subscriptions.json supports
-# two on-disk shapes during the Path B transition:
-#   legacy:      {"subscribed": ["proj1", "proj2"]}
-#   vault-keyed: {"VAULT": {"subscribed": [...], "ssh_writes": [...]}, ...}
-# Legacy ops preserve legacy on writes; vault-aware ops migrate on first write.
+# Single canonical on-disk shape (Path B):
+#   {"<vault>": {"subscribed": [...], "ssh_writes": [...]}, ...}
+#
+# Legacy flat ``{"subscribed": [...]}`` is migrated by
+# ``scripts/migrate-to-pathb.py`` during the Path B cutover. Encountering
+# it on read raises ProjectResolutionError pointing at the migration script.
 
 def default_vault() -> str:
-    """Vault name for new vault-aware writes when none is specified."""
+    """Vault name for new writes when none is specified."""
     return os.environ.get(DEFAULT_VAULT_ENV, DEFAULT_VAULT_FALLBACK)
 
 
@@ -198,16 +203,20 @@ def vault_path(vault: str, vaults_base: Path | None = None) -> Path:
 
 
 def _read_raw_subscriptions() -> dict:
+    """Read the JSON file; refuse legacy-format files with a clear pointer."""
     try:
         data = json.loads(SUBSCRIPTIONS_PATH.read_text())
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _is_legacy_format(data: dict) -> bool:
-    """True iff data is the legacy ``{"subscribed": [...]}`` shape."""
-    return isinstance(data.get("subscribed"), list)
+    if not isinstance(data, dict):
+        return {}
+    if isinstance(data.get("subscribed"), list):
+        raise ProjectResolutionError(
+            f"{SUBSCRIPTIONS_PATH} is in legacy flat format. "
+            f"Run `python3 ~/agents/scripts/migrate-to-pathb.py --vault "
+            f"{default_vault()}` to migrate to vault-keyed shape."
+        )
+    return data
 
 
 def _write_raw_subscriptions(data: dict) -> None:
@@ -230,7 +239,10 @@ def _write_raw_subscriptions(data: dict) -> None:
 
 
 def _normalize_vault_keyed(raw: dict) -> dict:
-    """Coerce a vault-keyed dict into the canonical ``{vault: {subscribed, ssh_writes}}`` form."""
+    """Coerce raw input to the canonical ``{vault: {subscribed, ssh_writes}}`` shape.
+
+    Silently drops non-dict vault values and non-string entries in the lists.
+    """
     out: dict = {}
     for vault, vdata in raw.items():
         if not isinstance(vdata, dict):
@@ -246,19 +258,11 @@ def _normalize_vault_keyed(raw: dict) -> dict:
     return out
 
 
-def _migrate_legacy_to_vault_keyed(raw: dict, vault: str) -> dict:
-    """Move legacy ``subscribed: [...]`` into ``{vault: {subscribed, ssh_writes: []}}``."""
-    legacy = [s for s in (raw.get("subscribed") or []) if isinstance(s, str)]
-    return {vault: {"subscribed": legacy, "ssh_writes": []}}
-
-
 def read_subscriptions() -> list[str]:
-    """Aggregated subscribed project names across both formats. Sorted by insertion order."""
+    """Aggregated subscribed project names across all vaults, insertion order."""
     raw = _read_raw_subscriptions()
     if not raw:
         return []
-    if _is_legacy_format(raw):
-        return [s for s in (raw.get("subscribed") or []) if isinstance(s, str)]
     seen: set[str] = set()
     out: list[str] = []
     for vdata in _normalize_vault_keyed(raw).values():
@@ -270,37 +274,23 @@ def read_subscriptions() -> list[str]:
 
 
 def add_subscription(name: str) -> None:
-    """Subscribe ``name`` (machine-local). Preserves on-disk format.
+    """Subscribe ``name`` (machine-local). Routes new entries to ``default_vault()``.
 
-    - Empty/missing/legacy file: writes legacy shape with ``name`` appended.
-    - Vault-keyed file: no-op if already subscribed in any vault; otherwise
-      appends to default vault's ``subscribed`` list.
-    Idempotent — re-adding ``name`` is a no-op regardless of which vault holds it.
+    No-op if ``name`` is already subscribed in any vault. Idempotent.
     """
     raw = _read_raw_subscriptions()
-    if not raw or _is_legacy_format(raw):
-        subs = [s for s in (raw.get("subscribed") or []) if isinstance(s, str)]
-        if name not in subs:
-            subs.append(name)
-        _write_raw_subscriptions({"subscribed": subs})
-        return
-    # Vault-keyed: only add if not already subscribed somewhere
-    data = _normalize_vault_keyed(raw)
+    data = _normalize_vault_keyed(raw) if raw else {}
     if any(name in vdata["subscribed"] for vdata in data.values()):
         return
-    add_subscription_to_vault(default_vault(), name)
+    vdata = data.setdefault(default_vault(), {"subscribed": [], "ssh_writes": []})
+    vdata["subscribed"].append(name)
+    _write_raw_subscriptions(data)
 
 
 def remove_subscription(name: str) -> None:
     """Drop ``name`` from any vault that has it. No-op if absent or file missing."""
     raw = _read_raw_subscriptions()
     if not raw:
-        return
-    if _is_legacy_format(raw):
-        subs = [s for s in (raw.get("subscribed") or []) if isinstance(s, str)]
-        if name in subs:
-            subs.remove(name)
-            _write_raw_subscriptions({"subscribed": subs})
         return
     data = _normalize_vault_keyed(raw)
     changed = False
@@ -315,27 +305,22 @@ def remove_subscription(name: str) -> None:
 # ---------- vault-aware subscription operations ----------
 
 def read_subscriptions_dict() -> dict[str, dict]:
-    """Vault-keyed subscriptions. Synthesizes a default-vault view of legacy files (no rewrite)."""
+    """Vault-keyed subscriptions, canonicalized."""
     raw = _read_raw_subscriptions()
     if not raw:
         return {}
-    if _is_legacy_format(raw):
-        return _migrate_legacy_to_vault_keyed(raw, default_vault())
     return _normalize_vault_keyed(raw)
 
 
 def write_subscriptions_dict(data: dict[str, dict]) -> None:
-    """Atomic write of vault-keyed subscriptions (forces vault-keyed format on disk)."""
+    """Atomic write of vault-keyed subscriptions (canonicalizes on the way down)."""
     _write_raw_subscriptions(_normalize_vault_keyed(data))
 
 
 def add_subscription_to_vault(vault: str, name: str) -> None:
-    """Subscribe ``name`` in ``vault``. Migrates legacy file → vault-keyed if needed. Idempotent."""
+    """Subscribe ``name`` in ``vault``. Idempotent."""
     raw = _read_raw_subscriptions()
-    if _is_legacy_format(raw):
-        data = _migrate_legacy_to_vault_keyed(raw, default_vault())
-    else:
-        data = _normalize_vault_keyed(raw) if raw else {}
+    data = _normalize_vault_keyed(raw) if raw else {}
     vdata = data.setdefault(vault, {"subscribed": [], "ssh_writes": []})
     if name not in vdata["subscribed"]:
         vdata["subscribed"].append(name)
@@ -343,12 +328,9 @@ def add_subscription_to_vault(vault: str, name: str) -> None:
 
 
 def remove_subscription_from_vault(vault: str, name: str) -> None:
-    """Drop ``name`` from ``vault.subscribed``. No-op if absent. Migrates legacy → vault-keyed."""
+    """Drop ``name`` from ``vault.subscribed``. No-op if absent."""
     raw = _read_raw_subscriptions()
-    if _is_legacy_format(raw):
-        data = _migrate_legacy_to_vault_keyed(raw, default_vault())
-    else:
-        data = _normalize_vault_keyed(raw) if raw else {}
+    data = _normalize_vault_keyed(raw) if raw else {}
     if vault not in data:
         return
     if name in data[vault]["subscribed"]:
@@ -357,12 +339,9 @@ def remove_subscription_from_vault(vault: str, name: str) -> None:
 
 
 def claim_ssh_host(vault: str, host: str) -> None:
-    """Add ``host`` to ``vault.ssh_writes``. Idempotent. Migrates legacy → vault-keyed."""
+    """Add ``host`` to ``vault.ssh_writes``. Idempotent."""
     raw = _read_raw_subscriptions()
-    if _is_legacy_format(raw):
-        data = _migrate_legacy_to_vault_keyed(raw, default_vault())
-    else:
-        data = _normalize_vault_keyed(raw) if raw else {}
+    data = _normalize_vault_keyed(raw) if raw else {}
     vdata = data.setdefault(vault, {"subscribed": [], "ssh_writes": []})
     if host not in vdata["ssh_writes"]:
         vdata["ssh_writes"].append(host)
@@ -370,12 +349,9 @@ def claim_ssh_host(vault: str, host: str) -> None:
 
 
 def release_ssh_host(vault: str, host: str) -> None:
-    """Drop ``host`` from ``vault.ssh_writes``. No-op if absent. Migrates legacy → vault-keyed."""
+    """Drop ``host`` from ``vault.ssh_writes``. No-op if absent."""
     raw = _read_raw_subscriptions()
-    if _is_legacy_format(raw):
-        data = _migrate_legacy_to_vault_keyed(raw, default_vault())
-    else:
-        data = _normalize_vault_keyed(raw) if raw else {}
+    data = _normalize_vault_keyed(raw) if raw else {}
     if vault not in data:
         return
     if host in data[vault]["ssh_writes"]:
