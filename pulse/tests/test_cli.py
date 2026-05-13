@@ -888,3 +888,236 @@ def test_main_audit_returns_nonzero_on_errors(monkeypatch, tmp_path, capsys):
     assert rc == 1
     out = capsys.readouterr().out
     assert "client-mismatch" in out
+
+
+# ---------- offboard ----------
+
+def _offboard_setup(monkeypatch, tmp_path: Path, vault: str = "DyingVault") -> tuple[Path, Path, Path]:
+    """Create a fully-configured vault: dir + subscription + client mapping + remote mapping."""
+    vaults_base = tmp_path / "vaults"
+    (vaults_base / vault / "Projects").mkdir(parents=True)
+    subs_file = tmp_path / "subs.json"
+    subs_file.write_text(json.dumps({
+        vault: {"subscribed": ["x"], "ssh_writes": []},
+        "Other": {"subscribed": [], "ssh_writes": []},
+    }))
+    clients = tmp_path / "vault-clients.yaml"
+    clients.write_text(f"{vault}: dying\nOther: keep\n")
+    remotes = tmp_path / "vault-remotes.yaml"
+    remotes.write_text(f"{vault}: git@example.com:dying.git\nOther: git@example.com:keep.git\n")
+
+    monkeypatch.setattr(pr, "VAULTS_BASE", vaults_base)
+    monkeypatch.setattr(pr, "SUBSCRIPTIONS_PATH", subs_file)
+    return vaults_base, clients, remotes
+
+
+def test_offboard_dry_run_writes_nothing(monkeypatch, tmp_path):
+    vaults_base, clients, remotes = _offboard_setup(monkeypatch, tmp_path)
+    actions = cli.offboard_vault(
+        "DyingVault",
+        vaults_base=vaults_base,
+        vault_clients_path=clients,
+        vault_remotes_path=remotes,
+        dry_run=True,
+        today="2026-05-13",
+    )
+    # Plans are recorded
+    assert actions["move-vault"][0] == "would-move"
+    assert actions["subscription"][0] == "would-remove"
+    assert actions["vault-clients"][0] == "would-remove"
+    assert actions["vault-remotes"][0] == "would-remove"
+    # But nothing actually moved
+    assert (vaults_base / "DyingVault").exists()
+    assert "DyingVault" in pr.read_subscriptions_dict()
+    assert "DyingVault" in cli._load_vault_yaml_map(clients)
+    assert "DyingVault" in cli._load_vault_yaml_map(remotes)
+
+
+def test_offboard_for_real_moves_vault(monkeypatch, tmp_path):
+    vaults_base, clients, remotes = _offboard_setup(monkeypatch, tmp_path)
+    cli.offboard_vault(
+        "DyingVault",
+        vaults_base=vaults_base,
+        vault_clients_path=clients,
+        vault_remotes_path=remotes,
+        dry_run=False,
+        today="2026-05-13",
+    )
+    src = vaults_base / "DyingVault"
+    dst = vaults_base / "_archived" / "DyingVault-2026-05-13"
+    assert not src.exists()
+    assert dst.exists()
+    assert (dst / "Projects").is_dir()
+
+
+def test_offboard_for_real_removes_subscription(monkeypatch, tmp_path):
+    vaults_base, clients, remotes = _offboard_setup(monkeypatch, tmp_path)
+    cli.offboard_vault(
+        "DyingVault",
+        vaults_base=vaults_base,
+        vault_clients_path=clients,
+        vault_remotes_path=remotes,
+        dry_run=False,
+        today="2026-05-13",
+    )
+    subs = pr.read_subscriptions_dict()
+    assert "DyingVault" not in subs
+    assert "Other" in subs  # other vaults preserved
+
+
+def test_offboard_for_real_removes_from_vault_clients(monkeypatch, tmp_path):
+    vaults_base, clients, remotes = _offboard_setup(monkeypatch, tmp_path)
+    cli.offboard_vault(
+        "DyingVault",
+        vaults_base=vaults_base,
+        vault_clients_path=clients,
+        vault_remotes_path=remotes,
+        dry_run=False,
+        today="2026-05-13",
+    )
+    after = cli._load_vault_yaml_map(clients)
+    assert "DyingVault" not in after
+    assert after["Other"] == "keep"
+
+
+def test_offboard_for_real_removes_from_vault_remotes(monkeypatch, tmp_path):
+    vaults_base, clients, remotes = _offboard_setup(monkeypatch, tmp_path)
+    cli.offboard_vault(
+        "DyingVault",
+        vaults_base=vaults_base,
+        vault_clients_path=clients,
+        vault_remotes_path=remotes,
+        dry_run=False,
+        today="2026-05-13",
+    )
+    after = cli._load_vault_yaml_map(remotes)
+    assert "DyingVault" not in after
+    assert after["Other"] == "git@example.com:keep.git"
+
+
+def test_offboard_blocked_when_destination_exists(monkeypatch, tmp_path):
+    vaults_base, clients, remotes = _offboard_setup(monkeypatch, tmp_path)
+    # Pre-create destination
+    (vaults_base / "_archived" / "DyingVault-2026-05-13").mkdir(parents=True)
+    actions = cli.offboard_vault(
+        "DyingVault",
+        vaults_base=vaults_base,
+        vault_clients_path=clients,
+        vault_remotes_path=remotes,
+        dry_run=False,
+        today="2026-05-13",
+    )
+    assert actions["move-vault"][0] == "blocked"
+    # Source still in place
+    assert (vaults_base / "DyingVault").exists()
+
+
+def test_offboard_idempotent_after_completion(monkeypatch, tmp_path):
+    vaults_base, clients, remotes = _offboard_setup(monkeypatch, tmp_path)
+    # First run: real offboard
+    cli.offboard_vault(
+        "DyingVault",
+        vaults_base=vaults_base,
+        vault_clients_path=clients,
+        vault_remotes_path=remotes,
+        dry_run=False,
+        today="2026-05-13",
+    )
+    # Second run: should all-skip cleanly
+    actions = cli.offboard_vault(
+        "DyingVault",
+        vaults_base=vaults_base,
+        vault_clients_path=clients,
+        vault_remotes_path=remotes,
+        dry_run=False,
+        today="2026-05-13",
+    )
+    assert actions["move-vault"][0] == "skipped"
+    assert actions["subscription"][0] == "skipped"
+    assert actions["vault-clients"][0] == "skipped"
+    assert actions["vault-remotes"][0] == "skipped"
+
+
+def test_offboard_digest_presets_deferred_message(monkeypatch, tmp_path):
+    vaults_base, clients, remotes = _offboard_setup(monkeypatch, tmp_path)
+    actions = cli.offboard_vault(
+        "DyingVault",
+        vaults_base=vaults_base,
+        vault_clients_path=clients,
+        vault_remotes_path=remotes,
+        dry_run=True,
+        today="2026-05-13",
+    )
+    assert actions["digest-presets"][0] == "deferred"
+    assert "#167" in actions["digest-presets"][1]
+
+
+def test_write_vault_yaml_map_removes_file_when_empty(tmp_path):
+    path = tmp_path / "x.yaml"
+    path.write_text("V: x\n")
+    cli._write_vault_yaml_map(path, {})
+    assert not path.exists()
+
+
+def test_write_vault_yaml_map_rewrites_remaining(tmp_path):
+    path = tmp_path / "x.yaml"
+    path.write_text("A: a\nB: b\nC: c\n")
+    cli._write_vault_yaml_map(path, {"B": "b"})
+    assert path.read_text().strip() == "B: b"
+
+
+def test_render_offboard_marks_actions_clearly():
+    actions = {
+        "move-vault": ("moved", "/a", "/b"),
+        "subscription": ("removed", "V"),
+        "digest-presets": ("deferred", "manual step"),
+    }
+    out = cli.render_offboard("V", actions, dry_run=False)
+    assert "✓ move-vault" in out
+    assert "✓ subscription" in out
+    assert "⏭ digest-presets" in out
+
+
+def test_render_offboard_dry_run_suggests_for_real():
+    actions = {"move-vault": ("would-move", "/a", "/b")}
+    out = cli.render_offboard("V", actions, dry_run=True)
+    assert "DRY RUN" in out
+    assert "Re-run with --for-real" in out
+
+
+# ---------- main() offboard ----------
+
+def test_main_vault_offboard_dry_run(monkeypatch, tmp_path, capsys):
+    vaults_base, clients, remotes = _offboard_setup(monkeypatch, tmp_path)
+    rc = cli.main([
+        "vault", "offboard", "--vault", "DyingVault", "--dry-run",
+        "--vaults-base", str(vaults_base),
+        "--vault-clients", str(clients),
+        "--vault-remotes", str(remotes),
+    ])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "DRY RUN" in out
+    assert "would-move" in out
+    # Side-effect-free
+    assert (vaults_base / "DyingVault").exists()
+
+
+def test_main_vault_offboard_for_real(monkeypatch, tmp_path, capsys):
+    vaults_base, clients, remotes = _offboard_setup(monkeypatch, tmp_path)
+    rc = cli.main([
+        "vault", "offboard", "--vault", "DyingVault", "--for-real",
+        "--vaults-base", str(vaults_base),
+        "--vault-clients", str(clients),
+        "--vault-remotes", str(remotes),
+    ])
+    assert rc == 0
+    assert not (vaults_base / "DyingVault").exists()
+    assert "DyingVault" not in pr.read_subscriptions_dict()
+
+
+def test_main_vault_offboard_requires_mode(monkeypatch, tmp_path):
+    _offboard_setup(monkeypatch, tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["vault", "offboard", "--vault", "DyingVault"])
+    assert exc.value.code == 2

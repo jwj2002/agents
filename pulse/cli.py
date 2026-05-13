@@ -674,6 +674,131 @@ def audit_all(
     return findings
 
 
+# ---------- vault offboard ----------
+
+def _write_vault_yaml_map(path: Path, data: dict[str, str]) -> None:
+    """Rewrite a vault YAML map. Comments and ordering are not preserved
+    (the file is regenerated from the dict). Empty data → file removed."""
+    if not data:
+        if path.exists():
+            path.unlink()
+        return
+    lines = [f"{k}: {v}" for k, v in sorted(data.items())]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n")
+
+
+def offboard_vault(
+    vault: str,
+    *,
+    vaults_base: Path | None = None,
+    vault_clients_path: Path | None = None,
+    vault_remotes_path: Path | None = None,
+    dry_run: bool = True,
+    today: str | None = None,
+) -> dict:
+    """Off-board a vault. Moves dir to ``_archived/`` and removes from config files.
+
+    Returns a dict mapping action name → ``(status, *args)`` for both dry-run
+    and real-run modes. Idempotent: skips steps whose precondition isn't met.
+
+    Skipped explicitly (deferred to #167):
+    - Email-digest preset removal from ``~/.claude/digest-config.yaml``
+    """
+    base = vaults_base if vaults_base is not None else _vaults_base()
+    clients_path = vault_clients_path if vault_clients_path is not None else VAULT_CLIENTS_PATH
+    remotes_path = vault_remotes_path if vault_remotes_path is not None else VAULT_REMOTES_PATH
+
+    import datetime as _dt
+    today = today or _dt.date.today().isoformat()
+    src = base / vault
+    dst = base / "_archived" / f"{vault}-{today}"
+
+    actions: dict = {}
+
+    # 1. Move vault dir
+    if src.is_dir():
+        if dst.exists():
+            actions["move-vault"] = ("blocked", f"destination exists: {dst}")
+        elif dry_run:
+            actions["move-vault"] = ("would-move", str(src), str(dst))
+        else:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            src.rename(dst)
+            actions["move-vault"] = ("moved", str(src), str(dst))
+    else:
+        actions["move-vault"] = ("skipped", f"not a directory: {src}")
+
+    # 2. Subscription file
+    subs = pr.read_subscriptions_dict()
+    if vault in subs:
+        if dry_run:
+            actions["subscription"] = ("would-remove", vault)
+        else:
+            del subs[vault]
+            pr.write_subscriptions_dict(subs)
+            actions["subscription"] = ("removed", vault)
+    else:
+        actions["subscription"] = ("skipped", f"{vault} not in subscriptions")
+
+    # 3. vault-clients.yaml
+    clients = _load_vault_yaml_map(clients_path)
+    if vault in clients:
+        if dry_run:
+            actions["vault-clients"] = ("would-remove", vault)
+        else:
+            del clients[vault]
+            _write_vault_yaml_map(clients_path, clients)
+            actions["vault-clients"] = ("removed", vault)
+    else:
+        actions["vault-clients"] = ("skipped", f"{vault} not in {clients_path.name}")
+
+    # 4. vault-remotes.yaml
+    remotes = _load_vault_yaml_map(remotes_path)
+    if vault in remotes:
+        if dry_run:
+            actions["vault-remotes"] = ("would-remove", vault)
+        else:
+            del remotes[vault]
+            _write_vault_yaml_map(remotes_path, remotes)
+            actions["vault-remotes"] = ("removed", vault)
+    else:
+        actions["vault-remotes"] = ("skipped", f"{vault} not in {remotes_path.name}")
+
+    # 5. Email digest presets — deferred
+    actions["digest-presets"] = (
+        "deferred",
+        "remove presets for this vault manually from ~/.claude/digest-config.yaml (#167)",
+    )
+
+    return actions
+
+
+def render_offboard(vault: str, actions: dict, *, dry_run: bool) -> str:
+    """Format offboard actions for terminal output."""
+    header = f"pulse vault offboard {vault} {'(DRY RUN)' if dry_run else ''}"
+    lines = [header, ""]
+    for step, payload in actions.items():
+        status = payload[0]
+        rest = payload[1:]
+        if status in ("moved", "removed"):
+            marker = "✓"
+        elif status in ("would-move", "would-remove"):
+            marker = "·"
+        elif status == "blocked":
+            marker = "✗"
+        elif status == "deferred":
+            marker = "⏭"
+        else:
+            marker = " "
+        detail = " — ".join(str(x) for x in rest)
+        lines.append(f"  {marker} {step}: {status}{(' — ' + detail) if detail else ''}")
+    lines.append("")
+    if dry_run:
+        lines.append("Re-run with --for-real to execute.")
+    return "\n".join(lines) + "\n"
+
+
 def render_audit(findings: list[AuditFinding]) -> str:
     """Format findings for terminal output. Groups by vault, then by level."""
     if not findings:
@@ -735,6 +860,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     audit.add_argument("--vault-remotes", default=None,
                        help="Path to vault→remote URL mapping YAML (default: ~/.claude/vault-remotes.yaml)")
 
+    vault = sub.add_parser("vault", help="Vault management")
+    vault_sub = vault.add_subparsers(dest="vault_cmd", required=True)
+    offboard = vault_sub.add_parser("offboard", help="Off-board a vault (spec §6.5 #6)")
+    offboard.add_argument("--vault", required=True, dest="vault_name",
+                          help="Vault name to off-board")
+    mode = offboard.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--dry-run", action="store_true", dest="dry_run")
+    mode.add_argument("--for-real", action="store_true", dest="for_real")
+    offboard.add_argument("--vaults-base", default=None)
+    offboard.add_argument("--vault-clients", default=None)
+    offboard.add_argument("--vault-remotes", default=None)
+
     return p.parse_args(argv)
 
 
@@ -779,6 +916,18 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(render_audit(findings))
             # Exit non-zero on any errors so cron surfaces them.
             return 1 if any(f.level == LEVEL_ERROR for f in findings) else 0
+
+        if args.cmd == "vault" and args.vault_cmd == "offboard":
+            dry_run = bool(args.dry_run)
+            actions = offboard_vault(
+                args.vault_name,
+                vaults_base=vaults_base,
+                vault_clients_path=Path(args.vault_clients) if args.vault_clients else None,
+                vault_remotes_path=Path(args.vault_remotes) if args.vault_remotes else None,
+                dry_run=dry_run,
+            )
+            sys.stdout.write(render_offboard(args.vault_name, actions, dry_run=dry_run))
+            return 0
 
         raise PulseError(f"unknown subcommand: {args.cmd}")
     except (PulseError, pr.ProjectResolutionError) as e:
