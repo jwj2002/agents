@@ -206,9 +206,9 @@ def test_project_dir_exists_missing(monkeypatch, tmp_path):
 # ---------- read_subscriptions ----------
 
 def test_read_subscriptions_normal(monkeypatch, tmp_path):
-    """Valid JSON with subscribed list → returns list of strings."""
+    """Vault-keyed JSON → returns aggregated list across vaults."""
     subs_file = tmp_path / "subs.json"
-    subs_file.write_text('{"subscribed": ["agents", "paul-jason"]}')
+    subs_file.write_text('{"V": {"subscribed": ["agents", "paul-jason"], "ssh_writes": []}}')
     monkeypatch.setattr(cli.project_resolver, "SUBSCRIPTIONS_PATH", subs_file)
     result = cli.read_subscriptions()
     assert result == ["agents", "paul-jason"]
@@ -221,9 +221,9 @@ def test_read_subscriptions_missing_file(monkeypatch, tmp_path):
 
 
 def test_read_subscriptions_empty_array(monkeypatch, tmp_path):
-    """subscribed: [] → returns []."""
+    """Vault with empty subscribed list → returns []."""
     subs_file = tmp_path / "subs.json"
-    subs_file.write_text('{"subscribed": []}')
+    subs_file.write_text('{"V": {"subscribed": [], "ssh_writes": []}}')
     monkeypatch.setattr(cli.project_resolver, "SUBSCRIPTIONS_PATH", subs_file)
     assert cli.read_subscriptions() == []
 
@@ -231,25 +231,27 @@ def test_read_subscriptions_empty_array(monkeypatch, tmp_path):
 # ---------- add_subscription ----------
 
 def test_add_subscription_creates_file(monkeypatch, tmp_path):
-    """add_subscription creates file if absent and writes [name]."""
+    """add_subscription on a missing file writes the canonical vault-keyed shape."""
     subs_file = tmp_path / "subs.json"
     monkeypatch.setattr(cli.project_resolver, "SUBSCRIPTIONS_PATH", subs_file)
+    monkeypatch.setenv(cli.project_resolver.DEFAULT_VAULT_ENV, "DV")
     cli.add_subscription("sweetprocess")
     import json as _json
     data = _json.loads(subs_file.read_text())
-    assert data["subscribed"] == ["sweetprocess"]
+    assert data == {"DV": {"subscribed": ["sweetprocess"], "ssh_writes": []}}
 
 
 def test_add_subscription_appends(monkeypatch, tmp_path):
-    """add_subscription appends to existing list and does not duplicate."""
+    """add_subscription appends to the default vault's list and does not duplicate."""
     subs_file = tmp_path / "subs.json"
-    subs_file.write_text('{"subscribed": ["agents"]}')
+    monkeypatch.setenv(cli.project_resolver.DEFAULT_VAULT_ENV, "DV")
+    subs_file.write_text('{"DV": {"subscribed": ["agents"], "ssh_writes": []}}')
     monkeypatch.setattr(cli.project_resolver, "SUBSCRIPTIONS_PATH", subs_file)
     cli.add_subscription("sweetprocess")
     cli.add_subscription("sweetprocess")  # second call must not duplicate
     import json as _json
     data = _json.loads(subs_file.read_text())
-    assert data["subscribed"] == ["agents", "sweetprocess"]
+    assert data["DV"]["subscribed"] == ["agents", "sweetprocess"]
 
 
 # ---------- register_project ----------
@@ -272,9 +274,8 @@ def test_register_project_creates_yaml(monkeypatch, tmp_path):
     assert 'updated_at: "' in content  # must be quoted
     assert "updated_by: jason" in content
 
-    import json as _json
-    subs = _json.loads(subs_file.read_text())
-    assert "myproj" in subs["subscribed"]
+    # add_subscription writes vault-keyed; check via aggregator
+    assert "myproj" in cli.read_subscriptions()
 
 
 def test_register_project_already_exists(monkeypatch, tmp_path):
@@ -299,7 +300,7 @@ def test_list_known_projects_filters_subs(monkeypatch, tmp_path):
     for name in ["alpha", "beta", "gamma"]:
         (projects_dir / f"{name}.yaml").write_text("")
     subs_file = tmp_path / "subs.json"
-    subs_file.write_text('{"subscribed": ["alpha", "gamma"]}')
+    subs_file.write_text('{"V": {"subscribed": ["alpha", "gamma"], "ssh_writes": []}}')
     monkeypatch.setattr(cli.project_resolver, "KNOWLEDGE_PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(cli.project_resolver, "SUBSCRIPTIONS_PATH", subs_file)
     result = cli.list_known_projects()
@@ -313,7 +314,7 @@ def test_list_known_projects_empty_subs_fallback(monkeypatch, tmp_path):
     for name in ["alpha", "beta"]:
         (projects_dir / f"{name}.yaml").write_text("")
     subs_file = tmp_path / "subs.json"
-    subs_file.write_text('{"subscribed": []}')
+    subs_file.write_text('{"V": {"subscribed": [], "ssh_writes": []}}')
     monkeypatch.setattr(cli.project_resolver, "KNOWLEDGE_PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(cli.project_resolver, "SUBSCRIPTIONS_PATH", subs_file)
     result = cli.list_known_projects()
@@ -353,7 +354,7 @@ def test_no_disk_dir_no_tty_error_message(monkeypatch, tmp_path):
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     subs_file = tmp_path / "subs.json"
-    subs_file.write_text('{"subscribed": ["agents"]}')
+    subs_file.write_text('{"V": {"subscribed": ["agents"], "ssh_writes": []}}')
 
     monkeypatch.setattr(cli.project_resolver, "HOME", fake_home)
     monkeypatch.setattr(cli.project_resolver, "KNOWLEDGE_PROJECTS_DIR", projects_dir)

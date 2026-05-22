@@ -1,10 +1,10 @@
 """Project name resolution + registration + per-machine subscriptions + host name.
 
-Tool-agnostic. Used by `action/cli.py`, `project/cli.py`, and any future
-CLI that needs to resolve a project name from cwd / --project flag and
-manage `~/.claude/dashboard-subscriptions.json`.
+Tool-agnostic. Used by `action/cli.py`, `project/cli.py`, `decision/cli.py`,
+and any future CLI that needs to resolve a project name from cwd / --project
+flag and manage `~/.claude/dashboard-subscriptions.json`.
 
-Public API:
+Public API (legacy, retained):
 - resolve_from_cwd() -> str | None
 - list_known_projects() -> list[str]
 - project_yaml_path(name) -> Path
@@ -17,14 +17,35 @@ Public API:
 - interactive_pick(candidates, header) -> str  (TTY)
 - resolve_with_picker(name, no_prompt=False) -> str  (combined resolver)
 
+Public API (Path B vault-aware additions):
+- read_subscriptions_dict() -> dict[vault, {subscribed, ssh_writes}]
+- write_subscriptions_dict(data) — atomic write, vault-keyed format
+- resolve_vault_for_project(name) -> str
+- vault_path(vault) / project_md_path(name, vault=None) /
+  decision_md_path(decision_id, vault)
+- add_subscription_to_vault(vault, name) / remove_subscription_from_vault(vault, name)
+- claim_ssh_host(vault, host) / release_ssh_host(vault, host)
+- default_vault() -> str
+
+On-disk shape (Path B, canonical):
+
+    {"<vault>": {"subscribed": [...], "ssh_writes": [...]}, ...}
+
+Legacy flat ``{"subscribed": [...]}`` is no longer supported —
+``scripts/migrate-to-pathb.py`` migrated it during the Path B cutover.
+A file detected in legacy shape raises ``ProjectResolutionError``
+pointing at the migration script.
+
 All failure modes raise ProjectResolutionError; callers translate to
 their own user-facing error type.
 """
 from __future__ import annotations
 
 import json
+import os
 import socket
 import sys
+import tempfile
 from datetime import date
 from pathlib import Path
 
@@ -32,6 +53,10 @@ HOME = Path.home()
 KNOWLEDGE_PROJECTS_DIR = HOME / "agents" / "knowledge" / "projects"
 SUBSCRIPTIONS_PATH = HOME / ".claude" / "dashboard-subscriptions.json"
 HOST_NAME_PATH = HOME / ".claude" / "host-name"
+VAULTS_BASE = HOME / "vaults"
+
+DEFAULT_VAULT_ENV = "AGENTS_DEFAULT_VAULT"
+DEFAULT_VAULT_FALLBACK = "JNS-Personal-Vault"
 
 
 class ProjectResolutionError(Exception):
@@ -74,18 +99,24 @@ def project_dir_exists(name: str) -> bool:
 
 
 def list_known_projects() -> list[str]:
-    """All registered project YAMLs, filtered by this machine's subscriptions if non-empty.
+    """Projects known to this machine, sorted.
 
-    Falls back to all registered yamls if subscriptions file is missing or empty.
+    Source of truth depends on what's present:
+    - If the legacy YAML registry has entries, filter them by subscriptions
+      (legacy behavior — used by the test fixtures that monkeypatch
+      KNOWLEDGE_PROJECTS_DIR to a tmp dir).
+    - If the registry is empty or missing (Path B post-archival), return the
+      subscription list directly (aggregated across all vaults).
     """
-    if not KNOWLEDGE_PROJECTS_DIR.exists():
-        return []
-    all_registered = sorted(p.stem for p in KNOWLEDGE_PROJECTS_DIR.glob("*.yaml"))
     subs = read_subscriptions()
-    if not subs:
-        return all_registered
-    filtered = [p for p in all_registered if p in subs]
-    return filtered if filtered else all_registered
+    if KNOWLEDGE_PROJECTS_DIR.exists():
+        all_registered = sorted(p.stem for p in KNOWLEDGE_PROJECTS_DIR.glob("*.yaml"))
+        if all_registered:
+            if not subs:
+                return all_registered
+            filtered = [p for p in all_registered if p in subs]
+            return filtered if filtered else all_registered
+    return sorted(subs)
 
 
 def register_project(name: str, owner: str = "jason", host: str | None = None) -> Path:
@@ -152,46 +183,219 @@ def set_host_name(name: str) -> None:
 
 
 # ---------- subscriptions ----------
+#
+# Single canonical on-disk shape (Path B):
+#   {"<vault>": {"subscribed": [...], "ssh_writes": [...]}, ...}
+#
+# Legacy flat ``{"subscribed": [...]}`` is migrated by
+# ``scripts/migrate-to-pathb.py`` during the Path B cutover. Encountering
+# it on read raises ProjectResolutionError pointing at the migration script.
 
-def read_subscriptions() -> list[str]:
-    """Read subscribed project names. Returns [] on missing / malformed / empty."""
+def default_vault() -> str:
+    """Vault name for new writes when none is specified."""
+    return os.environ.get(DEFAULT_VAULT_ENV, DEFAULT_VAULT_FALLBACK)
+
+
+def vault_path(vault: str, vaults_base: Path | None = None) -> Path:
+    """Path to a vault's directory."""
+    base = vaults_base if vaults_base is not None else VAULTS_BASE
+    return base / vault
+
+
+def _read_raw_subscriptions() -> dict:
+    """Read the JSON file; refuse legacy-format files with a clear pointer."""
     try:
         data = json.loads(SUBSCRIPTIONS_PATH.read_text())
-        subs = data.get("subscribed", [])
-        return [s for s in subs if isinstance(s, str)]
-    except (FileNotFoundError, json.JSONDecodeError, AttributeError):
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    if isinstance(data.get("subscribed"), list):
+        raise ProjectResolutionError(
+            f"{SUBSCRIPTIONS_PATH} is in legacy flat format. "
+            f"Run `python3 ~/agents/scripts/migrate-to-pathb.py --vault "
+            f"{default_vault()}` to migrate to vault-keyed shape."
+        )
+    return data
+
+
+def _write_raw_subscriptions(data: dict) -> None:
+    """Atomic JSON write of the subscription file."""
+    SUBSCRIPTIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_str = tempfile.mkstemp(
+        prefix=SUBSCRIPTIONS_PATH.name + ".",
+        suffix=".tmp",
+        dir=str(SUBSCRIPTIONS_PATH.parent),
+    )
+    tmp = Path(tmp_str)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data, indent=2) + "\n")
+        os.replace(tmp, SUBSCRIPTIONS_PATH)
+    except Exception:
+        if tmp.exists():
+            tmp.unlink()
+        raise
+
+
+def _normalize_vault_keyed(raw: dict) -> dict:
+    """Coerce raw input to the canonical ``{vault: {subscribed, ssh_writes}}`` shape.
+
+    Silently drops non-dict vault values and non-string entries in the lists.
+    """
+    out: dict = {}
+    for vault, vdata in raw.items():
+        if not isinstance(vdata, dict):
+            continue
+        out[vault] = {
+            "subscribed": [
+                s for s in (vdata.get("subscribed") or []) if isinstance(s, str)
+            ],
+            "ssh_writes": [
+                h for h in (vdata.get("ssh_writes") or []) if isinstance(h, str)
+            ],
+        }
+    return out
+
+
+def read_subscriptions() -> list[str]:
+    """Aggregated subscribed project names across all vaults, insertion order."""
+    raw = _read_raw_subscriptions()
+    if not raw:
         return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for vdata in _normalize_vault_keyed(raw).values():
+        for name in vdata["subscribed"]:
+            if name not in seen:
+                seen.add(name)
+                out.append(name)
+    return out
 
 
 def add_subscription(name: str) -> None:
-    """Append name to dashboard-subscriptions.json, creating the file if absent. Idempotent."""
-    try:
-        data = json.loads(SUBSCRIPTIONS_PATH.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
-        data = {}
-    if not isinstance(data, dict):
-        data = {}
-    subs: list[str] = data.get("subscribed", []) if isinstance(data.get("subscribed"), list) else []
-    if name not in subs:
-        subs.append(name)
-    data["subscribed"] = subs
-    SUBSCRIPTIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SUBSCRIPTIONS_PATH.write_text(json.dumps(data, indent=2) + "\n")
+    """Subscribe ``name`` (machine-local). Routes new entries to ``default_vault()``.
+
+    No-op if ``name`` is already subscribed in any vault. Idempotent.
+    """
+    raw = _read_raw_subscriptions()
+    data = _normalize_vault_keyed(raw) if raw else {}
+    if any(name in vdata["subscribed"] for vdata in data.values()):
+        return
+    vdata = data.setdefault(default_vault(), {"subscribed": [], "ssh_writes": []})
+    vdata["subscribed"].append(name)
+    _write_raw_subscriptions(data)
 
 
 def remove_subscription(name: str) -> None:
-    """Drop name from dashboard-subscriptions.json. No-op if name absent or file missing."""
-    try:
-        data = json.loads(SUBSCRIPTIONS_PATH.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
+    """Drop ``name`` from any vault that has it. No-op if absent or file missing."""
+    raw = _read_raw_subscriptions()
+    if not raw:
         return
-    if not isinstance(data, dict):
+    data = _normalize_vault_keyed(raw)
+    changed = False
+    for vdata in data.values():
+        if name in vdata["subscribed"]:
+            vdata["subscribed"].remove(name)
+            changed = True
+    if changed:
+        _write_raw_subscriptions(data)
+
+
+# ---------- vault-aware subscription operations ----------
+
+def read_subscriptions_dict() -> dict[str, dict]:
+    """Vault-keyed subscriptions, canonicalized."""
+    raw = _read_raw_subscriptions()
+    if not raw:
+        return {}
+    return _normalize_vault_keyed(raw)
+
+
+def write_subscriptions_dict(data: dict[str, dict]) -> None:
+    """Atomic write of vault-keyed subscriptions (canonicalizes on the way down)."""
+    _write_raw_subscriptions(_normalize_vault_keyed(data))
+
+
+def add_subscription_to_vault(vault: str, name: str) -> None:
+    """Subscribe ``name`` in ``vault``. Idempotent."""
+    raw = _read_raw_subscriptions()
+    data = _normalize_vault_keyed(raw) if raw else {}
+    vdata = data.setdefault(vault, {"subscribed": [], "ssh_writes": []})
+    if name not in vdata["subscribed"]:
+        vdata["subscribed"].append(name)
+    _write_raw_subscriptions(data)
+
+
+def remove_subscription_from_vault(vault: str, name: str) -> None:
+    """Drop ``name`` from ``vault.subscribed``. No-op if absent."""
+    raw = _read_raw_subscriptions()
+    data = _normalize_vault_keyed(raw) if raw else {}
+    if vault not in data:
         return
-    subs: list[str] = data.get("subscribed", []) if isinstance(data.get("subscribed"), list) else []
-    if name in subs:
-        subs.remove(name)
-    data["subscribed"] = subs
-    SUBSCRIPTIONS_PATH.write_text(json.dumps(data, indent=2) + "\n")
+    if name in data[vault]["subscribed"]:
+        data[vault]["subscribed"].remove(name)
+        _write_raw_subscriptions(data)
+
+
+def claim_ssh_host(vault: str, host: str) -> None:
+    """Add ``host`` to ``vault.ssh_writes``. Idempotent."""
+    raw = _read_raw_subscriptions()
+    data = _normalize_vault_keyed(raw) if raw else {}
+    vdata = data.setdefault(vault, {"subscribed": [], "ssh_writes": []})
+    if host not in vdata["ssh_writes"]:
+        vdata["ssh_writes"].append(host)
+    _write_raw_subscriptions(data)
+
+
+def release_ssh_host(vault: str, host: str) -> None:
+    """Drop ``host`` from ``vault.ssh_writes``. No-op if absent."""
+    raw = _read_raw_subscriptions()
+    data = _normalize_vault_keyed(raw) if raw else {}
+    if vault not in data:
+        return
+    if host in data[vault]["ssh_writes"]:
+        data[vault]["ssh_writes"].remove(host)
+        _write_raw_subscriptions(data)
+
+
+# ---------- vault / project / decision paths ----------
+
+def resolve_vault_for_project(name: str) -> str:
+    """Find which vault has ``name`` subscribed. Errors if zero or many matches."""
+    subs = read_subscriptions_dict()
+    matches = [v for v, vdata in subs.items() if name in vdata["subscribed"]]
+    if not matches:
+        raise ProjectResolutionError(
+            f"project {name!r} not subscribed in any vault. "
+            f"Run: project {name} --subscribe (or --subscribe-to-vault VAULT)"
+        )
+    if len(matches) > 1:
+        raise ProjectResolutionError(
+            f"project {name!r} subscribed in multiple vaults: {', '.join(matches)}. "
+            f"Pick one and unsubscribe from the others."
+        )
+    return matches[0]
+
+
+def project_md_path(
+    name: str,
+    vault: str | None = None,
+    vaults_base: Path | None = None,
+) -> Path:
+    """Path to ``<vault>/Projects/<name>.md``. Resolves vault if not given."""
+    if vault is None:
+        vault = resolve_vault_for_project(name)
+    return vault_path(vault, vaults_base) / "Projects" / f"{name}.md"
+
+
+def decision_md_path(
+    decision_id: str,
+    vault: str,
+    vaults_base: Path | None = None,
+) -> Path:
+    """Path to ``<vault>/Decisions/D-NNN.md``."""
+    return vault_path(vault, vaults_base) / "Decisions" / f"{decision_id}.md"
 
 
 # ---------- interactive picker ----------

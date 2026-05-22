@@ -1,0 +1,45 @@
+# Example digest config. Copy to ~/.claude/digest-config.yaml and edit.
+#
+# Per-machine, not synced across devices. Presets target exactly one vault;
+# cross-vault digests are not supported by presets (use `pulse digest
+# --all-vaults` directly on jns-mac for that).
+#
+# Required preset fields:
+#   vault              — which vault to render
+#   client             — expected client value; vault-validation refuses send
+#                        if any project in the rendered digest has a different
+#                        client: (spec §6.5 #1)
+#   recipient          — email address (use --unblock-recipient if blocked)
+#   subject_template   — Python str.format with {date} and {vault}
+#
+# Optional fields:
+#   description        — shown in `email-digest preset list`
+#   project            — "*" for all projects in vault (only "*" supported in v1;
+#                        a preset with a specific name is refused at runtime
+#                        because pulse digest doesn't filter by project yet —
+#                        rendering the whole vault would silently include
+#                        sibling projects the confirmation line doesn't mention)
+#   owner_filter       — informational annotation in digest header (no filtering)
+#   default_window     — daily | weekly | monthly | full (override with --window)
+
+sender: jjob@vital-enterprises.com
+
+presets:
+  paul-jason:
+    description: "Weekly 1:1 prep digest for Paul (vault-wide until pulse gains --project filter)"
+    vault: JNS-Personal-Vault
+    client: personal
+    project: "*"
+    owner_filter: Paul
+    default_window: weekly
+    recipient: ai-coder@vital-enterprises.com
+    subject_template: "Weekly status — JNS personal {date}"
+
+  personal-archive:
+    description: "Self-send for personal archival"
+    vault: JNS-Personal-Vault
+    client: personal
+    project: "*"
+    default_window: weekly
+    recipient: jasonwadejob@gmail.com
+    subject_template: "Personal digest — {vault} {date}"

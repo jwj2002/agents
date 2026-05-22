@@ -1,12 +1,20 @@
 # Cross-Device Project State
 
-> **Status**: FINAL — 2026-05-08 (Phase 7.1 only; 7.2 + 7.3 stubs reserved)
-> **Context**: A-013 closed the investigation half of `PLAN.md` Phase 7.
-> This doc is the architectural decision record. Implementation is split:
-> Phase 7.1 (this PR) is the spec + the cheap-insurance schema field;
-> Phase 7.2 (separate PR, triggered when needed) is the SSH-bridge
-> implementation that lets a single dashboard render see project state
-> across hosts.
+> **Status (2026-05-13)**: Phase 7.1 still describes the live `host:` field
+> convention on project notes. **Phase 7.2 (SSH bridge) is superseded by
+> Path B** — see `specs/path-b-migration.md`. The SSH-bridge concept was
+> redesigned around per-host sidecars at
+> `<vault>/Projects/_pulse/<project>--<host>.md` written by `pulse refresh`
+> (using `lib/host_resolver.py`), under a single-writer-per-host
+> convention declared in `~/.claude/dashboard-subscriptions.json`. The
+> `pulse digest` / `pulse audit` CLIs then read the sidecars. Phase 7.3
+> (write-from-anywhere) remains out of scope.
+>
+> **Phase 7.1 historical context** (FINAL — 2026-05-08): A-013 closed the
+> investigation half of `PLAN.md` Phase 7. This doc was the architectural
+> decision record. Implementation was split: Phase 7.1 (the spec + the
+> cheap-insurance `host:` schema field) shipped first; Phase 7.2 was
+> deferred. Path B then absorbed and reshaped 7.2.
 
 ---
 

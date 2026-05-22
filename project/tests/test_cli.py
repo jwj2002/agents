@@ -1,4 +1,4 @@
-"""Tests for project/cli.py — view/update project YAML."""
+"""Tests for project/cli.py — Obsidian project note frontmatter mutation."""
 from __future__ import annotations
 
 import json
@@ -8,65 +8,94 @@ from pathlib import Path
 import pytest
 import yaml
 
-# Repo root on path so we can import project.cli + lib.project_resolver
+# Repo root on path so we can import project.cli + lib.*
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 import project.cli as cli
+from lib import obsidian_md
+from lib import project_resolver as pr
 
 
 # ---------- fixtures ----------
 
-_MIN_YAML = """\
-project: testproj
-status: active
-focus: Initial focus
-next_steps: []
-blockers: []
-open_questions: []
-specs: []
-dependencies: []
-updated_at: '2026-01-01'
-updated_by: jason
+_MIN_BODY = """\
+# {name}
+
+## Purpose
+*(one sentence)*
+
+## Stack
+*(languages)*
+
+## Notes / journal
+*(your free-form area)*
 """
 
 
-_RICH_YAML = """\
-project: rich
-status: paused
-focus: Rich project
-next_steps:
-  - Step A
-  - Step B
-blockers:
-  - Blocker one
-open_questions:
-  - Why?
-specs: []
-dependencies: []
-updated_at: '2026-01-01'
-updated_by: jason
-"""
+def _project_note(name: str, **overrides) -> str:
+    """Render a minimal project note with the given frontmatter overrides."""
+    fm = {
+        "project": name,
+        "host": "jns-mac",
+        "client": "personal",
+        "kind": "engineering-tool",
+        "status": "active",
+        "focus": "Initial focus",
+        "status_updated": "2026-01-01",
+        "blockers": [],
+        "next_steps": [],
+        "open_questions": [],
+        "stack": [],
+        "repo_path": "",
+        "repo_remote": "",
+    }
+    fm.update(overrides)
+    return obsidian_md.dump(fm, _MIN_BODY.format(name=name), field_order=cli.PROJECT_FIELDS_ORDER)
 
 
-def _patch_resolver(monkeypatch, tmp_path: Path, name: str = "testproj", yaml_content: str = _MIN_YAML):
-    """Wire resolve_with_picker + YAML path to a tmp project. Returns the YAML path."""
-    projects_dir = tmp_path / "knowledge" / "projects"
+def _wire_vault(monkeypatch, tmp_path: Path, name: str = "testproj", **fm_overrides) -> Path:
+    """Create a vault layout, subscribe `name` to it, and patch resolver paths.
+
+    Returns the project note path inside the tmp vault.
+    """
+    vaults_root = tmp_path / "vaults"
+    vault_name = "TestVault"
+    projects_dir = vaults_root / vault_name / "Projects"
     projects_dir.mkdir(parents=True)
-    yaml_path = projects_dir / f"{name}.yaml"
-    yaml_path.write_text(yaml_content)
-    subs_file = tmp_path / "subs.json"
+    note_path = projects_dir / f"{name}.md"
+    note_path.write_text(_project_note(name, **fm_overrides))
 
-    monkeypatch.setattr(cli.project_resolver, "KNOWLEDGE_PROJECTS_DIR", projects_dir)
-    monkeypatch.setattr(cli.project_resolver, "SUBSCRIPTIONS_PATH", subs_file)
-    # Resolve_with_picker delegates to lib; just stub it to return the name.
+    subs_file = tmp_path / "subs.json"
+    subs_file.write_text(json.dumps({
+        vault_name: {"subscribed": [name], "ssh_writes": []},
+    }))
+
+    monkeypatch.setattr(pr, "VAULTS_BASE", vaults_root)
+    monkeypatch.setattr(pr, "SUBSCRIPTIONS_PATH", subs_file)
     monkeypatch.setattr(cli, "resolve_with_picker", lambda n, no_prompt=False: name)
-    monkeypatch.setattr(cli, "project_yaml_path", lambda n: yaml_path)
-    return yaml_path
+    return note_path
+
+
+def _read_fm(path: Path) -> dict:
+    fm, _ = obsidian_md.load(path)
+    return fm
+
+
+def _read_body(path: Path) -> str:
+    _, body = obsidian_md.load(path)
+    return body
 
 
 # ---------- read mode ----------
 
 def test_read_mode_renders_fields(monkeypatch, tmp_path, capsys):
-    _patch_resolver(monkeypatch, tmp_path, "rich", _RICH_YAML)
+    _wire_vault(
+        monkeypatch, tmp_path, "rich",
+        status="paused",
+        focus="Rich project",
+        next_steps=["Step A", "Step B"],
+        blockers=["Blocker one"],
+        open_questions=["Why?"],
+    )
     rc = cli.main(["rich", "--no-prompt"])
     assert rc == 0
     out = capsys.readouterr().out
@@ -78,10 +107,18 @@ def test_read_mode_renders_fields(monkeypatch, tmp_path, capsys):
     assert "Why?" in out
 
 
-def test_read_mode_missing_yaml_errors(monkeypatch, tmp_path, capsys):
-    name = "ghost"
-    monkeypatch.setattr(cli, "resolve_with_picker", lambda n, no_prompt=False: name)
-    monkeypatch.setattr(cli, "project_yaml_path", lambda n: tmp_path / f"{n}.yaml")
+def test_read_mode_missing_note_errors(monkeypatch, tmp_path, capsys):
+    """Project subscribed but note file missing → clear error."""
+    vaults_root = tmp_path / "vaults"
+    (vaults_root / "TestVault" / "Projects").mkdir(parents=True)
+    subs_file = tmp_path / "subs.json"
+    subs_file.write_text(json.dumps({
+        "TestVault": {"subscribed": ["ghost"], "ssh_writes": []},
+    }))
+    monkeypatch.setattr(pr, "VAULTS_BASE", vaults_root)
+    monkeypatch.setattr(pr, "SUBSCRIPTIONS_PATH", subs_file)
+    monkeypatch.setattr(cli, "resolve_with_picker", lambda n, no_prompt=False: "ghost")
+
     rc = cli.main(["ghost", "--no-prompt"])
     assert rc == 1
     err = capsys.readouterr().err
@@ -90,25 +127,24 @@ def test_read_mode_missing_yaml_errors(monkeypatch, tmp_path, capsys):
 
 # ---------- write modes ----------
 
-def test_set_focus(monkeypatch, tmp_path, capsys):
-    yaml_path = _patch_resolver(monkeypatch, tmp_path)
+def test_set_focus(monkeypatch, tmp_path):
+    note = _wire_vault(monkeypatch, tmp_path)
     rc = cli.main(["testproj", "--focus", "New focus", "--no-prompt"])
     assert rc == 0
-    data = yaml.safe_load(yaml_path.read_text())
-    assert data["focus"] == "New focus"
-    assert data["updated_at"] != "2026-01-01"  # bumped
+    fm = _read_fm(note)
+    assert fm["focus"] == "New focus"
+    assert fm["status_updated"] != "2026-01-01"  # bumped
 
 
 def test_set_status_valid(monkeypatch, tmp_path):
-    yaml_path = _patch_resolver(monkeypatch, tmp_path)
+    note = _wire_vault(monkeypatch, tmp_path)
     rc = cli.main(["testproj", "--status", "blocked", "--no-prompt"])
     assert rc == 0
-    data = yaml.safe_load(yaml_path.read_text())
-    assert data["status"] == "blocked"
+    assert _read_fm(note)["status"] == "blocked"
 
 
 def test_set_status_invalid(monkeypatch, tmp_path, capsys):
-    _patch_resolver(monkeypatch, tmp_path)
+    _wire_vault(monkeypatch, tmp_path)
     rc = cli.main(["testproj", "--status", "frozen", "--no-prompt"])
     assert rc == 1
     err = capsys.readouterr().err
@@ -116,81 +152,65 @@ def test_set_status_invalid(monkeypatch, tmp_path, capsys):
 
 
 def test_add_next_step(monkeypatch, tmp_path):
-    yaml_path = _patch_resolver(monkeypatch, tmp_path)
-    rc = cli.main(["testproj", "--next", "First step", "--next", "Second step", "--no-prompt"])
+    note = _wire_vault(monkeypatch, tmp_path)
+    rc = cli.main(["testproj", "--next", "First", "--next", "Second", "--no-prompt"])
     assert rc == 0
-    data = yaml.safe_load(yaml_path.read_text())
-    assert data["next_steps"] == ["First step", "Second step"]
+    assert _read_fm(note)["next_steps"] == ["First", "Second"]
 
 
 def test_remove_next_step_exact(monkeypatch, tmp_path):
-    yaml_path = _patch_resolver(monkeypatch, tmp_path, "rich", _RICH_YAML)
+    note = _wire_vault(monkeypatch, tmp_path, "rich", next_steps=["Step A", "Step B"])
     rc = cli.main(["rich", "--done", "Step A", "--no-prompt"])
     assert rc == 0
-    data = yaml.safe_load(yaml_path.read_text())
-    assert data["next_steps"] == ["Step B"]
+    assert _read_fm(note)["next_steps"] == ["Step B"]
 
 
 def test_remove_next_step_substring(monkeypatch, tmp_path):
-    yaml_path = _patch_resolver(monkeypatch, tmp_path, "rich", _RICH_YAML)
-    rc = cli.main(["rich", "--done", "step b", "--no-prompt"])  # case-insensitive substring
+    note = _wire_vault(monkeypatch, tmp_path, "rich", next_steps=["Step A", "Step B"])
+    rc = cli.main(["rich", "--done", "step b", "--no-prompt"])  # case-insensitive
     assert rc == 0
-    data = yaml.safe_load(yaml_path.read_text())
-    assert data["next_steps"] == ["Step A"]
+    assert _read_fm(note)["next_steps"] == ["Step A"]
 
 
 def test_remove_next_step_no_match(monkeypatch, tmp_path, capsys):
-    _patch_resolver(monkeypatch, tmp_path, "rich", _RICH_YAML)
+    _wire_vault(monkeypatch, tmp_path, "rich", next_steps=["Step A"])
     rc = cli.main(["rich", "--done", "nonexistent", "--no-prompt"])
     assert rc == 1
-    err = capsys.readouterr().err
-    assert "no item matching" in err
+    assert "no item matching" in capsys.readouterr().err
 
 
 def test_remove_ambiguous_match(monkeypatch, tmp_path, capsys):
-    multi_yaml = """\
-project: multi
-status: active
-focus: ''
-next_steps:
-  - foo task one
-  - foo task two
-blockers: []
-open_questions: []
-specs: []
-dependencies: []
-updated_at: '2026-01-01'
-updated_by: jason
-"""
-    _patch_resolver(monkeypatch, tmp_path, "multi", multi_yaml)
+    _wire_vault(
+        monkeypatch, tmp_path, "multi",
+        next_steps=["foo task one", "foo task two"],
+    )
     rc = cli.main(["multi", "--done", "foo", "--no-prompt"])
     assert rc == 1
-    err = capsys.readouterr().err
-    assert "multiple items match" in err
+    assert "multiple items match" in capsys.readouterr().err
 
 
 def test_add_blocker_and_unblock(monkeypatch, tmp_path):
-    yaml_path = _patch_resolver(monkeypatch, tmp_path)
-    rc = cli.main(["testproj", "--blocker", "API down", "--no-prompt"])
-    assert rc == 0
+    note = _wire_vault(monkeypatch, tmp_path)
+    cli.main(["testproj", "--blocker", "API down", "--no-prompt"])
     rc = cli.main(["testproj", "--unblock", "API", "--no-prompt"])
     assert rc == 0
-    data = yaml.safe_load(yaml_path.read_text())
-    assert data["blockers"] == []
+    assert _read_fm(note)["blockers"] == []
 
 
 def test_add_question_and_unquestion(monkeypatch, tmp_path):
-    yaml_path = _patch_resolver(monkeypatch, tmp_path)
-    rc = cli.main(["testproj", "--question", "Should we?", "--no-prompt"])
-    assert rc == 0
+    note = _wire_vault(monkeypatch, tmp_path)
+    cli.main(["testproj", "--question", "Should we?", "--no-prompt"])
     rc = cli.main(["testproj", "--unquestion", "Should", "--no-prompt"])
     assert rc == 0
-    data = yaml.safe_load(yaml_path.read_text())
-    assert data["open_questions"] == []
+    assert _read_fm(note)["open_questions"] == []
 
 
 def test_combined_updates_in_one_call(monkeypatch, tmp_path):
-    yaml_path = _patch_resolver(monkeypatch, tmp_path, "rich", _RICH_YAML)
+    note = _wire_vault(
+        monkeypatch, tmp_path, "rich",
+        next_steps=["Step A", "Step B"],
+        blockers=["Blocker one"],
+    )
     rc = cli.main([
         "rich",
         "--focus", "Combined",
@@ -201,97 +221,187 @@ def test_combined_updates_in_one_call(monkeypatch, tmp_path):
         "--no-prompt",
     ])
     assert rc == 0
-    data = yaml.safe_load(yaml_path.read_text())
-    assert data["focus"] == "Combined"
-    assert data["status"] == "blocked"
-    assert "Added step" in data["next_steps"]
-    assert "Step A" not in data["next_steps"]
-    assert "New blocker" in data["blockers"]
+    fm = _read_fm(note)
+    assert fm["focus"] == "Combined"
+    assert fm["status"] == "blocked"
+    assert "Added step" in fm["next_steps"]
+    assert "Step A" not in fm["next_steps"]
+    assert "New blocker" in fm["blockers"]
+
+
+# ---------- body preservation ----------
+
+def test_body_preserved_across_frontmatter_mutation(monkeypatch, tmp_path):
+    note = _wire_vault(monkeypatch, tmp_path)
+    original_body = _read_body(note)
+    cli.main(["testproj", "--focus", "X", "--no-prompt"])
+    cli.main(["testproj", "--blocker", "Y", "--no-prompt"])
+    assert _read_body(note) == original_body
 
 
 # ---------- subscriptions ----------
 
 def test_subscribe_idempotent(monkeypatch, tmp_path):
-    _patch_resolver(monkeypatch, tmp_path)
-    subs_file = tmp_path / "subs.json"
-    monkeypatch.setattr(cli.project_resolver, "SUBSCRIPTIONS_PATH", subs_file)
+    """--subscribe is idempotent and preserves on-disk format."""
+    _wire_vault(monkeypatch, tmp_path)
+    # _wire_vault already subscribes "testproj" to TestVault; calling --subscribe again is a no-op
     rc = cli.main(["testproj", "--subscribe", "--no-prompt"])
     assert rc == 0
-    rc = cli.main(["testproj", "--subscribe", "--no-prompt"])  # second call no-ops
+    rc = cli.main(["testproj", "--subscribe", "--no-prompt"])
     assert rc == 0
-    data = json.loads(subs_file.read_text())
-    assert data["subscribed"] == ["testproj"]
+    on_disk = json.loads(pr.SUBSCRIPTIONS_PATH.read_text())
+    # Still exactly one subscription (no duplicate)
+    assert on_disk["TestVault"]["subscribed"].count("testproj") == 1
 
 
 def test_unsubscribe_removes(monkeypatch, tmp_path):
-    _patch_resolver(monkeypatch, tmp_path)
-    subs_file = tmp_path / "subs.json"
-    subs_file.write_text(json.dumps({"subscribed": ["testproj", "other"]}))
-    monkeypatch.setattr(cli.project_resolver, "SUBSCRIPTIONS_PATH", subs_file)
+    _wire_vault(monkeypatch, tmp_path)
     rc = cli.main(["testproj", "--unsubscribe", "--no-prompt"])
     assert rc == 0
-    data = json.loads(subs_file.read_text())
-    assert "testproj" not in data["subscribed"]
-    assert "other" in data["subscribed"]
+    on_disk = json.loads(pr.SUBSCRIPTIONS_PATH.read_text())
+    assert "testproj" not in on_disk["TestVault"]["subscribed"]
 
 
-def test_subscribe_does_not_bump_updated_at(monkeypatch, tmp_path):
-    """--subscribe is machine-local; should not modify the project YAML."""
-    yaml_path = _patch_resolver(monkeypatch, tmp_path)
-    subs_file = tmp_path / "subs.json"
-    monkeypatch.setattr(cli.project_resolver, "SUBSCRIPTIONS_PATH", subs_file)
-    original_text = yaml_path.read_text()
+def test_subscribe_does_not_modify_note(monkeypatch, tmp_path):
+    """--subscribe is machine-local; should not modify the project note."""
+    note = _wire_vault(monkeypatch, tmp_path)
+    original = note.read_text()
     rc = cli.main(["testproj", "--subscribe", "--no-prompt"])
     assert rc == 0
-    assert yaml_path.read_text() == original_text
+    assert note.read_text() == original
 
 
-# ---------- YAML round-trip safety ----------
+# ---------- frontmatter shape / atomicity ----------
 
 def test_field_order_preserved(monkeypatch, tmp_path):
-    yaml_path = _patch_resolver(monkeypatch, tmp_path, "rich", _RICH_YAML)
+    note = _wire_vault(monkeypatch, tmp_path, "rich", focus="x")
     rc = cli.main(["rich", "--focus", "rewritten", "--no-prompt"])
     assert rc == 0
-    text = yaml_path.read_text()
-    # Field order: project comes before status, before focus, before next_steps...
+    text = note.read_text()
     proj_idx = text.index("project:")
+    host_idx = text.index("host:")
     status_idx = text.index("status:")
     focus_idx = text.index("focus:")
     steps_idx = text.index("next_steps:")
-    assert proj_idx < status_idx < focus_idx < steps_idx
+    assert proj_idx < host_idx < status_idx < focus_idx < steps_idx
+
+
+def test_field_order_includes_host_between_project_and_status(monkeypatch, tmp_path):
+    note = _wire_vault(monkeypatch, tmp_path)
+    cli.main(["testproj", "--focus", "trigger write", "--no-prompt"])
+    text = note.read_text()
+    project_idx = text.index("project:")
+    host_idx = text.index("host:")
+    status_idx = text.index("status:")
+    assert project_idx < host_idx < status_idx
 
 
 def test_atomic_write_no_temp_left_behind(monkeypatch, tmp_path):
-    yaml_path = _patch_resolver(monkeypatch, tmp_path)
+    note = _wire_vault(monkeypatch, tmp_path)
     rc = cli.main(["testproj", "--focus", "X", "--no-prompt"])
     assert rc == 0
-    leftover = list(yaml_path.parent.glob("*.tmp*"))
+    leftover = list(note.parent.glob("*.tmp*"))
     assert leftover == []
 
 
-def test_schema_version_preserved_on_write(monkeypatch, tmp_path):
-    """An existing schema_version field must survive apply_updates round-trip.
+# ---------- host: field ----------
 
-    The agents-repo YAML schema convention (specs/knowledge-surfaces.md) puts
-    schema_version first; any write path that drops it would silently break
-    forward-compat tooling.
-    """
-    versioned_yaml = "schema_version: 1\n" + _MIN_YAML
-    yaml_path = _patch_resolver(monkeypatch, tmp_path, "testproj", versioned_yaml)
-    rc = cli.main(["testproj", "--focus", "round-tripped", "--no-prompt"])
+def test_set_host_flag_updates_existing(monkeypatch, tmp_path):
+    note = _wire_vault(monkeypatch, tmp_path, host="jns-mac")
+    rc = cli.main(["testproj", "--set-host", "jbox06", "--no-prompt"])
     assert rc == 0
-    text = yaml_path.read_text()
-    assert "schema_version: 1" in text
-    # And it remains the first non-comment field.
-    first_field = text.lstrip().splitlines()[0]
-    assert first_field.startswith("schema_version:")
+    assert _read_fm(note)["host"] == "jbox06"
 
+
+def test_set_host_flag_does_not_bump_status_updated(monkeypatch, tmp_path):
+    note = _wire_vault(monkeypatch, tmp_path, host="jns-mac", status_updated="2026-01-01")
+    rc = cli.main(["testproj", "--set-host", "jbox06", "--no-prompt"])
+    assert rc == 0
+    assert _read_fm(note)["status_updated"] == "2026-01-01"
+
+
+def test_set_host_flag_idempotent(monkeypatch, tmp_path, capsys):
+    _wire_vault(monkeypatch, tmp_path, host="jns-mac")
+    rc = cli.main(["testproj", "--set-host", "jns-mac", "--no-prompt"])
+    assert rc == 0
+    assert "no-op" in capsys.readouterr().out
+
+
+def test_render_includes_host(monkeypatch, tmp_path, capsys):
+    _wire_vault(monkeypatch, tmp_path, host="jbox06")
+    rc = cli.main(["testproj", "--no-prompt"])
+    assert rc == 0
+    assert "Host: jbox06" in capsys.readouterr().out
+
+
+# ---------- new flags: --register-host / --claim-ssh-host / --release-ssh-host ----------
+
+def test_register_host_flag_writes_file(monkeypatch, tmp_path, capsys):
+    host_file = tmp_path / "host-name"
+    monkeypatch.setattr(pr, "HOST_NAME_PATH", host_file)
+    rc = cli.main(["--register-host", "jns-mac"])
+    assert rc == 0
+    assert host_file.read_text().strip() == "jns-mac"
+    assert "registered as host: jns-mac" in capsys.readouterr().out
+
+
+def test_claim_ssh_host_flag_updates_subscription(monkeypatch, tmp_path, capsys):
+    subs_file = tmp_path / "subs.json"
+    monkeypatch.setattr(pr, "SUBSCRIPTIONS_PATH", subs_file)
+    monkeypatch.delenv(pr.DEFAULT_VAULT_ENV, raising=False)
+
+    rc = cli.main(["--claim-ssh-host", "MyVault", "jbox06"])
+    assert rc == 0
+    on_disk = json.loads(subs_file.read_text())
+    assert on_disk["MyVault"]["ssh_writes"] == ["jbox06"]
+    assert "claimed ssh host: jbox06" in capsys.readouterr().out
+
+
+def test_release_ssh_host_flag(monkeypatch, tmp_path):
+    subs_file = tmp_path / "subs.json"
+    subs_file.write_text(json.dumps({
+        "MyVault": {"subscribed": [], "ssh_writes": ["jbox06", "et01"]},
+    }))
+    monkeypatch.setattr(pr, "SUBSCRIPTIONS_PATH", subs_file)
+
+    rc = cli.main(["--release-ssh-host", "MyVault", "jbox06"])
+    assert rc == 0
+    on_disk = json.loads(subs_file.read_text())
+    assert on_disk["MyVault"]["ssh_writes"] == ["et01"]
+
+
+def test_claim_ssh_host_does_not_require_project(monkeypatch, tmp_path):
+    """--claim-ssh-host short-circuits before project resolution."""
+    subs_file = tmp_path / "subs.json"
+    monkeypatch.setattr(pr, "SUBSCRIPTIONS_PATH", subs_file)
+    monkeypatch.delenv(pr.DEFAULT_VAULT_ENV, raising=False)
+    # No project file or subscription configured — should still succeed.
+    rc = cli.main(["--claim-ssh-host", "V", "h"])
+    assert rc == 0
+
+
+# ---------- argparse / mode resolution ----------
+
+def test_no_args_no_writes_is_read_mode(monkeypatch, tmp_path, capsys):
+    _wire_vault(monkeypatch, tmp_path)
+    rc = cli.main(["testproj", "--no-prompt"])
+    assert rc == 0
+    assert "PROJECT: testproj" in capsys.readouterr().out
+
+
+def test_status_in_help_lists_allowed_values():
+    p_args = cli.parse_args(["proj", "--no-prompt"])
+    assert p_args.status is None  # default
+
+
+# ---------- legacy register_project (still uses YAML for now; #168 retires) ----------
 
 def test_register_project_writes_schema_version(monkeypatch, tmp_path):
-    """register_project (auto-create on first --subscribe of a known repo dir)
-    must seed schema_version: 1."""
-    from lib import project_resolver as pr
+    """register_project still seeds schema_version: 1 on legacy YAMLs.
 
+    register_project remains the YAML-creation path used by action's
+    auto-register flow until #168 archives knowledge/projects/.
+    """
     projects_dir = tmp_path / "knowledge" / "projects"
     projects_dir.mkdir(parents=True)
     subs_file = tmp_path / "subs.json"
@@ -301,15 +411,10 @@ def test_register_project_writes_schema_version(monkeypatch, tmp_path):
     monkeypatch.setattr(pr, "SUBSCRIPTIONS_PATH", subs_file)
     monkeypatch.setattr(pr, "HOST_NAME_PATH", host_file)
     yaml_path = pr.register_project("brandnew", owner="jason")
-    text = yaml_path.read_text()
-    assert text.splitlines()[0] == "schema_version: 1"
+    assert yaml_path.read_text().splitlines()[0] == "schema_version: 1"
 
-
-# ---------- host: field (Phase 7.1) ----------
 
 def test_register_project_stamps_host_from_file(monkeypatch, tmp_path):
-    from lib import project_resolver as pr
-
     projects_dir = tmp_path / "knowledge" / "projects"
     projects_dir.mkdir(parents=True)
     subs_file = tmp_path / "subs.json"
@@ -318,16 +423,11 @@ def test_register_project_stamps_host_from_file(monkeypatch, tmp_path):
     monkeypatch.setattr(pr, "KNOWLEDGE_PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(pr, "SUBSCRIPTIONS_PATH", subs_file)
     monkeypatch.setattr(pr, "HOST_NAME_PATH", host_file)
-
     yaml_path = pr.register_project("hostproj")
-    data = yaml.safe_load(yaml_path.read_text())
-    assert data["host"] == "jns-mac"
+    assert yaml.safe_load(yaml_path.read_text())["host"] == "jns-mac"
 
 
 def test_register_project_falls_back_to_gethostname(monkeypatch, tmp_path):
-    """host-name file absent → gethostname() lowercased + first segment."""
-    from lib import project_resolver as pr
-
     projects_dir = tmp_path / "knowledge" / "projects"
     projects_dir.mkdir(parents=True)
     subs_file = tmp_path / "subs.json"
@@ -335,16 +435,11 @@ def test_register_project_falls_back_to_gethostname(monkeypatch, tmp_path):
     monkeypatch.setattr(pr, "SUBSCRIPTIONS_PATH", subs_file)
     monkeypatch.setattr(pr, "HOST_NAME_PATH", tmp_path / "no-host-file")
     monkeypatch.setattr(pr.socket, "gethostname", lambda: "Some-Host.local")
-
     yaml_path = pr.register_project("fallback")
-    data = yaml.safe_load(yaml_path.read_text())
-    assert data["host"] == "some-host"  # lowercased + .local stripped
+    assert yaml.safe_load(yaml_path.read_text())["host"] == "some-host"
 
 
 def test_register_project_explicit_host_override(monkeypatch, tmp_path):
-    """register_project(host='jbox06') wins over the file/fallback."""
-    from lib import project_resolver as pr
-
     projects_dir = tmp_path / "knowledge" / "projects"
     projects_dir.mkdir(parents=True)
     subs_file = tmp_path / "subs.json"
@@ -353,16 +448,11 @@ def test_register_project_explicit_host_override(monkeypatch, tmp_path):
     monkeypatch.setattr(pr, "KNOWLEDGE_PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(pr, "SUBSCRIPTIONS_PATH", subs_file)
     monkeypatch.setattr(pr, "HOST_NAME_PATH", host_file)
-
     yaml_path = pr.register_project("override", host="jbox06")
-    data = yaml.safe_load(yaml_path.read_text())
-    assert data["host"] == "jbox06"
+    assert yaml.safe_load(yaml_path.read_text())["host"] == "jbox06"
 
 
 def test_get_host_name_handles_empty_file(monkeypatch, tmp_path):
-    """Empty host-name file → fallback (file has empty content; we should not return '')."""
-    from lib import project_resolver as pr
-
     host_file = tmp_path / "host-name"
     host_file.write_text("\n")
     monkeypatch.setattr(pr, "HOST_NAME_PATH", host_file)
@@ -371,98 +461,17 @@ def test_get_host_name_handles_empty_file(monkeypatch, tmp_path):
 
 
 def test_set_host_name_writes_file(monkeypatch, tmp_path):
-    from lib import project_resolver as pr
-
     host_file = tmp_path / "host-name"
     monkeypatch.setattr(pr, "HOST_NAME_PATH", host_file)
     pr.set_host_name("jns-mac")
     assert host_file.read_text().strip() == "jns-mac"
-    # idempotent
-    pr.set_host_name("jns-mac")
+    pr.set_host_name("jns-mac")  # idempotent
     assert host_file.read_text().strip() == "jns-mac"
 
 
 def test_set_host_name_rejects_empty(monkeypatch, tmp_path):
-    from lib import project_resolver as pr
-
     monkeypatch.setattr(pr, "HOST_NAME_PATH", tmp_path / "host-name")
     with pytest.raises(ValueError):
         pr.set_host_name("")
     with pytest.raises(ValueError):
         pr.set_host_name("   ")
-
-
-def test_register_host_flag_writes_file(monkeypatch, tmp_path, capsys):
-    """`project --register-host <name>` writes ~/.claude/host-name."""
-    host_file = tmp_path / "host-name"
-    monkeypatch.setattr(cli.project_resolver, "HOST_NAME_PATH", host_file)
-    rc = cli.main(["--register-host", "jns-mac"])
-    assert rc == 0
-    assert host_file.read_text().strip() == "jns-mac"
-    out = capsys.readouterr().out
-    assert "registered as host: jns-mac" in out
-
-
-def test_set_host_flag_updates_existing(monkeypatch, tmp_path):
-    versioned_yaml = "schema_version: 1\nproject: testproj\nhost: jns-mac\n" + _MIN_YAML
-    yaml_path = _patch_resolver(monkeypatch, tmp_path, "testproj", versioned_yaml)
-    rc = cli.main(["testproj", "--set-host", "jbox06", "--no-prompt"])
-    assert rc == 0
-    data = yaml.safe_load(yaml_path.read_text())
-    assert data["host"] == "jbox06"
-
-
-def test_set_host_flag_does_not_bump_updated_at(monkeypatch, tmp_path):
-    """--set-host is operational, not content. Same precedent as --subscribe."""
-    versioned_yaml = "schema_version: 1\nproject: testproj\nhost: jns-mac\n" + _MIN_YAML
-    yaml_path = _patch_resolver(monkeypatch, tmp_path, "testproj", versioned_yaml)
-    original_updated_at = yaml.safe_load(yaml_path.read_text())["updated_at"]
-    rc = cli.main(["testproj", "--set-host", "jbox06", "--no-prompt"])
-    assert rc == 0
-    new_updated_at = yaml.safe_load(yaml_path.read_text())["updated_at"]
-    assert new_updated_at == original_updated_at
-
-
-def test_set_host_flag_idempotent(monkeypatch, tmp_path, capsys):
-    versioned_yaml = "schema_version: 1\nproject: testproj\nhost: jns-mac\n" + _MIN_YAML
-    _patch_resolver(monkeypatch, tmp_path, "testproj", versioned_yaml)
-    rc = cli.main(["testproj", "--set-host", "jns-mac", "--no-prompt"])
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "no-op" in out
-
-
-def test_field_order_includes_host_between_project_and_status(monkeypatch, tmp_path):
-    versioned_yaml = "schema_version: 1\nproject: testproj\nhost: jns-mac\n" + _MIN_YAML
-    yaml_path = _patch_resolver(monkeypatch, tmp_path, "testproj", versioned_yaml)
-    cli.main(["testproj", "--focus", "trigger write", "--no-prompt"])
-    text = yaml_path.read_text()
-    project_idx = text.index("project:")
-    host_idx = text.index("host:")
-    status_idx = text.index("status:")
-    assert project_idx < host_idx < status_idx
-
-
-def test_render_includes_host(monkeypatch, tmp_path, capsys):
-    versioned_yaml = "schema_version: 1\nproject: testproj\nhost: jbox06\n" + _MIN_YAML
-    _patch_resolver(monkeypatch, tmp_path, "testproj", versioned_yaml)
-    rc = cli.main(["testproj", "--no-prompt"])
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "Host: jbox06" in out
-
-
-# ---------- argparse / mode resolution ----------
-
-def test_no_args_no_writes_is_read_mode(monkeypatch, tmp_path, capsys):
-    _patch_resolver(monkeypatch, tmp_path)
-    rc = cli.main(["testproj", "--no-prompt"])
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "PROJECT: testproj" in out
-
-
-def test_status_in_help_lists_allowed_values():
-    """argparse --help should mention the allowed statuses."""
-    p_args = cli.parse_args(["proj", "--no-prompt"])
-    assert p_args.status is None  # default

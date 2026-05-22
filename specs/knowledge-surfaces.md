@@ -1,12 +1,25 @@
 # Knowledge Surfaces — Authority Map & Scoping Rules
 
-> **Status**: FINAL — 2026-05-07
-> **Context**: Phase 6 follow-up. After collapsing the Knowledge MCP into
-> filesystem-native CLIs, knowledge state is spread across multiple
-> directories with no single source of truth doc. This spec maps every
-> surface to "authoritative for X / written by Y / read by Z," locks in
-> the per-project vs. global scoping rules, and standardizes a
-> `schema_version` field for forward compatibility.
+> **Status (2026-05-13)**: Two surfaces moved in the Path B migration
+> (see `specs/path-b-migration.md`):
+>
+> - `knowledge/projects/<name>.yaml` → `<vault>/Projects/<name>.md` (Obsidian
+>   markdown frontmatter). The legacy YAMLs are archived at
+>   `_archived/projects-pre-pathb/`. `project/cli.py` now mutates the MD
+>   frontmatter via `lib/obsidian_md.py`.
+> - `knowledge/decisions/D-NNN.yaml` → `<vault>/Decisions/D-NNN.md` (MADR
+>   format). The legacy YAMLs + `index.yaml` are archived at
+>   `_archived/decisions-pre-pathb/`. `decision/cli.py` reshaped to write
+>   the MADR markdown; no more `index.yaml` (replaced by Dataview queries).
+>
+> Every other surface in the table below is unchanged.
+>
+> **Historical context** (FINAL — 2026-05-07): Phase 6 follow-up. After
+> collapsing the Knowledge MCP into filesystem-native CLIs, knowledge state
+> was spread across multiple directories with no single source of truth doc.
+> This spec mapped every surface to "authoritative for X / written by Y /
+> read by Z," locked in the per-project vs. global scoping rules, and
+> standardized a `schema_version` field for forward compatibility.
 
 ---
 
@@ -14,11 +27,13 @@
 
 | Surface | Scope | Status | Authoritative for |
 |---|---|---|---|
-| `knowledge/projects/<name>.yaml` | per-project | ALIVE | project tracker (focus, host, status, blockers, next_steps, open_questions). `host:` declares which host owns the project — see `specs/cross-device-state.md` (Phase 7.1). |
-| `knowledge/decisions/D-NNN.yaml` | per-project (`project:` field) | DORMANT — no writer | architecturally significant decisions |
+| `<vault>/Projects/<name>.md` | per-project | ALIVE (Path B, since 2026-05-13) | project tracker (focus, host, client, kind, status, blockers, next_steps, open_questions, stack, repo_path, repo_remote). Frontmatter mutated by `project/cli.py`. `host:` declares which host owns the project. |
+| `<vault>/Projects/_pulse/<project>--<host>.md` | per-(project, host) sidecar | ALIVE (Path B) | machine-derived state: last_commit, commits_24h/7d, open_actions/issues, branch hygiene. Written by `pulse refresh` exclusively (single-writer-per-host); never hand-edited. |
+| `<vault>/Decisions/D-NNN.md` | per-project (`project:` frontmatter) | ALIVE (Path B) | architecturally significant decisions in MADR format. Frontmatter + body sections mutated by `decision/cli.py`. |
+| `~/agents/_archived/projects-pre-pathb/<name>.yaml` | per-project | ARCHIVED — pre-Path-B history | (read for historical reference only; do not write) |
+| `~/agents/_archived/decisions-pre-pathb/D-NNN.yaml` | per-project | ARCHIVED — pre-Path-B history | (read for historical reference only; do not write) |
 | `knowledge/patterns/pat-<slug>.yaml` | global (no `project:` field) | CATALOG-ONLY — no live reader | reusable code patterns + lifecycle (pilot → validated) |
 | `knowledge/learning-rules/LR-NNN.yaml` | global | DORMANT — no recent writer | failure-derived rules surfaced at SessionStart |
-| `knowledge/decisions/index.yaml` | global index | maintained | by-project / by-topic index of decisions |
 | `~/.claude/memory/patterns-critical.md` | global, per-machine | ALIVE — loaded by SessionStart | "Top 3 critical patterns" injection |
 | `~/.claude/projects/<…>/memory/MEMORY.md` | per-Claude-session, per-machine | ALIVE — auto-memory | conversation-spanning user/feedback/project memories |
 | `<repo>/ACTIONS.md` | per-repo | ALIVE — `action` CLI writes | open and recently-closed actions |
@@ -65,12 +80,12 @@ A surface is **per-project** if its records are scoped to a single project's lif
 
 | Surface | Mechanism |
 |---|---|
-| `knowledge/projects/<name>.yaml` | Filename = project name. One file per project. |
-| `knowledge/decisions/D-NNN.yaml` | `project:` field inside each YAML (e.g. D-042 → `docketiq`). Cross-references via `linked.related_decisions`. |
+| `<vault>/Projects/<name>.md` | Filename = project name. One file per project. (Path B; previously `knowledge/projects/<name>.yaml`.) |
+| `<vault>/Decisions/D-NNN.md` | `project:` frontmatter field inside each MD (e.g. D-042 → `docketiq`). Cross-references via `linked.related_decisions`. (Path B; previously `knowledge/decisions/D-NNN.yaml` + `index.yaml`. Dataview queries replace the index.) |
 | `<repo>/ACTIONS.md` | Lives in the project repo. |
 | `<repo>/specs/`, `<repo>/PLAN.md` | Live in the project repo. |
 
-**Rule for new decisions:** every `D-NNN.yaml` MUST have a `project:` field. If a decision spans projects, list the primary project and reference others via `linked.related_decisions`.
+**Rule for new decisions:** every `D-NNN.md` MUST have a `project:` frontmatter field. If a decision spans projects, list the primary project and reference others via `linked.related_decisions`.
 
 ### Global surfaces
 
@@ -104,12 +119,17 @@ Every YAML form gets a `schema_version` field. Reasoning: the schemas WILL evolv
 
 ### Decision
 
-Add `schema_version: 1` as the **first non-comment line** of every YAML file in:
+Add `schema_version: 1` as the **first non-comment field** of every record:
 
-- `knowledge/projects/*.yaml`
-- `knowledge/decisions/D-NNN.yaml` (NOT `index.yaml` — that's an index, not a record)
+- `<vault>/Decisions/D-NNN.md` — frontmatter (Path B; previously `knowledge/decisions/D-NNN.yaml`)
 - `knowledge/patterns/pat-*.yaml`
 - `knowledge/learning-rules/LR-NNN.yaml`
+
+Project notes (`<vault>/Projects/<name>.md`) intentionally **omit
+`schema_version`** post-Path-B — the Obsidian frontmatter shape is
+authoritative and Dataview queries that rely on stable field names would
+break on a version bump anyway. Migration script `migrate-to-pathb.py`
+drops `schema_version` from each project YAML when converting.
 
 ### Writer responsibility
 

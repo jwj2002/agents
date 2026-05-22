@@ -22,38 +22,49 @@ Goal: collapse to one source of truth for project state, slim the config
 to artifacts that earn their cost, keep what compounds (Knowledge MCP,
 Codex delegation, content-brain-style phase discipline).
 
-## Architecture (current state, post-Phase 6C)
+## Architecture (current state, post-Phase 8 / Path B)
 
 ```
-                       ┌────────────────────┐
-                       │  Filesystem YAMLs  │  source of truth
-                       │  (committed)       │  projects, decisions,
-                       │                    │  patterns, learning rules
-                       └─────────┬──────────┘
-                                 │ direct read/write
-                       ┌─────────┴──────────┐
-                       │  Python CLIs       │  action, dashboard,
-                       │  (~/agents/)       │  project, review-session
-                       └─────────┬──────────┘
-                                 │ shell-out
-                       ┌─────────┴──────────┐
-                       │  Thin Claude       │  /action, /dashboard,
-                       │  skill wrappers    │  /project, /review-session
-                       └────────────────────┘
+   ┌──────────────────────────┐   ┌──────────────────────────────┐
+   │  Obsidian vaults         │   │  Per-repo ACTIONS.md         │
+   │  ~/vaults/<name>/        │   │  (in each project's repo)    │
+   │                          │   │                              │
+   │  Projects/<name>.md      │   │  action/cli.py writes        │
+   │  (human-edited fm)       │   └──────────────────────────────┘
+   │  Decisions/D-NNN.md      │
+   │  (MADR frontmatter+body) │
+   │  Daily/<date>.md         │
+   │  (Templater + Dataview)  │
+   │  Projects/_pulse/        │   ┌──────────────────────────────┐
+   │  <project>--<host>.md    │←──┤  pulse refresh               │
+   │  (machine-derived,       │   │  (git + gh + ACTIONS.md +    │
+   │   single-writer/host)    │   │   lib/host_resolver SSH)     │
+   └────────┬─────────────────┘   └──────────────────────────────┘
+            │ reads
+   ┌────────┴─────────────────┐
+   │  Python CLIs             │  action, project, decision,
+   │  (~/agents/)             │  pulse, email-digest
+   └────────┬─────────────────┘
+            │ shell-out (where wrapped)
+   ┌────────┴─────────────────┐
+   │  Thin Claude             │  /action, /project (others legacy)
+   │  skill wrappers          │
+   └──────────────────────────┘
 
-                  + git/gh overlay per project
-                  (last commit, open issues — read on demand)
-
-                       ┌────────────────────┐
-                       │  Codex delegation  │  parallel work,
-                       │  (rescue/review)   │  reviews, rescue
-                       └────────────────────┘
+   ┌──────────────────────────┐
+   │  Codex delegation        │  parallel work, reviews, rescue
+   │  (rescue/review)         │
+   └──────────────────────────┘
 ```
 
 Multi-agent channels were dropped in Phase 2 (Option B). Codex delegation
 is the converged multi-agent pattern. The Knowledge MCP server retired in
 Phase 6C (#146); its source is archived at `_archived/knowledge-mcp/`.
-Surface map and scoping rules: `specs/knowledge-surfaces.md`.
+Path B (Phase 8) moved projects/decisions from YAML to Obsidian vaults and
+retired the `dashboard` + `review_session` CLIs in favor of Templater +
+Dataview rendering inside Obsidian and the `pulse` CLI for sidecar refresh.
+Surface map and scoping rules: `specs/knowledge-surfaces.md`. Path B
+decision record: `specs/path-b-migration.md`.
 
 Reference specs:
 - `specs/phase0-usage-report.md` — what got measured, what didn't, why Phase 3 was deferred
@@ -187,9 +198,22 @@ or `knowledge.db`. Vault-metrics MCP remains (separate server, unrelated).
 
 ---
 
-## Phase 7 — Cross-device project state ⏳ INVESTIGATION
+## Phase 7 — Cross-device project state ✅ DONE (2026-05-08, Phase 7.1) + superseded by Phase 8
 
-The dashboard CLI ported in Phase 6A is **local-only** — it reads files
+Phase 7.1 shipped: `host:` schema field on every project record, plus
+`~/.claude/host-name` per-machine canonical-name file. See
+`specs/cross-device-state.md`.
+
+Phase 7.2 (SSH bridge) was absorbed and redesigned by Path B (Phase 8) —
+implemented as per-host sidecars at
+`<vault>/Projects/_pulse/<project>--<host>.md` written by `pulse refresh`,
+under a single-writer-per-host convention. See `specs/path-b-migration.md`.
+
+Original Phase 7 investigation text retained below for historical context:
+
+---
+
+(historical) The dashboard CLI ported in Phase 6A is **local-only** — it reads files
 on the machine it runs on. Cross-device visibility (e.g., seeing jbox06
 project state from the laptop) needs separate design work; the MCP→CLI
 swap by itself does not address it.
@@ -228,6 +252,61 @@ swap by itself does not address it.
 
 ---
 
+## Phase 8 — Path B (Obsidian + multi-vault topology) ✅ DONE (2026-05-13)
+
+Full architectural decision record: `specs/path-b-migration.md`.
+
+**What shipped (umbrella #170, 16 commits, +9000 LOC):**
+
+| Component | Issue | Module |
+|---|---|---|
+| Pre-flight YAML→Obsidian migration manifest | #165 | `scripts/migration-manifest.py` |
+| Obsidian Templater + Dataview templates + sync script | #163 | `templates/obsidian/`, `templates/sync-templates.sh` |
+| `obsidian_md` lib (frontmatter + section helpers) | #166 | `lib/obsidian_md.py` |
+| Vault-aware subscription helpers + auto-migrate | #166 | `lib/project_resolver.py` |
+| `project` CLI reshape to Obsidian markdown frontmatter | #166 | `project/cli.py` |
+| `decision` CLI reshape to MADR markdown | #166 | `decision/cli.py` |
+| One-time per-device bootstrap script | #164 | `bootstrap-laptop.sh` |
+| YAML→Obsidian migration + archival cutover | #168 | `scripts/migrate-to-pathb.py`, `scripts/run-pathb-archival.sh` |
+| `host_resolver` (git/gh/SSH + cache) | #161 | `lib/host_resolver.py` |
+| `pulse refresh / report / digest / audit / vault offboard` | #161/162 | `pulse/cli.py` |
+| `email-digest` preset config + interactive Y/E/S/N + isolation guardrails | #167 | `email-digest/cli.py` |
+| Docs cleanup | #169 | this file + the specs |
+
+**Retired (archived to `_archived/`):**
+- `dashboard/` CLI — replaced by Obsidian Daily review + Project page Dataview blocks
+- `review_session/` CLI — replaced by Daily review's stale-focus + git-hygiene queries
+- `knowledge/projects/*.yaml` — moved to `<vault>/Projects/*.md`
+- `knowledge/decisions/*.yaml` — archived (not migrated; new decisions go to `<vault>/Decisions/D-NNN.md` via `decision/cli.py`)
+
+**Isolation guardrails landed (per spec §6.5 + Codex F4):**
+1. Email-digest preset → vault validation (refuses send on client mismatch)
+2. `pulse digest --all-vaults` jns-mac-only (hardcoded check)
+3. Pre-send confirmation context line
+4. Per-vault git remote allowlist (opt-in via `~/.claude/vault-remotes.yaml`)
+5. `pulse audit` subcommand (cron-friendly drift detection)
+6. `pulse vault offboard` (single-command vault retirement)
+7. FileVault policy (documented; bootstrap checks on macOS)
+
+**Operational guide:**
+- Day-to-day project work in Obsidian — open the Daily note (auto-Templater on first open of the day), check stale-focus + activity blocks
+- Refresh sidecars on demand: `pulse refresh` (or via launchd/cron every 30 min)
+- Generate a digest: `pulse digest --vault JNS-Personal-Vault` (terminal) or `email-digest preset run paul-jason` (interactive send)
+- Audit before a client engagement ends: `pulse audit`
+- Off-board a client vault: `pulse vault offboard --vault NAME --dry-run` → `--for-real`
+
+**Exit criteria:**
+- [x] All 7 project YAMLs migrated to Obsidian project notes (`migrate-to-pathb.py` smoke-verified)
+- [x] All 9 decision YAMLs archived
+- [x] Retired CLIs archived via `git mv` (history preserved)
+- [x] Subscription file in vault-keyed format with backup at `dashboard-subscriptions-pre-pathb.json`
+- [x] Templates installed in vault, Dataview queries reference real frontmatter fields (no `this.subscribed` references — Codex F1 fix)
+- [x] Per-host sidecars written on `pulse refresh` (verified with real agents + buddy data)
+- [x] Email-digest preset config example shipped + vault validation refuses cross-client leakage
+- [x] Bootstrap script idempotent + handles macOS / Linux / WSL
+
+---
+
 ## Phase 5 — PLAN.md discipline ✅ DONE (template); ongoing per project
 
 **What shipped:**
@@ -263,12 +342,13 @@ swap by itself does not address it.
 
 ## Sequencing Discipline
 
-Phases 0, 1, 2, 4, 5 shipped. Phase 3 explicitly deferred to give
-measurement infrastructure time to mature. Phase 6 planned —
-implementation begins with 6A (dashboard CLI). Phase 7 (cross-device
-project state) is investigation-only until Phase 6A completes.
+Phases 0, 1, 2, 4, 5, 6, 7, 8 shipped. Phase 3 explicitly deferred until
+the orchestrate usage logger lands. Path B (Phase 8) shipped 2026-05-13.
 
 Pre-consolidation rollback SHAs (per `specs/phase0-usage-report.md`):
 - `~/agents` HEAD pre-Phase 1: `fec005d`
 - `~/projects/flotilla` HEAD pre-archival: `e786eac`
 - `~/agents` HEAD pre-Phase 6: TBD at start of 6A.
+- `~/agents` HEAD pre-Path-B (Phase 8) implementation PR: `ff84488`
+  (the spec merge commit). Rollback procedure documented in
+  `specs/path-b-migration.md` §11.
