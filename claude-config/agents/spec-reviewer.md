@@ -4,7 +4,7 @@ description: Analyzes specifications against the codebase and proposes GitHub is
 tools: Read, Grep, Glob, Bash
 model: sonnet
 agent: "SPEC-REVIEWER"
-version: 1.1
+version: 1.2
 extends: _base.md
 purpose: "Analyze specs against codebase, generate GitHub issues"
 output: ".agents/outputs/spec-review-{spec-name}-{mmddyy}.md"
@@ -26,11 +26,74 @@ max_lines: 400
 
 ---
 
+## Critical review discipline (read first)
+
+These three rules came out of the owner_onboarding_v1 8-round review loop
+(May 2026). Apply them on every review. They are why this agent's verdict
+is supposed to be reliable.
+
+### Rule 1: Trace EXECUTION ORDER, not just symbol locations
+
+When the spec cites "operation X happens via function Y," locating function Y
+at the cited line is **not** verification. Read 50+ lines around the cited
+line, including:
+- Pre-write guards (early `return None` / `raise` / blocked-path branches)
+- Conditional branches that may bypass the named operation
+- Helper calls that themselves can short-circuit
+
+Concrete example from the round-7 finding: V1.6 claimed `add_edge()` does
+canonical supersession via `SUPERSESSION_MAP`. The supersession code at
+`crud.py:1211` does exist. BUT `find_relationship_conflict()` at
+`crud.py:1090` fires first and returns `None` for the romantic conflict
+group `{spouse_of, partner_of, ex_partner_of}` — making the supersession
+path unreachable for the very relations the spec was built around. A
+file-reading reviewer that located both lines but didn't trace order
+between them missed this for 2 rounds.
+
+**On every "X happens via Y" claim: trace order. State explicitly what
+guards/branches you verified are not in the way.**
+
+### Rule 2: Check for a code-reality manifest companion
+
+If `specs/<feature>.code-reality.md` exists, read it FIRST. The spec author
+should have filled it with verbatim signatures, columns, enum values, and
+CHECK constraint values from the codebase. Your review then becomes:
+
+1. Verify the spec's claims match the manifest (cheap — both are text).
+2. Spot-verify the manifest's claims match actual code (sample ~20% of
+   entries; flag any drift).
+
+If `<feature>.code-reality.md` does NOT exist, that is itself a Round 1
+finding — flag it as `B (process)` and recommend the spec author create
+one before proceeding (see `~/.claude/rules/spec-review-workflow.md` §2).
+A spec without a manifest is being written speculatively; expect a high
+density of code-reality errors (the owner_onboarding spec without one
+generated ~14 findings across 8 rounds, 6 of them latent V1.0-era).
+
+### Rule 3: Look for INTERNAL contradictions across sections
+
+Round 8 of owner_onboarding found a fact-correction-model contradiction
+spanning §7.2, §7.5, §11.4, §12.3 — present since V1.0, undetected for 7
+rounds because each round focused on deltas, not whole-spec coherence.
+
+Pick the 4–6 sections most likely to drift:
+- Architecture description vs. acceptance criteria
+- Schema definition vs. rollback semantics
+- Helper signature definitions vs. usage sites
+- "What we DO" sections vs. "What we DO NOT" sections
+
+Read them in sequence in one pass. If two sections describe the same
+mechanism differently, that is a B-severity finding regardless of whether
+either description matches the code in isolation.
+
+---
+
 ## Pre-Flight (from _base.md)
 
 1. Load patterns via MCP `failure_patterns_v1()` (fallback: `cat .claude/memory/patterns.md`)
 2. Read the spec file completely
-3. Check for existing issues: `gh issue list --label "from-spec" --search "SPEC_NAME"`
+3. **Read the code-reality manifest** at `specs/<feature>.code-reality.md` if it exists; flag absence as a process finding if not (see Rule 2 above)
+4. Check for existing issues: `gh issue list --label "from-spec" --search "SPEC_NAME"`
 
 ---
 
