@@ -4,11 +4,179 @@ paths: ["**/specs/**", "**/.agents/**"]
 
 # Spec Review Workflow & Best Practices
 
-This document defines the **specification review and issue creation workflow** based on lessons learned from the flow-of-funds specification process (December 2025).
+This document defines the **specification review and issue creation workflow** based on lessons learned from the flow-of-funds specification process (December 2025) and the owner_onboarding_v1 8-round review loop (May 2026).
 
 ## Overview
 
 The spec review workflow ensures specifications are **finalized and validated** before creating GitHub issues, preventing wasted effort and maintaining consistency between specs and implementation work.
+
+**Target:** converge in ≤ 3 adversarial review rounds. If you find yourself heading toward round 4+, something upstream (drafting discipline, manifest completeness, reviewer scope) is wrong — fix that instead of doing another surgical round. See §4.
+
+---
+
+## 1. Why these rules exist
+
+The owner_onboarding_v1 spec required **8 rounds** of adversarial review (Codex + Claude in parallel) before reaching a clean state. Risk trajectory was non-monotonic (8 → 8 → 7 → 6 → 5 → 7 → 8 → 7) — risk **rose** in three rounds because each "surgical fix" introduced new code-reality errors.
+
+Of ~14 distinct findings across 8 rounds, **6 were latent bugs from V1.0–V1.2 era** — pre-existing claims that no reviewer caught for 5+ rounds. The remaining ~8 findings were errors introduced by surgical-fix drafts that I never verified against the codebase before re-submitting.
+
+The single highest-leverage fix is: **do code-reality verification at drafting time, not as a side-effect of review.** The next three sections operationalize this.
+
+---
+
+## 2. Pre-V1.0 Code-Reality Manifest (mandatory before drafting)
+
+Before writing any spec that touches existing code, produce a companion file:
+
+```
+specs/<feature>.md                  ← the spec
+specs/<feature>.code-reality.md     ← the manifest (this section)
+```
+
+Use the template at `~/.claude/templates/code-reality-manifest.md`. Fill it in by reading the actual codebase — `Read`, `Grep`, `Bash` to query the DB if needed. Do NOT skip this step on the assumption that "I roughly know the code."
+
+The manifest captures, verbatim from the source files:
+
+- **§1 Functions cited** — every function the spec calls/extends, with signature AND surrounding pre-write guards/branches/early returns (the round-7 lesson: locating a symbol ≠ tracing what reaches it; read 50+ lines around each cited line)
+- **§2 Tables / columns** — every table the spec writes to or queries, with exact column list and unique/partial indexes
+- **§3 Enums** — every enum value the spec uses, copied verbatim
+- **§4 CHECK constraints** — current values for any constraint the spec extends
+- **§5 Cross-module helpers** — every contract that spans modules
+- **§6 Migration provenance** — for every "already in production" claim, the actual owning migration file:line
+- **§7 Negative manifest** — things that look like they should exist but DON'T (prevents re-invention)
+
+**Cost:** 30–60 minutes one-shot. **Savings:** 3–6 review rounds (the owner_onboarding spec's rounds 1, 6, 7, 8 were all manifest failures — together that's 4 rounds × 2 reviewers × ~15 min ≈ 2 hours of compute, plus drafting time).
+
+The manifest is NOT itself an implementation deliverable. It's a drafting precondition. After spec lock, the manifest stays as a companion file so future implementation work can verify the spec against it.
+
+---
+
+## 3. Self-Review Checklist (before submitting V1.0 for review)
+
+Before invoking any reviewer, the spec author runs this checklist. It takes ~15 minutes and catches the majority of grade-A errors that adversarial review would otherwise spend a full round on.
+
+### 3.1 Spec ↔ manifest cross-check
+
+```bash
+# For every symbol the spec cites, confirm it's in the manifest with verified shape
+grep -E "`[A-Za-z_][A-Za-z0-9_]*`" specs/<feature>.md | sort -u
+# → cross-check each hit against specs/<feature>.code-reality.md
+```
+
+Any symbol in the spec but NOT in the manifest is either (a) a load-bearing claim that wasn't verified, or (b) prose that doesn't need to be in the spec. Either way: address before submission.
+
+### 3.2 Execution-order trace
+
+For every claim in the spec of the form "operation X happens via path Y":
+
+- [ ] I read 50+ lines around Y in the actual source.
+- [ ] I confirmed that no pre-write guard / early return / conditional branch can prevent X from reaching the cited line.
+- [ ] If guards exist, the spec either (a) explicitly notes they apply, or (b) explains why the spec's call path bypasses them.
+
+This is the discipline that would have caught the V1.6 `add_edge() SUPERSESSION` claim: the function exists, the SUPERSESSION code at `:1211` exists, but `find_relationship_conflict()` at `:1090` returns None first for the romantic conflict group.
+
+### 3.3 Internal consistency
+
+Pick the 4–6 sections of the spec most likely to drift apart (typical pairs: architecture vs. acceptance criteria, schema vs. rollback semantics, helper signatures vs. their usage sites). Read them in sequence. They should tell one story.
+
+The V1.7→V1.8 round-8 finding was a fact-correction-model contradiction across §7.2, §7.5, §11.4, §12.3 — present since V1.0, undetected for 7 rounds because each round focused on deltas, not whole-spec coherence.
+
+### 3.4 Output
+
+If anything in §3.1–§3.3 fails, V1.0 is not ready. Fix and re-check before involving reviewers. Reviewers are an expensive resource (each round ≈ 20 min of agent compute + your synthesis time); don't burn them on errors you could have caught in 15 minutes.
+
+---
+
+## 4. Adversarial Review — Convergence Rules
+
+### 4.1 Round cadence and reviewer count
+
+| Round | Reviewers | Why |
+|---|---|---|
+| R1 | **1 reviewer** (default: Codex via `/codex:adversarial-review`) | First-pass errors are gross; one reviewer catches >90%. Two in parallel at R1 is wasteful. |
+| R2 | 2 reviewers in parallel (Codex + spec-reviewer agent) | Convergence check. Two reviewers catching the same issue independently is your lock signal (§4.3). |
+| R3 | 2 reviewers | Final pass. If R3 is not clean, go to §4.4 — do NOT do R4. |
+
+### 4.2 Risk trajectory as a signal
+
+Track Codex's `RISK: N/10` across rounds. The trajectory tells you what's happening:
+
+- **Monotonic descent (8 → 6 → 4 → PROCEED):** healthy convergence. Continue.
+- **Plateau (6 → 6 → 6):** reviewers are sampling, not exhausting. Either the spec is large enough that one pass isn't covering it, or the same class of issue keeps surfacing. Re-scope reviewer prompt.
+- **Rising (e.g., 5 → 7):** a "fix" introduced new errors, or surfaced latent ones. **STOP.** Do NOT continue surgical fixes. Go to §4.4.
+
+### 4.3 Convergence (lock) signal
+
+Lock the spec when **both** of these hold:
+
+1. Both reviewers return PROCEED (or PROCEED-WITH-EDITS with only nits/m findings).
+2. Their findings are **convergent** — if any are non-trivial, both reviewers found them independently.
+
+Reviewer **divergence** (one says clean, the other says BLOCK) is NOT a tiebreaker question. Resolve it by reading the underlying code/docs yourself, 5 minutes max. The owner_onboarding round-8 divergence on `ON CONFLICT DO NOTHING` semantics was settled by reading PG docs — Claude was wrong, Codex was right. Without that manual resolution, picking either reviewer would have been wrong.
+
+### 4.4 Stop conditions (use BEFORE round 4)
+
+If round 3 doesn't lock, choose ONE of:
+
+- **(a) Full hygiene pass.** One exhaustive read of the entire spec against the manifest + codebase, finding all remaining latent bugs in one pass. Then submit ONE final review round. Use when most remaining findings are pre-existing-but-undetected (the owner_onboarding pattern).
+- **(b) Architectural rethink.** If risk is rising or the same kind of issue keeps surfacing, the underlying design may be wrong. Step back from text edits and reconsider whether the spec's premise is reachable in the current codebase. Use when round-over-round findings include "this path is unreachable / this feature doesn't compose with X."
+- **(c) Lock with known-issues addendum.** Accept the spec at current state, add §N "Known V1 implementation gaps" listing remaining findings as work-to-do in implementation tickets. Use when the architecture is right but details are noisy and implementation work would naturally close them.
+
+R4+ of pure surgical fixes is almost never the right answer. It's what we did with owner_onboarding (8 rounds) and it cost ~7 hours.
+
+---
+
+## 5. Drafting → Review → Lock — the end-to-end happy path
+
+```
+┌────────────────────────────────────────────┐
+│ 1. Code-Reality Manifest (§2)              │
+│    30-60 min, read actual code             │
+│    → specs/<feature>.code-reality.md       │
+└──────────────────┬─────────────────────────┘
+                   │
+┌──────────────────┴─────────────────────────┐
+│ 2. Draft V1.0 from manifest                │
+│    Every claim sourced from §1-§7          │
+└──────────────────┬─────────────────────────┘
+                   │
+┌──────────────────┴─────────────────────────┐
+│ 3. Self-Review Checklist (§3)              │
+│    15 min, spec ↔ manifest grep            │
+│    Execution-order trace + internal        │
+│    consistency check                        │
+└──────────────────┬─────────────────────────┘
+                   │
+┌──────────────────┴─────────────────────────┐
+│ 4. R1: Single reviewer (§4.1)              │
+│    /codex:adversarial-review               │
+└──────────────────┬─────────────────────────┘
+                   │
+              ┌────┴────┐
+              │ Clean?  │
+              └────┬────┘
+            yes ◄──┴──► no → fix → R2: 2 reviewers
+              │
+              ▼
+       ┌─────────────┐
+       │ Convergence?│
+       │  (§4.3)     │
+       └─────┬───────┘
+       yes  ◄┴► no → resolve divergence (5 min) → re-check
+              │
+              ▼
+       ┌─────────────┐
+       │ R3 final    │
+       │ confirmation│
+       └─────┬───────┘
+             │
+             ▼
+       LOCK + tag + create issues (§6+)
+```
+
+If you're at R4 or risk has risen between rounds, route to §4.4 instead of continuing this happy path.
+
+---
 
 ## Workflow Pattern
 
