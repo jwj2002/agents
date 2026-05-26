@@ -110,6 +110,7 @@ link_item "$SCRIPT_DIR/commands"            "$CLAUDE_DIR/commands"            "c
 link_item "$SCRIPT_DIR/agents"              "$CLAUDE_DIR/agents"              "agents/"
 link_item "$SCRIPT_DIR/rules"               "$CLAUDE_DIR/rules"              "rules/"
 link_item "$SCRIPT_DIR/skills"              "$CLAUDE_DIR/skills"              "skills/"
+link_item "$SCRIPT_DIR/templates"           "$CLAUDE_DIR/templates"           "templates/"
 link_item "$SCRIPT_DIR/statusline.py"       "$CLAUDE_DIR/statusline.py"       "statusline.py"
 
 echo ""
@@ -507,7 +508,7 @@ echo "Phase 4: Verify"
 ERRORS=0
 
 # Verify symlinks resolve
-for link in settings.json hooks commands agents rules skills statusline.py; do
+for link in settings.json hooks commands agents rules skills templates statusline.py; do
     target="$CLAUDE_DIR/$link"
     if [ -L "$target" ] && [ -e "$target" ]; then
         : # OK
