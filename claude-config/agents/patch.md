@@ -82,6 +82,48 @@ ls .agents/outputs/contract-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOCKED: C
 
 ---
 
+## Wiring / Integration Checklist (service-layer and fullstack changes)
+
+Before writing implementation code, verify each item that applies. Skip items
+that are clearly not relevant (documentation-only, trivial rename, frontend-only
+styling change with no new services or enums).
+
+```markdown
+### Callers wired?
+- [ ] Every new function/class is imported and called from at least one live path
+      (router, scheduler job, lifespan handler, or test). Grep for the symbol.
+
+### Callees exist (no duck-typing)?
+- [ ] Every method this code calls on an external object is confirmed to exist.
+      Read the class definition — do NOT assume a method exists because the name
+      sounds right. (Pattern: MISSING_INTERFACE_METHODS — e.g., `add_fact()` never
+      existed in `grid/crud.py`.)
+
+### Service registered?
+- [ ] If a new service/worker/handler is created, it is registered in the
+      ServiceContainer, FastAPI lifespan, or supervisor `_workers` dict — whichever
+      is canonical for this codebase. (Pattern: MISSING_SERVICE_WIRING)
+
+### Enum VALUE not NAME?
+- [ ] All enum values sent over the wire or stored in DB use the string VALUE
+      (`"CO-OWNER"`) not the Python identifier name (`CO_OWNER`). Applies to
+      frontend literals, config values, and test fixtures. (Pattern: ENUM_VALUE)
+
+### Path expansion?
+- [ ] Any config path that may contain `~` is resolved via `Path(...).expanduser()`
+      before use — not assumed to expand automatically. (Pattern: PATH_EXPANSION)
+
+### Data handoff between sequential steps?
+- [ ] If this change is step N in a pipeline, verify that step N-1's output shape
+      matches what step N expects. Read both sides. (Pattern: DATA_HANDOFF)
+```
+
+**Scope**: Apply when the change (a) creates a new service/class, (b) calls methods
+on objects from another module, (c) participates in a sequential pipeline, or
+(d) involves enum values that cross a wire or DB boundary.
+
+---
+
 ## Implementation
 
 ### Branch Check (FIRST)
@@ -204,6 +246,14 @@ Before marking DONE:
 - [ ] Single transaction (atomic)
 - [ ] Relationships loaded for serialization
 
+### Wiring (if service-layer or fullstack)
+- [ ] All new symbols reachable from at least one live call path
+- [ ] All callee methods confirmed to exist (no duck-typing)
+- [ ] New services registered in container/lifespan/supervisor
+- [ ] Enum values are string VALUES not Python names
+- [ ] Config paths call `.expanduser()` if `~` possible
+- [ ] Pipeline handoff shapes verified (step N-1 output == step N input)
+
 ### Testing
 - [ ] New code has tests
 - [ ] Success cases covered
@@ -292,8 +342,12 @@ Pre-Flight:
 
 Implementation:
 - [ ] Verified component APIs before using
-- [ ] Using enum VALUES not names
+- [ ] Using enum VALUES not names (string VALUE, not Python identifier)
 - [ ] Access control via deps (not inline)
+- [ ] All new callees confirmed to exist (read the class — no duck-typing)
+- [ ] New services/workers registered (container/lifespan/supervisor)
+- [ ] Pipeline data-handoff shapes verified (if sequential steps)
+- [ ] Config paths use `.expanduser()` if `~` possible
 
 Completion:
 - [ ] All requirements implemented

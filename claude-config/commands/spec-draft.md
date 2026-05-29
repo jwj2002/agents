@@ -17,6 +17,30 @@ Guides you through creating a complete specification by asking structured questi
 
 ---
 
+## Pre-Condition: Code-Reality Manifest (HARD GATE)
+
+**Before executing any step below**, verify that a code-reality manifest exists for
+this feature:
+
+```
+specs/<feature>.code-reality.md
+```
+
+If it does not exist:
+1. **STOP.** Do not proceed to Step 1.
+2. Tell the user: "A code-reality manifest is required before drafting. Please produce
+   `specs/<feature>.code-reality.md` using the template at
+   `~/.claude/templates/code-reality-manifest.md` (§1–§8), then re-run `/spec-draft`."
+3. Optionally offer to start filling the manifest interactively, but do NOT draft the
+   spec or move to Step 1 until the manifest file exists and the §8 self-verification
+   checklist is complete.
+
+**Rationale**: See `~/.claude/rules/spec-review-workflow.md` §2. The
+`owner_onboarding_v1` spec took 8 review rounds because V1.0 was drafted without a
+manifest — 4 of those rounds were manifest failures. Do not skip this gate.
+
+---
+
 ## Process
 
 ### Step 1: Classify Feature Type
