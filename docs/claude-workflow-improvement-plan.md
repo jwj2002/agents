@@ -1,163 +1,232 @@
-# Claude Workflow Improvement Plan
+# Claude Coding Process — Full Review & Improvement Plan
 
 **Date:** 2026-05-29
-**Author:** Critical review (Claude Opus 4.8) at Jason's request — no sugar-coating.
-**Scope:** Jason's Claude Code workflow across `~/projects` (excl. `~/agents`), his
-custom Claude infrastructure (`~/agents/claude-config`), and his prompting habits.
+**Author:** Critical review (Claude Opus 4.8), at Jason's request — blunt, evidence-grounded, no ego-management.
+**Scope:** Every stage of the coding process — spec → issues → agent prompts → implementation → review → PR → ship → telemetry → learn — across **work** (`~/projects`) and **personal** (`~/agents`) code.
+**Supersedes:** the earlier stub of this file.
 
 ---
 
-## 0. Evidence base
+## 0. How to read this
 
-- **Telemetry (vault-metrics MCP):** 95 orchestrate runs, 89.5% pass.
-  - COMPLEX 29/29 (100%), SIMPLE 43/44 (98%), **UNKNOWN 11/20 (55%)**.
-  - by stack: backend 62/63, fullstack 7/7, frontend 4/4, **unknown 11/20**.
-  - 15 logged failure causes, nearly all count=1, concentrated in `buddy`.
-- **Learning files:** local `metrics.jsonl` = 3 lines; **no `pattern-events.jsonl`
-  anywhere; `patterns-full.md` missing** → `/learn` has never closed the loop.
-- **History:** 14,068 entries; **2,820 (20%) are `/rate-limit-options`**.
-- **Portfolio:** 25 project dirs — 3 active, 18 dormant, 5 no-git stubs;
-  duplicate clusters (maison ×4, generators ×3, real-estate ×3); only 5 have a
-  full CLAUDE.md + `.claude/` setup.
-- **Infra:** 12 agents, 17 commands, 12 rule files (~1,929 lines), 11 hooks.
+Each process stage below has three blocks: **Current state (verified)** with real file paths, **Critical gaps**, and **Fix**. The plan is grounded in the actual code, not aspiration. Section 5 sequences everything into P0/P1/P2 with acceptance criteria. Section 7 lists what NOT to build — the discipline of *not* adding surface area matters as much as the additions.
 
 ---
 
-## 1. What is genuinely working (keep, don't touch)
+## 1. Evidence base (verified)
 
-1. **The disciplined pipeline is near-flawless.** Inside `/orchestrate`,
-   COMPLEX and SIMPLE work passes ~98–100%. The MAP→PLAN→PATCH→PROVE structure,
-   the CONTRACT synchronization point for fullstack, and PLAN-CHECK gating are
-   real engineering, not theater. **The framework works.**
-2. **Approval gates.** "Review the plan before PATCH. Any questions?" is your
-   single best habit — it has caught real bugs before they shipped.
-3. **File/issue-anchored prompting.** You pin work to specs and issue numbers;
-   agents always know what "done" means. This is why your in-pipeline rate is high.
-4. **Security posture.** Secret-guard hook, deny-list for `.env`/keys, allowlist
-   for safe commands. Better than most teams.
-5. **State continuity.** SessionStart restore + PreCompact checkpoint +
-   PERSISTENT_STATE.yaml = work survives compaction. Rare and valuable.
-
----
-
-## 2. The gaps (ranked by impact)
-
-### GAP 1 — You get burned when you SKIP your own pipeline. (highest ROI)
-UNKNOWN-complexity work passes **55%**; pipeline work passes **~98%**. The
-failures aren't a Claude problem — they're a *routing* problem. Ad-hoc/freeform
-work bypasses MAP (read the code) and PROVE (verify), and that's exactly where
-the ~10× higher failure rate lives.
-**Action:** make the pipeline the default path, not the disciplined exception.
-
-### GAP 2 — The learning loop is open. You instrument but never learn.
-95 runs + 15 failures recorded; `/learn` never run; `patterns-full.md` missing;
-no `pattern-events.jsonl`. `patterns-critical.md` is hand-written. You are
-carrying the *cost* of telemetry with none of the *compounding benefit*.
-**Action:** close the loop on a schedule and actually feed failures back into agents.
-
-### GAP 3 — Your failure DNA is "reality drift," not bad planning.
-The 15 failures are overwhelmingly: wrong table name (spec said `grid_entity`,
-real table `entity`), asyncpg Pool vs Connection, SQL reserved word `symmetric`,
-OpenAI strict-schema rejection, missing duck-typed interface methods, paths
-without `.expanduser()`. **None of these are fixed by more planning.** They are
-fixed by verifying against *live infrastructure and real types* EARLY. Today your
-PROVE phase catches them late ("phase2-live-test", "sprint4-*") after implementation.
-**Action:** add an early reality-check, not another planning agent.
-
-### GAP 4 — Portfolio sprawl dilutes everything.
-25 dirs, 3 active, 5 zero-git stubs, 3 duplicate clusters. Each new project
-reinvents (or skips) the Claude setup — only 5 of 25 are fully set up. Sprawl is
-why "consistency across projects" is a pain: there's no consistent baseline to be
-consistent *with*.
-**Action:** archive aggressively; standardize a project template.
-
-### GAP 5 — A large bespoke framework with half-built edges, maintained by one person.
-`/review` is a 21-line wrapper; `/feature` is referenced but missing;
-`patterns-full.md` missing; learn loop dormant. The framework's *surface area* now
-exceeds what's *validated*. This is a maintenance liability and a single point of
-failure (you).
-**Action:** finish or delete the half-built pieces; prefer plugins/skills you don't
-have to maintain where they exist.
-
-### GAP 6 — Prompting: strong, with three concrete leaks.
-- **2,820 `/rate-limit-options` (20% of history).** Either compulsive checking or a
-  binding/statusline firing it. Diagnose and kill the noise.
-- **Backtracking within a single prompt** ("…do X. Before you finalize, let me ask
-  3 questions…"). Front-load the questions or split the turn.
-- **Vague terse follow-ups** ("Thoughts?", "Why would you…?") that assume context.
-  Anchor to a file/line/output.
+- **Telemetry (vault-metrics MCP, `~/agents/mcp-server/`):** recording is real but **siloed per project**.
+  - `~/projects/buddy/.claude/memory/metrics.jsonl` = 95 lines; `failures.jsonl` = 15.
+  - `~/projects/mymoney-dev/.claude/memory/metrics.jsonl` = 90 lines; `failures.jsonl` = 23.
+  - `~/agents/.claude/memory/metrics.jsonl` = 3 lines.
+  - MCP reads via `get_project_memory_dir()` → defaults to **cwd**. There is **no global aggregation**.
+- **Reported pass rate 89.5%** (COMPLEX 29/29, SIMPLE 43/44, **UNKNOWN 11/20**) — but this is **PROVE grading its own output**. Post-PROVE correction turns ("forgot to wire X") are **not recorded anywhere**.
+- **`/learn` has never run:** no `pattern-events.jsonl` anywhere; `patterns-full.md` missing; `patterns-critical.md` is hand-written. No cron / RemoteTrigger / loop.
+- **`/rate-limit-options` = 2,820 of 14,068 history entries (20%).**
+- **Git lifecycle stops at the PR.** No `/ship`; no auto commit/merge/squash/prune.
+- **Spec discipline is strong for backend, blind for frontend.** Code-reality manifest + 3-round adversarial review exist; no frontend-component or design-token manifest; `discover-patterns` not wired into `spec-draft`.
+- **`~/agents` is a real repo** (jwj2002/agents) with CI (`.github/workflows/validate.yml`) and tests (`pytest.ini`, `lib/tests/`) — but **near-zero telemetry** (3 records) and **no spec discipline** (ad-hoc `ACTIONS.md`).
 
 ---
 
-## 3. Should you build specialized agents?
+## 2. Core diagnosis (three root problems)
 
-**Short answer: mostly NO — and that instinct is the trap.** You already have 12
-agents and 17 commands; several are half-built. Another *process* agent has near-zero
-marginal value and adds maintenance surface (GAP 5).
+**P-A. The instrument lies.** Your headline metric is self-graded by PROVE in the same context that wrote the code. Your real failure mode — integration/wiring gaps you fix in follow-up turns — is structurally invisible. You cannot improve what you cannot see. **The most important single change in this plan is to measure first-pass-correctness.**
 
-**Build agents ONLY where they attack your actual failure DNA (GAP 3) or close the
-loop (GAP 2). Specifically:**
+**P-B. The loop is open at four joints.** Data is recorded per project but (1) never aggregated to global, (2) `/learn` is never triggered, (3) applied patterns aren't re-injected into agent context per run, (4) `/learn --validate` never runs. You pay for telemetry and harvest nothing.
 
-- ✅ **A reality-check / live-verification step** (enhance PROVE or add a pre-PATCH
-  "infra probe"): before implementing DB or LLM-schema code, connect to the real
-  Postgres and `\d` the actual tables, confirm Pool-vs-Connection, dry-run the
-  OpenAI/LLM JSON schema against the live API. This directly kills wrong-table,
-  reserved-word, strict-schema, and pool-vs-connection failures.
-- ✅ **An operational `/learn` runner** (a scheduled job, not really a new agent):
-  run weekly, cluster failures, propose agent/pattern diffs for your approval.
-- ⚠️ **Maybe** a domain "data-layer reviewer" focused on your recurring asyncpg /
-  pgvector / migration patterns — but only after the loop is closed and proves the
-  pattern persists.
-- ❌ **Do NOT** build: more orchestrate-phase agents, per-project bespoke agents,
-  or "accuracy" agents that duplicate PLAN-CHECK/PROVE.
-
-The highest-leverage moves are **process and enforcement, not new agents.**
+**P-C. Defects are born upstream and caught downstream.** Your logged failures are spec-drift and live-only (`grid_entity` vs `entity`, asyncpg Pool vs Connection, reserved word `symmetric`, OpenAI strict-schema 400, missing duck-typed methods). Planning doesn't catch these; specs-from-code-reality and an early live reality-check do. And UI inconsistency/duplication is born from specs that never name the components/tokens to reuse.
 
 ---
 
-## 4. The plan (prioritized, concrete)
+## 3. Process review — stage by stage
 
-### P0 — This week (kills the most failures for the least effort)
-1. **Enforce routing.** Make `/orchestrate` (even SIMPLE tier) the default. Treat
-   `/quick`/freeform as the rare exception, and when used, still require a MAP read
-   + a PROVE verification line. Target: drive UNKNOWN-complexity work toward zero.
-2. **Close the learning loop.** Run `/learn` against the existing 95+15 records.
-   Generate `patterns-full.md`. Then schedule it: `/loop` weekly or a cron routine.
-   Verify `pattern-events.jsonl` starts populating.
-3. **Diagnose the 2,820 `/rate-limit-options`.** Find what fires it (keybinding,
-   statusline, habit). Kill or automate it.
+### 3.1 Spec development
 
-### P1 — Next 2 weeks (attacks failure DNA + sprawl)
-4. **Add an early reality-check for data/LLM-schema work.** A pre-implementation
-   probe that reads live schema (`\d`), confirms object types, and dry-runs any
-   strict JSON schema against the real API. Wire it into PATCH for backend/DB issues.
-   This is the one *new* capability worth building.
-5. **Portfolio cull.** Archive the 5 no-git stubs and dormant duplicates (maison ×4
-   → 1, generators ×3 → 1, real-estate ×3 → 1). Goal: ≤10 real projects.
-6. **Standardize a project baseline.** One `scaffold-project` template that drops a
-   CLAUDE.md + `.claude/` (commands, settings, memory) into every new repo, so
-   consistency is automatic, not manual.
+**Current (verified):** `~/.claude/commands/spec-draft.md` (7-step guided draft, backend pattern grep) → `~/.claude/commands/spec-review.md` (spec-reviewer agent, gap classification) governed by `~/agents/claude-config/rules/spec-review-workflow.md` (§2 code-reality manifest, §3 self-review, §4 adversarial R1/R2/R3 convergence). Template `~/.claude/templates/code-reality-manifest.md` (8 sections) exists and is used by real backend specs.
 
-### P2 — This month (pay down framework debt)
-7. **Finish or delete half-built pieces:** upgrade `/review` to be agent/pattern-aware
-   *or* delete it in favor of the `code-review` skill; resolve the missing `/feature`;
-   remove dead references.
-8. **Validate `--resume` and failure recovery** end-to-end; document "what to do when
-   PATCH/PROVE fails."
-9. **Prompting tweaks:** front-load questions (don't backtrack mid-prompt); anchor
-   terse follow-ups to a file/line.
+**Gaps:**
+- **Manifest is not mandatory in practice.** You learned it on `owner_onboarding_v1` (8 rounds) and wrote it down — but adherence is optional. This is the biggest defect leak.
+- **Frontend/UI is unspecced.** Specs cite backend enums/tables/functions verbatim but never cite **reusable components, prop APIs, state hooks, or design tokens.** → UI inconsistency and re-implemented one-off components.
+- **`discover-patterns` is not wired into `spec-draft`** — pattern reuse is not surfaced at draft time.
 
-### Metrics to watch (you already collect them — now USE them)
-- UNKNOWN-complexity share of runs → trend to 0.
-- Overall pass rate → 89.5% → 95%+ as the loop closes and reality-checks land.
-- Live-only failures (wrong-table, schema, pool/connection) → trend to 0 after P1.4.
-- `/learn` runs per month → ≥4 (was 0).
+**Fix:**
+1. **Make the code-reality manifest a hard gate** before any V1.0 spec (enforce in `spec-draft` and `spec-review-workflow.md` §5 happy path; refuse to draft without it).
+2. **New `~/.claude/templates/frontend-component-manifest.md`** (parallel to code-reality): reusable components + prop contracts, shared hooks, **design tokens** (color/spacing/typography/breakpoints), layout primitives. Required for any UI-touching spec.
+3. **Wire `discover-patterns` into `spec-draft` Step 2:** for UI features, prompt "run `/discover-patterns frontend` first" and cite results in the spec.
+4. **Add a self-review check** in `spec-review-workflow.md` §3: "frontend component-API verification" (parallel to the execution-order trace).
+
+### 3.2 GitHub issue development
+
+**Current (verified):** `spec-review --create-issues` generates issues referencing commit hash + spec version + line numbers; PM V1 issues carried test ACs lifted from spec §8. Good practice when used.
+
+**Gaps:**
+- **Ad-hoc work bypasses issues entirely** → `UNKNOWN` complexity → 55% pass and zero telemetry.
+- Test ACs in issues are inconsistent (great for PM V1, absent elsewhere).
+
+**Fix:**
+1. **Every non-trivial change gets an issue**, even personal `~/agents` work — that's the unit telemetry attaches to. Trivial work that skips an issue must still emit a metric (see 3.8).
+2. **Standardize the issue body:** required "Test ACs" + "Components/patterns to reuse" sections, auto-filled from the spec + manifests.
+
+### 3.3 Agent prompts
+
+**Current (verified):** 12 agents under `~/.claude/agents/` (`_base` + map/map-plan/plan/plan-checker/patch/prove/contract/test-planner/discuss/spec-reviewer/pr-fresh-reviewer). Well-factored, no redundancy. Agents are loaded from disk per dispatch; `load_learning_rules.py` (SessionStart) injects `patterns-critical.md` only.
+
+**Gaps:**
+- **PROVE's verification scope misses integration.** It checks "does my code work," not "is every caller wired and every callee present." This is your wiring/integration failure class.
+- **Learned patterns aren't re-injected** (`patterns-full.md` not loaded; loop break #3).
+- **No early live reality-check** for backend/DB/LLM-schema work.
+
+**Fix:**
+1. **Add a Wiring/Integration checklist to `patch.md` + `prove.md`:** callers wired? callees exist (read the class, no duck-typing)? service registered in `ServiceContainer`? enum VALUE not NAME? `Path(...).expanduser()`? data handoff between sequential steps verified?
+2. **Add an early reality-check step for backend/DB/LLM work** (enhance MAP/PATCH): connect to **real** Postgres and inspect actual tables (`\d`), confirm Pool-vs-Connection, dry-run any strict JSON schema against the **live** API *before* implementing. This is the one new capability worth building (kills wrong-table, reserved-word, strict-schema, pool-vs-connection at the source).
+3. **Encode recurring failure classes as explicit checklist items** in `patch.md` (sourced from `failures.jsonl`): `MISSING_SERVICE_WIRING`, `MISSING_INTERFACE_METHODS`, `ASYNCPG_POOL_VS_CONNECTION`, `SQL_RESERVED_WORD`, `OPENAI_STRICT_SCHEMA`, `PATH_EXPANSION`.
+
+### 3.4 Implementation & the wiring failure class
+
+Already covered by 3.3 fixes. Additional rule: **small PRs.** Person-Consolidation hid 37 regressions in one big diff; adversarial review is only as strong as the diff is small. Enforce "one logical change per PR" (already a git-workflow rule — make it a `/ship` precondition).
+
+### 3.5 Review — adversarial vs approval gate
+
+**Current:** approval gates ("review before PATCH") historically; you've shifted toward Codex/independent-Claude adversarial review. Correct direction.
+
+**Separate the two jobs (they are not the same):**
+- **Adversarial review** answers *"is this thing right?"* — correctness, wiring, best-practices. Independent grader, parallelizable. Use heavily, in **two** places: on the **spec** (cheap) and on the **diff/PR** (catches implementation defects). One pass is not enough.
+- **The approval gate** answers *"is this the right thing?"* — scope, priority, taste. Irreducibly yours. Keep a *lightweight* gate here only.
+
+**Fix:** standardize "spec adversarial review (loop to low RISK)" + "diff adversarial review on every PR" as pipeline steps, classified BLOCKING/NON-BLOCKING/CLEAN per `implementation-routing.md`.
+
+### 3.6 PR process
+
+**Current (verified):** pre-commit hook (`~/projects/buddy/scripts/pre-commit`) runs `ruff --fix`, `ruff format`, a `relationship_id` grep gate, and version bump — blocks on the gate. `~/.claude/commands/pr.md` runs the pre-PR checklist + `pr-fresh-reviewer` (E01–E15), blocks on CRITICAL, then `gh pr create` and **stops**. `/pr --merge` squash-merges (no `--delete-branch` in buddy), runs post-merge verification, manual prune.
+
+**Gaps:** stops at PR; merge/prune manual; post-merge verification uses `pytest -x` in places (hides regressions — see `feedback_pytest_no_dash_x_for_validation`).
+
+**Fix:** fold into `/ship` (3.7). Replace any `-x` in validation with the full suite.
+
+### 3.7 `/ship` — commit / merge / squash / prune automation
+
+**Goal:** one command from green diff → shipped, plus an **auto tail** for commit→merge→squash→prune.
+
+**`/ship` sequence (new command `~/.claude/commands/ship.md`):**
+1. Assert on feature branch (not main); one logical change.
+2. Stage + commit (conventional message); pre-commit hook runs (lint/format/version).
+3. `git fetch origin && git rebase origin/main` → resolve or abort.
+4. `git push --force-with-lease` (safe after rebase).
+5. `gh pr create` if absent → `pr-fresh-reviewer` → **block on CRITICAL**; for COMPLEX/risky diffs, `/codex:adversarial-review`.
+6. `gh pr checks --watch` → **block on red CI**.
+7. **Re-verify PR HEAD == local HEAD** (the `gh pr merge --squash` drops-commits caveat) → if mismatch, push then re-check.
+8. `gh pr merge <N> --squash --delete-branch`.
+9. Post-merge verification: `git checkout main && git pull`, **full** `ruff` + `pytest tests/` (no `-x`).
+10. `git fetch --prune origin`; delete local branch; clean `: gone]` branches.
+11. Auto-derive docs: changelog entry from the conventional commit; update affected README/CLAUDE.md if flagged.
+12. Record outcome to telemetry (3.8); emit "Shipped ✓ <PR url>".
+
+**Auto tail (the shortcut you asked for):** `/ship --auto` runs steps 8–11 without prompts **only when all guards pass**. Also expose a shell alias (e.g. `gship`) for the tail.
+
+**Guards (non-negotiable for any auto-merge):**
+- Never merge red CI; never `--force` (only `--force-with-lease` after rebase); always `--squash`.
+- Always rebase + verify HEAD parity before merge (drop-commits caveat).
+- Post-merge full-suite verification is mandatory; failure → stop + propose hotfix, do not prune.
+- Enable repo "auto-delete head branches"; otherwise `--delete-branch`.
+- A kill switch: `/ship` without `--auto` always pauses before the irreversible merge.
+
+### 3.8 Telemetry — must be automated
+
+**Current (verified):** `orchestrate.md` Step 4 calls `record_metrics`/`record_failure` via `~/.claude/hooks/state_manager.py` → per-project `.claude/memory/*.jsonl`. **Only orchestrate runs record.** `/quick`, freeform, and correction turns record nothing. No global aggregation.
+
+**Fix — close the four joints:**
+1. **Global aggregation hook** — new `~/.claude/hooks/aggregate_metrics_to_global.py`, wired into the `Stop` hooks in `settings.json`: merge every `~/projects/*/.claude/memory/*.jsonl` and `~/agents/.claude/memory/*.jsonl` → global `~/.claude/memory/{metrics,failures}.jsonl` (idempotent, dedup by issue+date+project).
+2. **First-pass-correctness capture (P-A fix, highest value)** — extend the metrics schema with `first_pass_correct: bool` and `corrections: [reason]`. Mechanism: a tiny `/correction <issue> "<what was missed>"` micro-command that flips the record + appends a failure, **plus** a `Stop`-hook heuristic that flags follow-up fix prompts referencing a just-PASSED issue before `/ship`. This makes your real defect rate visible for the first time.
+3. **Record `/quick` and freeform outcomes** so `UNKNOWN`-complexity work is measured (today it's a blind spot at 55%).
+4. **These feed the automated `/learn` (3.9) and a `/dashboard` subscription** so trends are visible without manual queries.
+
+### 3.9 Learn process — must be automated
+
+**Current (verified):** `~/.claude/commands/learn.md` consumes `{metrics,failures}.jsonl`, produces `patterns.md`, `patterns-critical.md`, `patterns-full.md`, `pattern-events.jsonl`, and (with `--apply`) inserts `## Learned Prevention` sections into agent files + bumps versions. `--cross-project` scans `~/projects/*` and `~/agents`. **100% manual; never run.**
+
+**Fix:**
+1. **Schedule it.** A RemoteTrigger/cron routine runs **weekly**: `/learn --apply --cross-project --validate`. (Friday EOD or after every 10 issues, whichever first.)
+2. **Re-injection** — update `~/.claude/hooks/load_learning_rules.py` to also load `patterns-full.md`, so applied patterns actually reach PATCH/PROVE on the next run (loop break #3).
+3. **Auto-validate** — `--validate` compares success rate before/after each applied pattern; report effectiveness; auto-revert patterns that don't help.
+4. **Apply threshold** stays ≥5 occurrences for auto-apply; 2–4 occurrences → surfaced for your review, not auto-applied.
+5. **First run now** — run `/learn --cross-project` against the existing 95+90+15+23 records to generate the missing `patterns-full.md` and seed the loop.
+
+### 3.10 Dual-source learning — work (`~/projects`) + personal (`~/agents`)
+
+**Current (verified):** `~/projects/buddy` = full ceremony + rich telemetry; `~/agents` = fast ad-hoc + 3 telemetry records, no specs. `/learn --cross-project` already scans both.
+
+**Principle — keep the two modes, unify the learning:**
+- **Do not impose full spec ceremony on `~/agents`.** Personal velocity is a feature. Sample only high-signal work (major refactors get a *lightweight* code-reality manifest; everything else stays fast).
+- **Instrument `~/agents` equally.** Wire metrics on every completed action (it already has `.claude/memory/` + CI). Add a `/dashboard` subscription.
+- **One global pattern store.** Both sources feed the same `~/.claude/memory/patterns-*.md`, so a bug pattern learned in personal code protects work code and vice-versa — which is exactly the cross-pollination you want.
 
 ---
 
-## 5. One-line verdict
+## 4. New artifacts to build (concrete)
 
-Your framework is excellent; your *adherence* and your *feedback loop* are the
-problems. Don't build more agents — **enforce the pipeline you have, close the
-learning loop, and add exactly one early reality-check** for the live-infra bugs
-that planning can't catch.
+| Artifact | Path | Purpose |
+|---|---|---|
+| `/ship` command | `~/.claude/commands/ship.md` | Green-diff → shipped, with guards + `--auto` tail |
+| `gship` alias | `~/.gitconfig` or `~/agents/bin/` | Shell shortcut for the commit→merge→squash→prune tail |
+| Global aggregation hook | `~/.claude/hooks/aggregate_metrics_to_global.py` | Per-project jsonl → global store (Stop hook) |
+| First-pass capture | `~/.claude/commands/correction.md` + Stop-hook heuristic | Record `first_pass_correct` + correction reasons |
+| Frontend-component manifest | `~/.claude/templates/frontend-component-manifest.md` | Force UI specs to cite reusable components/tokens |
+| Design tokens reference | `knowledge/design-tokens.yaml` (per project) | Single source for color/spacing/typography/breakpoints |
+| Weekly learn routine | RemoteTrigger/cron: `/learn --apply --cross-project --validate` | Closes the loop automatically |
+| Reality-check step | enhancement to `map.md`/`patch.md` | Live schema/type/JSON-schema probe before implementing |
+| Wiring checklist | additions to `patch.md` + `prove.md` | Kill the integration/wiring failure class |
+
+---
+
+## 5. Sequenced roadmap
+
+### P0 — this week (visibility + the loop)
+1. **Run `/learn --cross-project` now** against existing records → generate `patterns-full.md`, seed `pattern-events.jsonl`.
+2. **Build the global aggregation hook** + wire into `Stop`. *Accept:* global `metrics.jsonl` reflects all projects after any session.
+3. **Add first-pass-correctness capture** (`/correction` + schema field + Stop heuristic). *Accept:* a correction turn shows up as `first_pass_correct=false` in telemetry.
+4. **Record `/quick` + freeform outcomes.** *Accept:* `UNKNOWN`-complexity share trends down; no silent work.
+5. **Diagnose & kill the 2,820 `/rate-limit-options`.**
+
+### P1 — next 2 weeks (defect prevention + ship)
+6. **Make the code-reality manifest a hard gate**; add the wiring checklist to `patch.md`/`prove.md`.
+7. **Build the early reality-check** for backend/DB/LLM work.
+8. **Build `/ship`** (full + `--auto` tail) with all guards; replace `-x` in validation with full suite.
+9. **Frontend-component manifest + design-tokens.yaml + wire `discover-patterns` into `spec-draft`.** *Accept:* next UI spec cites reusable components/tokens by name.
+
+### P2 — this month (automate learning + pay down debt)
+10. **Schedule the weekly `/learn --apply --cross-project --validate`** + fix `load_learning_rules.py` to load `patterns-full.md`.
+11. **Instrument `~/agents` equally** + `/dashboard` subscription; adopt lightweight manifests for major personal refactors only.
+12. **Finish/delete half-built pieces:** upgrade or remove `/review`; resolve missing `/feature`; validate `--resume`/recovery end-to-end.
+13. **Portfolio cull** to ≤10 real projects (archive 5 no-git stubs + duplicate maison/generator/real-estate clusters).
+14. **(Future) report step** — Telegram/agent notification fired from a Stop hook on `/ship`.
+
+---
+
+## 6. Metrics that prove it's working
+
+| Metric | Now | Target |
+|---|---|---|
+| **First-pass-correct rate** (no post-PROVE corrections) | **unmeasured** | measured, then ≥80% |
+| Overall pass (independently graded) | 89.5% (self-graded) | ≥95% (with diff review) |
+| `UNKNOWN`-complexity share of runs | 21% (11/20 fail) | <5% |
+| Live-only failures (wrong-table/schema/pool) | recurring | →0 after reality-check |
+| `/learn` runs per month | 0 | ≥4 (automated) |
+| `~/agents` telemetry records/month | ~1 | ≥ matches activity |
+| Manual steps from green-diff → shipped | ~10 | 1 (`/ship`) |
+
+---
+
+## 7. Non-goals (do NOT build)
+
+- **More orchestrate-phase agents.** You have enough; another adds maintenance surface and a bus-factor-of-one risk.
+- **Per-project bespoke agents.** Standardize via templates instead.
+- **"Accuracy" agents** that duplicate PLAN-CHECK/PROVE. Fix verification *scope*, don't clone the agent.
+- **Full spec ceremony in `~/agents`.** Preserve personal velocity; sample high-signal only.
+- **Polishing the Telegram report before the spec/telemetry core.** The tail is the cheapest, lowest-value part.
+
+---
+
+## 8. One-line verdict
+
+You don't have an agent shortage — you have an **invisible defect rate**, an **open learning loop**, and **defects born in under-specified specs**. Measure first-pass-correctness, automate telemetry + `/learn` across work *and* personal code, push defect-killing upstream into specs written from code reality (with a frontend manifest for UI/reuse), and collapse the ship tail into one guarded `/ship`. Build exactly the artifacts in §4 — and nothing else.
