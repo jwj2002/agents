@@ -1,0 +1,84 @@
+# design-tokens.yaml
+# Per-project design token registry.
+#
+# Convention:
+#   Location  : knowledge/design-tokens.yaml (repo root of each frontend project)
+#   Spec ref  : Add `design_tokens: knowledge/design-tokens.yaml` to spec frontmatter.
+#   Populate  : Run `/discover-patterns frontend` and choose "design tokens" as the
+#               focus area, OR extract manually from the design system config file.
+#   Maintain  : Update `meta.verified_at` + `meta.verified_commit` whenever the
+#               design system changes (tailwind config, globals.css theme block, etc.).
+#
+# This file is a SCHEMA EXAMPLE. Replace all placeholder <value> entries with actuals
+# from the target project before referencing this file in a spec manifest.
+
+meta:
+  project: "<repo-name>"
+  design_system: "<Tailwind | shadcn/ui | custom | MUI | ...>"
+  source_file: "<frontend/tailwind.config.js | src/styles/globals.css | ...>"
+  verified_at: "<YYYY-MM-DD>"
+  verified_commit: "<hash>"
+
+colors:
+  # CSS variable name → resolved value.
+  # Prefer semantic names (--color-primary) over raw palette (--blue-500).
+  primary: "<value>"              # e.g. "oklch(0.65 0.24 264)"
+  primary_foreground: "<value>"
+  background: "<value>"
+  foreground: "<value>"
+  muted: "<value>"
+  muted_foreground: "<value>"
+  accent: "<value>"
+  accent_foreground: "<value>"
+  destructive: "<value>"
+  border: "<value>"
+  ring: "<value>"
+  # Add project-specific semantic tokens below
+
+spacing:
+  # Numeric scale or named steps from the design system.
+  base: "<value>"                 # e.g. "4px" or "0.25rem" (1 Tailwind unit)
+  sm: "<value>"                   # e.g. "0.5rem"
+  md: "<value>"                   # e.g. "1rem"
+  lg: "<value>"                   # e.g. "1.5rem"
+  xl: "<value>"                   # e.g. "2rem"
+
+typography:
+  font_sans: "<value>"            # e.g. "Inter, system-ui, sans-serif"
+  font_mono: "<value>"            # e.g. "JetBrains Mono, monospace"
+  size_xs: "<value>"              # e.g. "0.75rem"
+  size_sm: "<value>"              # e.g. "0.875rem"
+  size_base: "<value>"            # e.g. "1rem"
+  size_lg: "<value>"              # e.g. "1.125rem"
+  size_xl: "<value>"              # e.g. "1.25rem"
+  size_2xl: "<value>"             # e.g. "1.5rem"
+  weight_normal: "<value>"        # e.g. "400"
+  weight_medium: "<value>"        # e.g. "500"
+  weight_semibold: "<value>"      # e.g. "600"
+  weight_bold: "<value>"          # e.g. "700"
+  line_height_tight: "<value>"    # e.g. "1.25"
+  line_height_normal: "<value>"   # e.g. "1.5"
+  line_height_relaxed: "<value>"  # e.g. "1.75"
+
+shadows:
+  sm: "<value>"                   # e.g. "0 1px 2px 0 rgb(0 0 0 / 0.05)"
+  md: "<value>"                   # e.g. "0 4px 6px -1px rgb(0 0 0 / 0.1)"
+  lg: "<value>"                   # e.g. "0 10px 15px -3px rgb(0 0 0 / 0.1)"
+
+radii:
+  sm: "<value>"                   # e.g. "0.25rem"
+  md: "<value>"                   # e.g. "0.5rem"
+  lg: "<value>"                   # e.g. "0.75rem"
+  full: "9999px"                  # pill / circle shapes
+
+breakpoints:
+  sm: "640px"
+  md: "768px"
+  lg: "1024px"
+  xl: "1280px"
+  "2xl": "1536px"
+
+# Usage in a spec manifest (specs/<feature>.frontend-manifest.md §3):
+#   Cite tokens by key and resolved value so reviewers can verify without
+#   opening the config file.
+#   Example row: colors.primary | colors | "oklch(0.65 0.24 264)" | Button bg
