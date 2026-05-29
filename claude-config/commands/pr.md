@@ -302,6 +302,6 @@ cd frontend && npm run build
 ## Related Commands
 
 - `/orchestrate` — Generate implementation with artifacts
-- `/review` — Pre-commit code review
+- `pr-review-toolkit:code-reviewer` — Automatic code review after changes (plugin agent)
 - `/codex:review` — Native Codex review for risky diffs (plugin)
 - `/codex:adversarial-review` — Adversarial review with focus text (plugin)
