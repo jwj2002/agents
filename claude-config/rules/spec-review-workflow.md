@@ -33,7 +33,12 @@ specs/<feature>.md                  ← the spec
 specs/<feature>.code-reality.md     ← the manifest (this section)
 ```
 
-Use the template at `~/.claude/templates/code-reality-manifest.md`. Fill it in by reading the actual codebase — `Read`, `Grep`, `Bash` to query the DB if needed. Do NOT skip this step on the assumption that "I roughly know the code."
+Use the template at `~/.claude/templates/code-reality-manifest.md`. Fill it in by reading the actual codebase — `Read`, `Grep`, `Bash` to query the DB if needed.
+
+**HARD GATE:** If `specs/<feature>.code-reality.md` does not exist when you are
+asked to draft or review a V1.0 spec, **STOP and refuse.** Do not draft. Do not
+review. Tell the caller to produce the manifest first using
+`~/.claude/templates/code-reality-manifest.md`, then return. This is not optional.
 
 The manifest captures, verbatim from the source files:
 
@@ -130,9 +135,10 @@ R4+ of pure surgical fixes is almost never the right answer. It's what we did wi
 
 ```
 ┌────────────────────────────────────────────┐
-│ 1. Code-Reality Manifest (§2)              │
-│    30-60 min, read actual code             │
-│    → specs/<feature>.code-reality.md       │
+│ 1. Code-Reality Manifest (§2)  ← HARD GATE  │
+│    30-60 min, read actual code              │
+│    → specs/<feature>.code-reality.md        │
+│    STOP if missing — do not proceed         │
 └──────────────────┬─────────────────────────┘
                    │
 ┌──────────────────┴─────────────────────────┐

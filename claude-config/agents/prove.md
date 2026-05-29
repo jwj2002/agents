@@ -159,15 +159,44 @@ grep -rn "onClick={() => {}}\|onChange={() => {}}\|return <div>Placeholder\|retu
 
 #### Level 3: WIRED (integration)
 
+Run each check that applies to the changed code:
+
 ```bash
-# New components imported somewhere
-# New endpoints called from frontend
-# New repos injected into services
-# ENUM_VALUE check (if fullstack)
-# COMPONENT_API check (if reusing components)
+# --- Caller wiring (MISSING_SERVICE_WIRING) ---
+# New service/class/function reachable from a live path (router/scheduler/lifespan)?
+# Replace NewClassName with the actual symbol name.
+grep -rn "NewClassName\|new_function_name" <relevant_dirs> | grep -v "^<file_defining_it>"
+
+# --- Service registration (MISSING_SERVICE_WIRING) ---
+# New service registered in ServiceContainer / lifespan / supervisor _workers dict?
+grep -n "ServiceContainer\|_workers\|lifespan" <entrypoint_files>
+
+# --- Callee existence (MISSING_INTERFACE_METHODS) ---
+# Every external method called by changed code must exist in that class.
+# For each external symbol invoked by changed code: read the class source file
+# and confirm the method is defined. No duck-typing.
+
+# --- Enum values (ENUM_VALUE — if fullstack or config) ---
+# Frontend/config uses string VALUE not Python identifier NAME.
+# Search for bare identifier usage — result should be zero hits.
+grep -rn "ENUM_NAME_WITHOUT_QUOTES" <frontend_and_config_files>
+
+# --- Component API (COMPONENT_API — if reusing frontend components) ---
+# Verify prop names and types match the component's actual PropTypes/interface.
+
+# --- Path expansion (PATH_EXPANSION — if config paths present) ---
+# Any Path(...) that may contain ~ must call .expanduser().
+# Result should be zero (all ~ paths call expanduser).
+grep -rn 'Path(' <changed_files> | grep '~' | grep -v '.expanduser()'
+
+# --- Data handoff (DATA_HANDOFF — if sequential pipeline steps) ---
+# Step N-1 output shape must match step N input. Read both sides.
 ```
 
-**Fail**: Isolated artifacts with no integration, wrong enum values/props.
+**Fail**: Any wiring check fails — new symbol unreachable from a live path,
+unregistered service/worker, missing callee method, enum identifier name instead
+of string value, `~` path without `.expanduser()`, or mismatched pipeline handoff
+shape.
 
 #### Level 4: FUNCTIONAL
 
@@ -318,9 +347,13 @@ Verification:
 Levels:
 - [ ] Level 1: All PATCH files exist
 - [ ] Level 2: No stubs/TODOs/placeholders
-- [ ] Level 3: New code wired (imports, routes, injection)
-- [ ] Level 3: Enum VALUES correct (if fullstack)
+- [ ] Level 3: New code reachable from a live call path (not just defined)
+- [ ] Level 3: All callee methods confirmed to exist in source (no duck-typing)
+- [ ] Level 3: New services/workers registered in container/lifespan/supervisor
+- [ ] Level 3: Enum VALUES correct — string VALUE not Python name (if fullstack)
 - [ ] Level 3: Component APIs correct (if reusing)
+- [ ] Level 3: Config paths call `.expanduser()` if `~` present
+- [ ] Level 3: Pipeline handoff shapes verified (if sequential steps)
 
 Outcome data (orchestrator records these — you populate the frontmatter):
 - [ ] Frontmatter has `status: PASS|BLOCKED`
