@@ -230,3 +230,27 @@ Already covered by 3.3 fixes. Additional rule: **small PRs.** Person-Consolidati
 ## 8. One-line verdict
 
 You don't have an agent shortage — you have an **invisible defect rate**, an **open learning loop**, and **defects born in under-specified specs**. Measure first-pass-correctness, automate telemetry + `/learn` across work *and* personal code, push defect-killing upstream into specs written from code reality (with a frontend manifest for UI/reuse), and collapse the ship tail into one guarded `/ship`. Build exactly the artifacts in §4 — and nothing else.
+
+---
+
+## Appendix A — Opus 4.8 leverage (added 2026-05-29)
+
+Verified against Anthropic's 4.8 release docs. Adopt these alongside the plan; they amplify it, they don't replace it.
+
+### Practices to adopt
+- **Effort-by-stage (the real rate-limit lever).** Default effort is `high` everywhere; adaptive thinking only reasons when needed. Run **high effort** for spec / plan / adversarial review; **drop effort** for mechanical work (the `/ship` tail, lint, renames). Lower effort consumes rate limits more slowly — this replaces compulsive `/rate-limit-options` checking (which is 20% of history).
+- **Fast mode for the mechanical tail.** 2.5× output, now 3× cheaper (`/fast`). Use for `/quick` and `/ship` steps 8–11; keep off for spec/review.
+- **Dynamic Workflows for codebase-scale work.** Plan + hundreds of parallel subagents in one session. Use for the **portfolio cull (§5.13)**, cross-cutting buddy refactors, and the **cross-project `/learn` aggregation (§3.9)**. Opt-in only.
+- **Leaner frontend prompting.** 4.8 needs less guidance to avoid generic "AI-slop" UI. Spend prompt budget on *which components/tokens to reuse* (§3.1 frontend manifest), not on coaxing non-generic output.
+- **Use 1M context + better compaction.** Load the **whole spec + its code-reality manifest in one context** rather than fragmenting — directly reduces the spec-drift failure class. PreCompact/PERSISTENT_STATE become a safety net, not a crutch.
+
+### Rely on, with one hard caveat
+- 4.8 is **~4× less likely to let flaws in its own code pass unremarked** and skips fewer required tool calls (maps to your wiring/integration + "fake success" failures). **Caveat:** a better author is still not an independent grader. First-pass-correctness measurement (§3.8) and diff-level adversarial review (§3.5) **still stand** — treat 4.8 as raising the floor, not relaxing discipline.
+
+### API-code changes (buddy, email-triage, mcp-server)
+- **Mid-conversation system messages:** append `role:"system"` after a user turn to update instructions mid-task **without breaking prompt cache** — useful for buddy's long agentic loops.
+- **Lower prompt-cache minimum (1,024 tokens):** buddy/email-triage's many small LLM calls now cache for free.
+- **Migration hazard (action):** on Opus 4.7+ / 4.8, passing `temperature`/`top_p`/`top_k` or `thinking.budget_tokens` to the Claude API returns **400**.
+  - **Scan result (2026-05-29):** `~/agents` clean; email-triage Haiku fallback clean; buddy's Haiku email calls clean.
+  - **One latent foot-gun:** `buddy/src/buddy/voice/response_generator.py:84-85` passes `temperature` (`voice_llm_temperature=0.4`, config.py:68) on the Anthropic path. Harmless on Haiku/Sonnet/OpenAI, but **400s the instant `voice_llm_model` is set to an Opus 4.7/4.8 model.** Fix: strip/guard `temperature` for Opus 4.7+ models (model-family check). Track as its own buddy issue.
+  - The `claude-api` skill can auto-apply 4.7→4.8 migration across a codebase.
