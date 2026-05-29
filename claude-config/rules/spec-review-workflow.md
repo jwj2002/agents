@@ -86,9 +86,25 @@ Pick the 4–6 sections of the spec most likely to drift apart (typical pairs: a
 
 The V1.7→V1.8 round-8 finding was a fact-correction-model contradiction across §7.2, §7.5, §11.4, §12.3 — present since V1.0, undetected for 7 rounds because each round focused on deltas, not whole-spec coherence.
 
-### 3.4 Output
+### 3.4 Frontend component-API verification (UI/Fullstack features only)
 
-If anything in §3.1–§3.3 fails, V1.0 is not ready. Fix and re-check before involving reviewers. Reviewers are an expensive resource (each round ≈ 20 min of agent compute + your synthesis time); don't burn them on errors you could have caught in 15 minutes.
+**Skip for backend-only specs.**
+
+For any spec that touches frontend code:
+
+- [ ] Every component cited in the spec is in `specs/<feature>.frontend-manifest.md` §1
+      with a verified prop contract (PropTypes or TypeScript interface, not assumed).
+- [ ] Every hook cited is in §2 with a verified return shape.
+- [ ] Every design token referenced matches the project's `knowledge/design-tokens.yaml`
+      (or `specs/<feature>.frontend-manifest.md` §3 if the yaml doesn't exist yet).
+- [ ] §5 of the manifest explicitly maps spec requirements to real, existing components.
+- [ ] §6 of the manifest lists any component the spec considered but found absent.
+
+If any box is unchecked and the spec is UI/Fullstack, V1.0 is not ready.
+
+### 3.5 Output
+
+If anything in §3.1–§3.4 fails, V1.0 is not ready. Fix and re-check before involving reviewers. Reviewers are an expensive resource (each round ≈ 20 min of agent compute + your synthesis time); don't burn them on errors you could have caught in 15 minutes.
 
 ---
 

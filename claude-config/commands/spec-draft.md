@@ -41,6 +41,36 @@ manifest — 4 of those rounds were manifest failures. Do not skip this gate.
 
 ---
 
+## Pre-Condition: Frontend-Component Manifest (HARD GATE — UI/Fullstack features only)
+
+**Skip this gate entirely for backend-only features.**
+
+For any feature whose type (Step 1) is **UI Component**, **Fullstack**, or any
+**Enhancement / Integration** that touches frontend code, verify that a
+frontend-component manifest exists:
+
+```
+specs/<feature>.frontend-manifest.md
+```
+
+If it does not exist:
+1. **STOP.** Do not proceed to Step 1.
+2. Tell the user: "A frontend-component manifest is required before drafting a
+   UI-touching spec. Please produce `specs/<feature>.frontend-manifest.md` using
+   the template at `~/.claude/templates/frontend-component-manifest.md` (§1–§8),
+   then re-run `/spec-draft`."
+3. Before filling the manifest, run `/discover-patterns frontend` in the target
+   repo to surface reusable components, hooks, and design tokens. Cite the output
+   in §1–§4 of the manifest.
+4. Do NOT draft the spec or move to Step 1 until the manifest file exists and the
+   §8 self-verification checklist is complete.
+
+**Rationale**: UI specs that don't cite real prop contracts or design tokens by name
+lead to re-implemented one-off components and visual inconsistency — the frontend
+parallel to the `owner_onboarding` backend manifest failures.
+
+---
+
 ## Process
 
 ### Step 1: Classify Feature Type
@@ -75,6 +105,18 @@ grep -l "account_id" backend/backend/*/models.py
 # Find existing enums
 grep -r "class.*Enum" backend/backend/*/enums.py
 ```
+
+**For UI/frontend features** — before reporting findings, run:
+
+```bash
+/discover-patterns frontend
+```
+
+This surfaces reusable components, shared hooks, and design tokens from the
+project's `frontend/src/` tree. Results must be cited in the
+`specs/<feature>.frontend-manifest.md` §1–§4 before the spec can proceed.
+If a `knowledge/design-tokens.yaml` does not yet exist in this repo, create one
+using `~/.claude/templates/design-tokens.yaml` as the schema.
 
 Report findings:
 ```
