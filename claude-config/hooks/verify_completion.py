@@ -9,11 +9,13 @@ Always exits 0 to avoid feedback loops. The output is visible to the user
 as context for whether to continue the conversation.
 """
 
+import json
 import os
+import re
 import shlex
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 def log(msg: str) -> None:
@@ -106,6 +108,75 @@ def check_todos_in_changes() -> str | None:
     return None
 
 
+def check_correction_needed() -> str | None:
+    """Heuristic: warn if a recent PASS record has no correction recorded yet
+    and the current branch looks like a follow-up fix for that issue.
+
+    Signal: branch name contains "fix" (case-insensitive) AND an issue number
+    is extractable from the branch name AND metrics.jsonl has a record for
+    that issue with status=PASS, no ``first_pass_correct`` field, and a date
+    within the last 7 days.
+
+    Advisory only — never raises; returns None on any error.
+    """
+    try:
+        code, branch = run("git branch --show-current 2>/dev/null")
+        if code != 0 or not branch or "fix" not in branch.lower():
+            return None
+
+        m = re.search(r"issue[-/](\d+)", branch, re.IGNORECASE)
+        if not m:
+            # Also accept plain numeric segment: fix/179-slug
+            m = re.search(r"[-/](\d+)[-/]", branch)
+        if not m:
+            return None
+        issue_num = int(m.group(1))
+
+        # Locate metrics.jsonl relative to CWD (project root).
+        metrics_path = os.path.join(os.getcwd(), ".claude", "memory", "metrics.jsonl")
+        if not os.path.exists(metrics_path):
+            return None
+
+        cutoff = datetime.now() - timedelta(days=7)
+        last_record = None
+        with open(metrics_path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get("issue") == issue_num:
+                    last_record = rec
+
+        if last_record is None:
+            return None
+
+        if last_record.get("status") != "PASS":
+            return None
+
+        if "first_pass_correct" in last_record:
+            return None  # correction already recorded
+
+        try:
+            rec_date = datetime.strptime(last_record.get("date", ""), "%Y-%m-%d")
+        except ValueError:
+            return None
+
+        if rec_date < cutoff:
+            return None
+
+        return (
+            f"issue #{issue_num} has a recent PASS but no correction recorded — "
+            f"if this is a correction turn, run: "
+            f'/correction {issue_num} "<what was missed>"'
+        )
+    except Exception:
+        return None
+
+
 def main() -> None:
     issues = []
 
@@ -124,6 +195,10 @@ def main() -> None:
     todos = check_todos_in_changes()
     if todos:
         issues.append(todos)
+
+    correction_hint = check_correction_needed()
+    if correction_hint:
+        issues.append(correction_hint)
 
     if issues:
         # Advisory only — print warnings but always exit 0 to avoid loops
