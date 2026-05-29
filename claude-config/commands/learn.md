@@ -1,6 +1,6 @@
 ---
 description: Analyze failure patterns and update learned knowledge base
-argument-hint: [--since YYYY-MM-DD] [--dry-run] [--verbose]
+argument-hint: [--since YYYY-MM-DD] [--dry-run] [--verbose] [--apply] [--validate] [--cross-project]
 ---
 
 # Learn Command
@@ -28,7 +28,7 @@ Analyzes accumulated failures and successes to extract patterns and update the k
 2. **Clusters failures** by root cause
 3. **Calculates metrics** (success rates, trends)
 4. **Extracts new patterns** from recurring failures
-5. **Updates patterns.md** with learned knowledge
+5. **Updates patterns-full.md** with learned knowledge
 6. **Suggests agent updates** for high-frequency patterns
 
 ---
@@ -127,9 +127,9 @@ Calculate by dimension:
 - By stack (backend/frontend/fullstack)
 - By week (trend analysis)
 
-### Step 5: Generate Updated patterns.md
+### Step 5: Generate Updated patterns-full.md
 
-Create new version of `.claude/memory/patterns.md`:
+Create new version of `.claude/memory/patterns-full.md`:
 
 ```markdown
 # Learned Patterns
@@ -163,7 +163,11 @@ Create new version of `.claude/memory/patterns.md`:
 
 ### Step 6: Identify Agent Update Candidates
 
-For patterns with 5+ occurrences:
+For patterns by occurrence count:
+
+- **≥5 occurrences** → eligible for `--apply` (auto-apply when flag is set)
+- **2–4 occurrences** → surface as proposals in the summary; NEVER auto-applied
+- **<2 occurrences** → mention in raw output only; no action
 
 ```markdown
 ## Suggested Agent Updates
@@ -225,12 +229,20 @@ For each suggested agent update from Step 6:
    + - [ ] Document VALUE strings in MAP-PLAN artifact
    ```
 
-5. **Apply changes**:
-   - If `--dry-run`: Show diff only, do NOT write
-   - If `--apply`: Write changes, bump agent version (minor increment in YAML frontmatter)
+5. **Apply changes** (occurrence-gated):
+   - If `--dry-run`: Show diff only, do NOT write regardless of count
+   - If occurrence count is **2–4**: Print proposal block only — do NOT write to agent file
+     ```
+     [PROPOSAL — 3 occurrences, needs ≥5 to auto-apply]
+     Pattern: {ROOT_CAUSE}
+     Suggested change: {agent file} — {description}
+     Run /learn --apply again once count reaches 5+.
+     ```
+   - If occurrence count is **≥5** and `--apply` flag is set: Write changes,
+     bump agent version (minor increment in YAML frontmatter)
    - Record application in `.claude/memory/pattern-events.jsonl`:
      ```json
-     {"date":"YYYY-MM-DD","pattern":"ENUM_VALUE","action":"applied","target":"agents/map-plan.md","version_before":"1.0","version_after":"1.1"}
+     {"date":"YYYY-MM-DD","pattern":"ENUM_VALUE","action":"applied","target":"agents/map-plan.md","version_before":"1.0","version_after":"1.1","occurrences":12}
      ```
 
 6. **After all updates applied**, report:
@@ -268,14 +280,14 @@ Success rate trend:
   • Week 4:     91% ↑ Improving!
 
 Files updated:
-  ✓ .claude/memory/patterns.md
+  ✓ .claude/memory/patterns-full.md
 
 Suggested agent updates (5+ occurrence patterns):
   1. MAP agent:   Add enum VALUE verification (12 failures)
   2. PATCH agent: Add multi-model detection (6 failures)
 
 Next steps:
-  • Review updated patterns.md
+  • Review updated patterns-full.md
   • Manually apply suggested agent updates
   • Continue using /orchestrate to gather more data
 ═══════════════════════════════════════════════════════════
@@ -291,7 +303,7 @@ With `--dry-run`, the command:
 - Does NOT modify any files
 
 ```
-[DRY RUN] Would update: .claude/memory/patterns.md
+[DRY RUN] Would update: .claude/memory/patterns-full.md
 [DRY RUN] Changes:
   + New pattern: SCOPE_CREEP (3 occurrences)
   ~ Updated: ENUM_VALUE (12 → 15 occurrences)
@@ -367,7 +379,7 @@ done
 
 - Group by `root_cause` across all projects
 - Note contributing projects for each pattern
-- Write to global `~/.claude/memory/patterns.md` (not project-local)
+- Write to global `~/.claude/memory/patterns-full.md` (not project-local)
 - Merge same root_cause counts from different projects
 
 Example output:
@@ -405,6 +417,24 @@ Pattern Validation Results:
   COMPONENT_API:   81% → 85% (+4%)  ✅ Minor improvement
   SCOPE_CREEP:     88% → 86% (-2%)  ⚠️ No improvement — review pattern
 ```
+
+**Auto-revert** (only when `--apply` and `--validate` are both set):
+
+For each applied pattern where success rate delta is **≤ 0%**:
+
+1. Remove the `## Learned Prevention: {ROOT_CAUSE}` block from the agent file
+2. Revert agent version (minor decrement in YAML frontmatter)
+3. Record revert in `pattern-events.jsonl`:
+   ```json
+   {"date":"YYYY-MM-DD","pattern":"SCOPE_CREEP","action":"reverted","reason":"no_improvement","delta":-0.02,"target":"agents/patch.md"}
+   ```
+4. Report in summary:
+   ```
+   AUTO-REVERTED: SCOPE_CREEP — 88% → 86% (-2%) in agents/patch.md
+   ```
+
+Patterns that are reverted twice are permanently marked `blocked` in
+`pattern-events.jsonl` and will not be auto-applied again.
 
 ---
 
