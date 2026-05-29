@@ -181,3 +181,17 @@ that the M365 capability isn't configured on that machine.
 - Editing `~/.claude/` directly. Always go through `~/agents/claude-config/`.
 - Putting secrets, ephemeral state, or large code patterns in CLAUDE.md.
 - Bypassing safety with `--no-verify`, `--force`, or `bypassPermissions` without explicit user approval.
+
+---
+
+## ~/agents — personal velocity rules
+
+`~/agents` is personal tooling, not a product. Preserve fast iteration:
+
+- **TRIVIAL/SIMPLE changes**: no manifest, no spec, no adversarial review.
+- **Major refactors (4+ files, new protocol, new command)**: produce a *lightweight*
+  code-reality manifest (`specs/<name>.code-reality.md`) before drafting; aim for
+  ≤2 review rounds, not the full spec-review-workflow ceremony.
+- Route substantive ~/agents work through `/orchestrate`; ad-hoc fixes via `/quick`.
+- All telemetry routes through the same `state_manager` hooks as `~/projects/` — no
+  separate recording path needed.

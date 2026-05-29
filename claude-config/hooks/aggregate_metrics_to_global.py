@@ -98,7 +98,7 @@ def aggregate(kind: str, source_dirs: list, global_dir: Path) -> int:
     # Sort output for deterministic, human-readable ordering.
     records = sorted(
         seen.values(),
-        key=lambda r: (r.get("date", ""), r.get("issue", 0), r.get("project", "")),
+        key=lambda r: (r.get("date", ""), str(r.get("issue", 0)), r.get("project", "")),
     )
 
     with open(global_file, "w", encoding="utf-8") as fh:
