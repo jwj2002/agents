@@ -19,7 +19,7 @@ ruff check . && ruff format --check .
 # Frontend (if applicable): cd frontend && npm run lint
 
 # 3. Tests
-pytest tests/ -x --timeout=60
+pytest tests/ --timeout=60
 # Frontend (if applicable): cd frontend && npm run build
 
 # 4. Server startup (if applicable)

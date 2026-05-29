@@ -35,7 +35,7 @@ git fetch origin && git rebase origin/main
 
 # 2. Run checks (Python projects)
 ruff check . && ruff format --check .
-pytest tests/ -x --timeout=60
+pytest tests/ --timeout=60
 
 # 3. Verify only relevant files changed
 git diff --name-only origin/main
