@@ -219,6 +219,8 @@ def record_metrics(
     root_cause: str | None = None,
     blocking_agent: str | None = None,
     agent_versions: dict[str, str] | None = None,
+    first_pass_correct: bool | None = None,
+    corrections: list | None = None,
 ) -> None:
     """Append a single record to ``.claude/memory/metrics.jsonl``.
 
@@ -227,8 +229,9 @@ def record_metrics(
          "complexity":"...","stack":"...","agents_run":[...]}
 
     Optional fields (root_cause, blocking_agent, duration_seconds,
-    agent_versions) are included only when supplied — keeps a PASS
-    record compact and parseable by /learn's existing jq filters.
+    agent_versions, first_pass_correct, corrections) are included only
+    when supplied — keeps a PASS record compact and parseable by
+    /learn's existing jq filters.
 
     Args:
         project_dir: Project root. The file lives at
@@ -245,6 +248,12 @@ def record_metrics(
         blocking_agent: Which agent surfaced the BLOCKED outcome
             (usually "PROVE"). Recorded only when status is BLOCKED.
         agent_versions: Optional version map, e.g. {"prove": "1.5"}.
+        first_pass_correct: True if the issue required no post-PROVE
+            corrections; False if a correction was recorded via
+            /correction. Absent on the initial PASS record (field
+            added retroactively by flip_to_correction).
+        corrections: List of correction reason strings. Only present
+            after /correction has been run at least once.
 
     Returns: None. Errors are logged to ``~/.claude/hooks.log``; the
     function never raises into the orchestrator.
@@ -265,6 +274,10 @@ def record_metrics(
         record["blocking_agent"] = blocking_agent
     if agent_versions:
         record["agent_versions"] = dict(agent_versions)
+    if first_pass_correct is not None:
+        record["first_pass_correct"] = first_pass_correct
+    if corrections is not None:
+        record["corrections"] = list(corrections)
 
     target = _memory_dir(project_dir) / "metrics.jsonl"
     try:
@@ -328,6 +341,84 @@ def record_failure(
         _append_jsonl(target, record)
     except OSError as e:
         logging.warning(f"record_failure: could not append to {target}: {e}")
+
+
+def flip_to_correction(
+    project_dir: Path,
+    issue: int,
+    reason: str,
+    emit_failure: bool = True,
+) -> bool:
+    """Find the most-recent metrics record for ``issue`` and append a
+    corrected copy with ``first_pass_correct=False`` and
+    ``corrections=[reason]``.
+
+    The original record is preserved (append-only invariant). The new
+    record is the canonical one — /learn and agent_metrics read the
+    most-recent record per issue.
+
+    Args:
+        project_dir: Project root.
+        issue: GitHub issue number to flip.
+        reason: Human-readable description of what was missed.
+        emit_failure: If True (default), also append a
+            FIRST_PASS_DEFECT entry to failures.jsonl.
+
+    Returns:
+        True if a record was found and the correction was appended.
+        False if no record for ``issue`` was found (logs a warning).
+        Fails open on IOError (logs warning, returns False).
+    """
+    issue = int(issue)
+    target = _memory_dir(project_dir) / "metrics.jsonl"
+    try:
+        if not target.exists():
+            logging.warning(
+                f"flip_to_correction: metrics.jsonl not found at {target}"
+            )
+            return False
+
+        lines = [l for l in target.read_text(encoding="utf-8").splitlines() if l.strip()]
+        last_record: dict | None = None
+        for line in lines:
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if rec.get("issue") == issue:
+                last_record = rec
+
+        if last_record is None:
+            logging.warning(
+                f"flip_to_correction: no metrics record found for issue #{issue}"
+            )
+            return False
+
+        # Build the corrected record from the last one.
+        corrected = dict(last_record)
+        corrected["date"] = datetime.now().strftime("%Y-%m-%d")
+        corrected["first_pass_correct"] = False
+        existing = corrected.get("corrections")
+        if isinstance(existing, list):
+            corrected["corrections"] = existing + [reason]
+        else:
+            corrected["corrections"] = [reason]
+
+        _append_jsonl(target, corrected)
+
+        if emit_failure:
+            record_failure(
+                project_dir,
+                issue,
+                "FIRST_PASS_DEFECT",
+                details=reason,
+            )
+
+        return True
+
+    except OSError as e:
+        logging.warning(f"flip_to_correction: IOError for issue #{issue}: {e}")
+        return False
 
 
 # ---------------------------------------------------------------------------
