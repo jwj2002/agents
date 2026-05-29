@@ -110,6 +110,10 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/session_end_context_update.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/aggregate_metrics_to_global.py"
           }
         ]
       }
