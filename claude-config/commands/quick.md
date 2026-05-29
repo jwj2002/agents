@@ -75,14 +75,14 @@ Quick task complete:
 
 ---
 
-## Optional: Metrics Recording
+## Step 6: Record Outcome (MANDATORY)
 
 `/quick` doesn't go through `/orchestrate`, so it records its own outcome
 via the same `state_manager` helper the orchestrator uses (see issue #104
 for why we no longer rely on free-form `echo >> file` placeholders).
 
 ```bash
-# After verification passes, optionally append a /quick outcome record.
+# After verification passes, always record the /quick outcome.
 # /quick changes don't have GitHub issues, so use issue=0 as a sentinel.
 python3 -c "
 import sys
@@ -92,11 +92,14 @@ from pathlib import Path
 record_metrics(
     Path('.'), 0, 'PASS', 'TRIVIAL', '$STACK',
     ['quick'],
+    first_pass_correct=True,
 )
 "
 ```
 
 `$STACK` is `backend`, `frontend`, or `config` based on Step 2's classification.
+
+For freeform work (no `/quick` command used), run this snippet manually with appropriate `stack` and `complexity` values, or use `/correction` to record a follow-up; automated freeform capture is intentionally out of scope due to signal ambiguity — route substantive work through `/quick` instead.
 
 ---
 
