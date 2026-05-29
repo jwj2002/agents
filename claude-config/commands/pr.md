@@ -248,7 +248,7 @@ Full checklist: `~/.claude/rules/post-merge-verification.md`
 ```bash
 git checkout main && git pull origin main
 ruff check . && ruff format --check .
-pytest tests/ -x --timeout=60
+pytest tests/ --timeout=60
 ```
 
 **If any check fails**: STOP cleanup. Report failure. Suggest `fix/hotfix-*` branch.
