@@ -224,3 +224,38 @@ When `--resume` is provided, skip already-completed phases:
    ```
    Resuming issue #184 from PATCH phase (MAP-PLAN, PLAN-CHECK already complete)
    ```
+
+---
+
+## Failure Recovery (BLOCKED or crashed phase)
+
+Use `--resume` after fixing the root cause. The state file tracks the last
+**completed** phase, so resume always picks up at the right point.
+
+### Scenario A: PROVE returns BLOCKED
+
+1. Read the PROVE artifact for `root_cause` and fix the code.
+2. Re-run: `/orchestrate N --resume`
+3. Resume logic: `completed_phases` = `[MAP-PLAN, PLAN-CHECK]` (PATCH ran but
+   PROVE blocked it, so PATCH is NOT in `completed_phases`).
+   → Next phase = PATCH. Implementation re-runs with failure context injected.
+
+### Scenario B: Agent crashes mid-run (no artifact written)
+
+State still shows the previous completed phase (the crashed agent never called
+`update_phase` to mark itself done). `--resume` re-runs the crashed phase from
+scratch with a fresh context window.
+
+### Scenario C: Artifact missing for a "completed" phase
+
+The artifact-verification step (Resume Mode point 4) warns:
+`WARNING: Missing artifact for MAP-PLAN`
+
+Do not force-resume past a missing artifact. Instead:
+- Re-run: `/orchestrate N --resume` — it will stop and warn, then restart from
+  the missing phase.
+- If the artifact was manually deleted and state is stale, clear state manually:
+  ```bash
+  python3 -c "import sys; sys.path.insert(0, '$HOME/.claude/hooks'); from state_manager import clear_active; from pathlib import Path; clear_active(Path('.'), N)"
+  ```
+  Then re-run from scratch: `/orchestrate N`

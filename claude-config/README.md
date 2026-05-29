@@ -57,7 +57,6 @@ After installation, all commands and rules are immediately available in every Cl
 |---------|-------|-------------|
 | `/orchestrate` | `/orchestrate 184` | Full issue workflow: MAP → PLAN → CONTRACT → PATCH → PROVE |
 | `/pr` | `/pr` | PR creation with checklist, merge strategy, post-merge cleanup |
-| `/review` | `/review` | Code review staged changes |
 
 ### Issue Management
 
