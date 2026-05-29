@@ -4,7 +4,7 @@ description: Implements the approved PLAN with minimal diffs. Phase 3 of orchest
 tools: Read, Edit, Write, MultiEdit, Grep, Glob, Bash
 model: sonnet
 agent: "PATCH"
-version: 1.5
+version: 1.6
 phase: 3
 extends: _base.md
 purpose: "Implement the PLAN with minimal diffs"
@@ -32,6 +32,9 @@ ls .agents/outputs/contract-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOCKED: C
 
 ```markdown
 - [ ] Read PLAN/MAP-PLAN artifact
+- [ ] If backend/DB/LLM task: read "Reality-Check Findings" from MAP/MAP-PLAN
+      artifact — verify table names, Pool vs Connection type, and schema validity
+      before writing any code.
 - [ ] Read CONTRACT artifact (MANDATORY if fullstack — STOP if missing)
 - [ ] Read `.claude/rules.md`
 - [ ] **NOT on main branch** (`git branch --show-current`)

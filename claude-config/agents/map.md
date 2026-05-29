@@ -4,7 +4,7 @@ description: Read-only investigator for COMPLEX orchestrate workflow phase 1. Ma
 tools: Read, Grep, Glob, Bash, Write
 model: haiku
 agent: "MAP"
-version: 1.1
+version: 1.2
 phase: 1
 extends: _base.md
 purpose: "Read-only investigation - understand current state before planning"
@@ -72,6 +72,49 @@ find backend/tests -name "test_*.py" | xargs grep -l "KEYWORD"
 # Components, hooks, contexts
 find frontend/src -name "*.jsx" -o -name "*.js" | xargs grep -l "KEYWORD"
 ```
+
+### 3.5 Live Reality-Check (skip if no DB or LLM schema involved)
+
+**Skip this step** for frontend-only, docs, config, and rename tasks.
+**Run this step** when the task touches DB models, migrations, asyncpg calls,
+or an OpenAI structured-output schema.
+
+```bash
+# 1. Confirm tables and columns exist as the plan assumes
+source .env 2>/dev/null || true
+psql "$DATABASE_URL" -c "\dt" 2>/dev/null        # list all tables — verify name
+psql "$DATABASE_URL" -c "\d <table_name>"        # columns, types, constraints
+
+# 2. Confirm Pool vs Connection for asyncpg callers
+grep -n "def get_pool\|def get_connection\|async_sessionmaker\|create_pool" \
+  backend/backend/database.py backend/backend/db/*.py 2>/dev/null | head -10
+
+# 3. Dry-run strict JSON schema (only if task uses response_format json_schema)
+python - <<'PY'
+import json, sys
+schema = { }  # paste planned schema here
+assert schema.get("additionalProperties") == False, "additionalProperties must be false"
+for k, v in schema.get("properties", {}).items():
+    assert "type" in v, f"property {k!r} missing 'type'"
+print("Schema OK")
+PY
+```
+
+**Record findings** in the MAP artifact under a "Reality-Check Findings" section:
+
+```markdown
+### Reality-Check Findings
+- Tables confirmed: `entity` (not `grid_entity`), `grid_fact` — both present
+- `get_pool()` returns `asyncpg.Pool`; `.transaction()` requires a `Connection` —
+  must call `pool.acquire()` first
+- Strict schema dry-run: `additionalProperties: false` confirmed, all properties
+  have `type` — OK
+```
+
+If any check fails (table absent, wrong type, schema invalid), **STOP and report**
+before continuing to Step 4.
+
+---
 
 ### 4. Document Reusable Components (MANDATORY for frontend)
 
