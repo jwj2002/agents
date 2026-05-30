@@ -13,11 +13,12 @@ Two responsibilities:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 _log_file = Path.home() / ".claude" / "hooks.log"
@@ -33,6 +34,68 @@ try:
     HAS_YAML = True
 except ImportError:
     HAS_YAML = False
+
+
+def _utc_now_iso() -> str:
+    """ISO-8601 UTC timestamp with **microsecond** precision.
+
+    Returns strings like ``"2026-05-29T14:23:45.123456Z"``.  Used as
+    ``recorded_at`` on every new metrics/failure record so the telemetry
+    gate can compare records across machines using a sortable timestamp.
+
+    Watermark invariant (strict ``>``)
+    ----------------------------------
+    The /learn watermark is advanced to the **max consumed ``recorded_at``**
+    in the snapshot — never to wall-clock ``now()``.  After that advance,
+    any record whose ``recorded_at`` equals the watermark was, by definition,
+    already consumed and is correctly excluded by the ``> watermark`` filter.
+    Any record stamped *after* the snapshot (``recorded_at > consumed_max``)
+    is still counted on the next run.  Microsecond precision makes collisions
+    between concurrent records on the same machine extremely unlikely, and the
+    strict ``>`` gate handles any equality case correctly.
+    """
+    return (
+        datetime.now(timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _event_id(issue: int, date: str, project: str, root_cause: str, details: str) -> str:
+    """Stable content-hash identifier for a failure record (M4).
+
+    SHA-1 of ``issue|date|project|root_cause|details`` (pipe-delimited, UTF-8).
+    Used as the deduplication key in ``write_host_shard()`` and
+    ``_collect_failures()`` so that two same-day same-issue failures with
+    *different* root_cause/details both survive (they produce different hashes).
+
+    Backward-compat: records that were written before event_id was added have
+    no ``event_id`` field.  Callers should call ``ensure_event_id(record)``
+    on read to synthesize one before deduplication.
+    """
+    payload = f"{issue}|{date}|{project}|{root_cause}|{details}"
+    return hashlib.sha1(payload.encode("utf-8"), usedforsecurity=False).hexdigest()
+
+
+def ensure_event_id(record: dict) -> dict:
+    """Return *record* with ``event_id`` guaranteed to be present (M4 backward-compat).
+
+    If the record already carries ``event_id``, it is returned unchanged.
+    Otherwise a stable hash is synthesized from the salient fields and
+    injected — the original record dict is mutated in-place and also returned.
+    This allows the deduplication logic in ``write_host_shard`` and
+    ``_collect_failures`` to always key on ``event_id``.
+    """
+    if "event_id" in record:
+        return record
+    record["event_id"] = _event_id(
+        issue=record.get("issue", 0),
+        date=record.get("date", ""),
+        project=record.get("project", ""),
+        root_cause=record.get("root_cause", ""),
+        details=record.get("details", ""),
+    )
+    return record
 
 
 def _state_path(project_dir: Path) -> Path:
@@ -261,6 +324,7 @@ def record_metrics(
     record: dict = {
         "issue": int(issue),
         "date": datetime.now().strftime("%Y-%m-%d"),
+        "recorded_at": _utc_now_iso(),
         "status": status,
         "complexity": complexity,
         "stack": stack,
@@ -320,10 +384,24 @@ def record_failure(
 
     Returns: None. Fails open with a logged warning on IOError.
     """
+    _date = datetime.now().strftime("%Y-%m-%d")
+    _details = details or ""
+    # Derive project name from project_dir at record time so that two failures
+    # from different projects that are otherwise identical get different event_ids.
+    # Mirrors the convention in aggregate_metrics_to_global._derive_project():
+    # the directory name of project_dir is the repo/project name.
+    _project = project_dir.name
     record: dict = {
         "issue": int(issue),
-        "date": datetime.now().strftime("%Y-%m-%d"),
+        "date": _date,
+        "recorded_at": _utc_now_iso(),
         "root_cause": root_cause,
+        "project": _project,
+        # Stable content-hash dedup key (M4).  Project is included at write
+        # time so cross-project failures with identical other fields get
+        # distinct event_ids.  ensure_event_id() is a no-op on re-read because
+        # the field is already present.
+        "event_id": _event_id(int(issue), _date, _project, root_cause, _details),
     }
     if files:
         record["files"] = list(files)
@@ -378,7 +456,7 @@ def flip_to_correction(
             )
             return False
 
-        lines = [l for l in target.read_text(encoding="utf-8").splitlines() if l.strip()]
+        lines = [ln for ln in target.read_text(encoding="utf-8").splitlines() if ln.strip()]
         last_record: dict | None = None
         for line in lines:
             try:
@@ -397,6 +475,7 @@ def flip_to_correction(
         # Build the corrected record from the last one.
         corrected = dict(last_record)
         corrected["date"] = datetime.now().strftime("%Y-%m-%d")
+        corrected["recorded_at"] = _utc_now_iso()
         corrected["first_pass_correct"] = False
         existing = corrected.get("corrections")
         if isinstance(existing, list):
