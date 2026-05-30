@@ -82,8 +82,11 @@ cat ~/agents/telemetry/*/failures.jsonl 2>/dev/null > "$UNION_FILE"
 echo "Union snapshot: $UNION_FILE ($(wc -l < "$UNION_FILE") lines)"
 
 # 0e. Compute consumed_max from the union snapshot (B2 — used at Step 6.6).
+#     Pass --snapshot "$UNION_FILE" so the watermark is the max recorded_at of
+#     EXACTLY the records in the snapshot — never any record appended to the live
+#     telemetry/ dir after the snapshot was taken (B2 safe variant).
 CONSUMED_MAX=$(python3 ~/agents/claude-config/scripts/telemetry_gate.py \
-  --compute-consumed-max 2>/dev/null || echo "")
+  --compute-consumed-max --snapshot "$UNION_FILE" 2>/dev/null || echo "")
 ```
 
 ### Step 1: Load Outcome Data

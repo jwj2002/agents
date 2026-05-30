@@ -227,6 +227,47 @@ def compute_consumed_max(telemetry_root: Path, since: datetime) -> datetime | No
     return consumed_max
 
 
+def compute_consumed_max_from_snapshot(snapshot_file: Path) -> datetime | None:
+    """Return the maximum ``recorded_at`` across all records in a snapshot file (B2).
+
+    This is the snapshot-safe variant of ``compute_consumed_max``: it computes
+    the watermark from the **already-materialized union snapshot** (``UNION_FILE``
+    from /learn Step 0d) rather than re-scanning the live ``telemetry/`` directory.
+
+    Because the snapshot was taken at a fixed moment, any record appended to the
+    live telemetry dir AFTER the snapshot was created is NOT reflected here — which
+    is precisely the B2 invariant: the watermark advances only to the max
+    ``recorded_at`` of the records that were actually analyzed, never further.
+
+    Normalizes legacy compound rows (M5) so their synthesised ``recorded_at``
+    (``date+"T00:00:00Z"``) is included in the max.
+
+    Returns ``None`` if the snapshot is empty or does not exist.
+    """
+    consumed_max: datetime | None = None
+    if not snapshot_file.exists():
+        return None
+    try:
+        with open(snapshot_file, encoding="utf-8") as fh:
+            for raw in fh:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    record = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                for normalized in _normalize_record(record):
+                    ts = _record_timestamp(normalized)
+                    if consumed_max is None or ts > consumed_max:
+                        consumed_max = ts
+    except OSError:
+        pass
+    return consumed_max
+
+
 def write_watermark_monotonic(
     state_path: Path,
     consumed_max: datetime,
@@ -392,7 +433,22 @@ def main() -> int:
         dest="compute_consumed_max",
         help=(
             "Print max recorded_at of new failures (consumed_max for B2 watermark) "
-            "and exit 0.  Prints empty string if no new failures."
+            "and exit 0.  Prints empty string if no new failures.  "
+            "When --snapshot FILE is also given, computes from the snapshot file "
+            "rather than the live telemetry/ dir (B2 safe variant)."
+        ),
+    )
+    parser.add_argument(
+        "--snapshot",
+        type=Path,
+        default=None,
+        dest="snapshot",
+        help=(
+            "Path to a materialized union snapshot JSONL file.  "
+            "When provided with --compute-consumed-max, computes consumed_max "
+            "from the snapshot rows rather than re-scanning the live telemetry/ dir. "
+            "Ensures the watermark reflects only records that were analyzed — "
+            "not any record appended after the snapshot was taken (B2)."
         ),
     )
     parser.add_argument(
@@ -437,9 +493,16 @@ def main() -> int:
         return 0
 
     if args.compute_consumed_max:
-        state_path = agents_root / "telemetry" / "_state.json"
-        wm = load_watermark(state_path)
-        cmax = compute_consumed_max(agents_root / "telemetry", wm)
+        if args.snapshot is not None:
+            # B2 safe variant: compute from the already-materialized snapshot so
+            # that records appended to the live telemetry/ dir after the snapshot
+            # was taken do NOT influence the watermark.
+            cmax = compute_consumed_max_from_snapshot(args.snapshot)
+        else:
+            # Legacy path: scan the live telemetry/ dir (only new records since wm).
+            state_path = agents_root / "telemetry" / "_state.json"
+            wm = load_watermark(state_path)
+            cmax = compute_consumed_max(agents_root / "telemetry", wm)
         if cmax is not None:
             # Microsecond precision (M3): format as YYYY-MM-DDTHH:MM:SS.ffffffZ
             print(cmax.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z")

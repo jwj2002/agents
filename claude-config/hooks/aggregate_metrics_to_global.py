@@ -166,6 +166,12 @@ def _load_source(
     Injects ``project`` if the record does not already carry it.  Normalizes
     legacy compound rows via ``normalize_record()`` (M5) and ensures every
     failure record has an ``event_id`` (M4).  Bad lines are skipped silently.
+
+    Dedup key for failure records (M4): ``event_id`` — so two records with the
+    same (issue, date, project) but *different* root_cause/details both survive
+    in the local ``~/.claude/memory/`` view.  Metrics records (which have a
+    ``status`` field) retain the legacy ``(issue, date, project)`` key because
+    they don't have meaningful event_ids.
     """
     try:
         with open(file, encoding="utf-8") as fh:
@@ -188,10 +194,15 @@ def _load_source(
                 for record in records:
                     # Use existing project tag on re-aggregation; else derive it.
                     record.setdefault("project", project_name)
-                    # Ensure event_id for dedup (M4 backward-compat).
                     if "status" not in record:
+                        # Ensure event_id present (M4 backward-compat), then dedup
+                        # by event_id so distinct root_causes for the same issue both
+                        # survive (M4 local-merge fix).
                         ensure_event_id(record)
-                    key = (record.get("issue"), record.get("date"), record.get("project"))
+                        key = record["event_id"]
+                    else:
+                        # Metrics records: legacy (issue, date, project) key is fine.
+                        key = (record.get("issue"), record.get("date"), record.get("project"))
                     seen[key] = record  # last wins
     except OSError:
         pass  # file vanished between glob and open — harmless
@@ -202,7 +213,7 @@ def aggregate(kind: str, source_dirs: list, global_dir: Path) -> int:
 
     Returns the number of records written.
     """
-    seen: dict = {}  # key=(issue, date, project) -> record
+    seen: dict = {}  # key=event_id (failures) or (issue,date,project) (metrics) -> record
 
     for source_dir in sorted(source_dirs):
         file = source_dir / f"{kind}.jsonl"

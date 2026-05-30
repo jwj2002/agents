@@ -36,12 +36,14 @@ from state_manager import (  # noqa: E402
 )
 from aggregate_metrics_to_global import (  # noqa: E402
     _collect_failures,
+    aggregate,
     normalize_record,
     write_host_shard,
 )
 from telemetry_gate import (  # noqa: E402
     _normalize_record,
     compute_consumed_max,
+    compute_consumed_max_from_snapshot,
     count_new_failures,
     load_watermark,
     write_watermark_monotonic,
@@ -522,3 +524,267 @@ class TestRoundTrip:
 
         count_post = count_new_failures(telemetry_root, new_watermark)
         assert count_post == 1, f"Post-snapshot record must be counted; got {count_post}"
+
+
+# ---------------------------------------------------------------------------
+# B2 (residual) — consumed_max from snapshot, not live telemetry dir
+# ---------------------------------------------------------------------------
+
+class TestConsumedMaxFromSnapshot:
+    """B2 — compute_consumed_max_from_snapshot uses only the snapshot rows."""
+
+    def test_snapshot_consumed_max_equals_max_recorded_at_in_file(self, tmp_path):
+        """consumed_max from snapshot = max recorded_at of snapshot rows."""
+        ts_older = "2026-05-10T08:00:00.000001Z"
+        ts_newer = "2026-05-10T12:00:00.500000Z"
+        records = [
+            {"issue": 1, "date": "2026-05-10", "root_cause": "A", "recorded_at": ts_older},
+            {"issue": 2, "date": "2026-05-10", "root_cause": "B", "recorded_at": ts_newer},
+        ]
+        snapshot = tmp_path / "union.jsonl"
+        snapshot.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+
+        cmax = compute_consumed_max_from_snapshot(snapshot)
+        assert cmax is not None
+
+        expected_str = ts_newer.replace("Z", "+00:00")
+        expected = datetime.fromisoformat(expected_str).astimezone(timezone.utc)
+        assert cmax == expected, f"Expected {expected}, got {cmax}"
+
+    def test_live_only_record_does_not_affect_snapshot_based_consumed_max(self, tmp_path):
+        """A record present only in the live telemetry dir but NOT in the snapshot
+        must NOT influence the snapshot-based consumed_max (B2 core invariant)."""
+        ts_snapshot = "2026-05-10T10:00:00.000001Z"
+        ts_live_only = "2026-05-10T11:00:00.999999Z"  # newer than snapshot record
+
+        # Snapshot contains only the earlier record
+        snapshot = tmp_path / "union.jsonl"
+        snapshot.write_text(
+            json.dumps({"issue": 1, "date": "2026-05-10", "root_cause": "A",
+                        "recorded_at": ts_snapshot}) + "\n"
+        )
+
+        # Live telemetry dir has a NEWER record appended after snapshot was taken
+        telemetry_root = tmp_path / "telemetry"
+        host_dir = telemetry_root / "host1"
+        host_dir.mkdir(parents=True)
+        shard = host_dir / "failures.jsonl"
+        shard.write_text(
+            json.dumps({"issue": 1, "date": "2026-05-10", "root_cause": "A",
+                        "recorded_at": ts_snapshot}) + "\n" +
+            json.dumps({"issue": 2, "date": "2026-05-10", "root_cause": "B",
+                        "recorded_at": ts_live_only}) + "\n"
+        )
+
+        snapshot_cmax = compute_consumed_max_from_snapshot(snapshot)
+        assert snapshot_cmax is not None
+
+        # Snapshot-based max must equal ts_snapshot, NOT ts_live_only
+        expected_str = ts_snapshot.replace("Z", "+00:00")
+        expected = datetime.fromisoformat(expected_str).astimezone(timezone.utc)
+        assert snapshot_cmax == expected, (
+            f"Snapshot-based consumed_max must not include the live-only record; "
+            f"expected {expected}, got {snapshot_cmax}"
+        )
+
+        # Verify that the live scan WOULD return the later timestamp (so the
+        # contrast is real — snapshot truly excludes what live would include).
+        epoch = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        live_cmax = compute_consumed_max(telemetry_root, epoch)
+        assert live_cmax is not None
+        live_expected_str = ts_live_only.replace("Z", "+00:00")
+        live_expected = datetime.fromisoformat(live_expected_str).astimezone(timezone.utc)
+        assert live_cmax == live_expected, (
+            f"Live scan should return {live_expected} but got {live_cmax}"
+        )
+
+        # The critical assertion: snapshot-based < live-based
+        assert snapshot_cmax < live_cmax, (
+            "Snapshot-based consumed_max must be less than live-based "
+            "(live-only record should not contaminate the snapshot watermark)"
+        )
+
+    def test_snapshot_consumed_max_nonexistent_file_returns_none(self, tmp_path):
+        cmax = compute_consumed_max_from_snapshot(tmp_path / "nonexistent.jsonl")
+        assert cmax is None
+
+    def test_snapshot_consumed_max_empty_file_returns_none(self, tmp_path):
+        snapshot = tmp_path / "empty.jsonl"
+        snapshot.write_text("")
+        cmax = compute_consumed_max_from_snapshot(snapshot)
+        assert cmax is None
+
+    def test_snapshot_consumed_max_normalizes_legacy_compound_rows(self, tmp_path):
+        """Legacy compound rows in the snapshot must be normalized before extracting ts."""
+        compound = {"issues": [1, 2], "root_causes": ["ENUM_VALUE"], "date": "2026-05-08"}
+        snapshot = tmp_path / "union.jsonl"
+        snapshot.write_text(json.dumps(compound) + "\n")
+
+        cmax = compute_consumed_max_from_snapshot(snapshot)
+        assert cmax is not None
+        # Compound rows synthesize recorded_at = date + "T00:00:00Z"
+        expected = datetime(2026, 5, 8, 0, 0, 0, tzinfo=timezone.utc)
+        assert cmax == expected, f"Expected {expected}, got {cmax}"
+
+
+# ---------------------------------------------------------------------------
+# M4 (residual) — local global-merge also deduplicates by event_id
+# ---------------------------------------------------------------------------
+
+class TestLocalMergeDeduplicatesByEventId:
+    """M4 (local-merge fix) — aggregate() keeps two records with same (issue,date,project)
+    but different root_cause when they have different event_ids."""
+
+    def test_local_merge_keeps_two_distinct_root_cause_failures(self, tmp_path):
+        """Two failures with same (issue, date, project) but different root_cause
+        must BOTH survive the local global-merge (aggregate for 'failures' kind)."""
+        # Build a project-style memory dir: <project>/.claude/memory/
+        project_dir = tmp_path / "myproject"
+        mem_dir = project_dir / ".claude" / "memory"
+        mem_dir.mkdir(parents=True)
+
+        eid1 = _event_id(10, "2026-05-20", "myproject", "ENUM_VALUE", "")
+        eid2 = _event_id(10, "2026-05-20", "myproject", "COMPONENT_API", "")
+        records = [
+            {"issue": 10, "date": "2026-05-20", "project": "myproject",
+             "root_cause": "ENUM_VALUE", "event_id": eid1,
+             "recorded_at": "2026-05-20T10:00:00.000001Z"},
+            {"issue": 10, "date": "2026-05-20", "project": "myproject",
+             "root_cause": "COMPONENT_API", "event_id": eid2,
+             "recorded_at": "2026-05-20T10:00:00.000002Z"},
+        ]
+        failures_file = mem_dir / "failures.jsonl"
+        failures_file.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+
+        global_dir = tmp_path / ".claude" / "memory"
+        count = aggregate("failures", [mem_dir], global_dir)
+
+        assert count == 2, (
+            f"Local merge must keep both distinct root_cause failures; got {count}"
+        )
+        global_file = global_dir / "failures.jsonl"
+        lines = [ln for ln in global_file.read_text().splitlines() if ln.strip()]
+        assert len(lines) == 2, f"Global file must have 2 records; got {len(lines)}"
+        root_causes = {json.loads(ln)["root_cause"] for ln in lines}
+        assert root_causes == {"ENUM_VALUE", "COMPONENT_API"}, (
+            f"Both root_causes must appear; got {root_causes}"
+        )
+
+    def test_local_merge_deduplicates_identical_event_id(self, tmp_path):
+        """The same failure written twice (identical event_id) must appear only once
+        in the merged global output."""
+        project_dir = tmp_path / "myproject"
+        mem_dir = project_dir / ".claude" / "memory"
+        mem_dir.mkdir(parents=True)
+
+        eid = _event_id(11, "2026-05-20", "myproject", "ENUM_VALUE", "")
+        record = {"issue": 11, "date": "2026-05-20", "project": "myproject",
+                  "root_cause": "ENUM_VALUE", "event_id": eid,
+                  "recorded_at": "2026-05-20T10:00:00.000001Z"}
+        # Write the same record twice (simulates a re-run that appends the same failure)
+        failures_file = mem_dir / "failures.jsonl"
+        failures_file.write_text(
+            json.dumps(record) + "\n" + json.dumps(record) + "\n"
+        )
+
+        global_dir = tmp_path / ".claude" / "memory"
+        count = aggregate("failures", [mem_dir], global_dir)
+
+        assert count == 1, (
+            f"Identical event_id must be deduplicated to 1 record; got {count}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# NEW — event_id includes project at record creation time (state_manager)
+# ---------------------------------------------------------------------------
+
+class TestEventIdIncludesProjectAtCreation:
+    """NEW finding — two failures identical except project must get different event_ids."""
+
+    def test_different_projects_produce_different_event_ids(self, tmp_path):
+        """record_failure() called on two different project dirs must emit
+        different event_ids even when issue, root_cause, and details are identical.
+
+        Both calls happen within the same test (same day), so the only differing
+        input to _event_id is ``project`` — proving that project is included in
+        the hash at record creation time.
+        """
+        project_a = tmp_path / "project_alpha"
+        project_b = tmp_path / "project_beta"
+        project_a.mkdir()
+        project_b.mkdir()
+
+        record_failure(project_a, issue=99, root_cause="ENUM_VALUE", details="same details")
+        record_failure(project_b, issue=99, root_cause="ENUM_VALUE", details="same details")
+
+        file_a = project_a / ".claude" / "memory" / "failures.jsonl"
+        file_b = project_b / ".claude" / "memory" / "failures.jsonl"
+        rec_a = json.loads(file_a.read_text().strip())
+        rec_b = json.loads(file_b.read_text().strip())
+
+        assert rec_a.get("project") == "project_alpha", (
+            f"record_failure must set project from project_dir.name; got {rec_a.get('project')!r}"
+        )
+        assert rec_b.get("project") == "project_beta", (
+            f"record_failure must set project from project_dir.name; got {rec_b.get('project')!r}"
+        )
+        # Both records are written on the same date with the same issue/root_cause/details.
+        # The ONLY difference is project — which must cause different event_ids.
+        assert rec_a["event_id"] != rec_b["event_id"], (
+            f"Different projects must produce different event_ids; "
+            f"project_alpha={rec_a['event_id']!r}, project_beta={rec_b['event_id']!r}"
+        )
+
+    def test_same_project_same_fields_produces_stable_event_id(self, tmp_path):
+        """Two calls to record_failure on the same project with identical fields
+        must produce the same event_id (stable content-hash)."""
+        project_dir = tmp_path / "myproject"
+        project_dir.mkdir()
+
+        # Call record_failure twice
+        record_failure(project_dir, issue=55, root_cause="COMPONENT_API", details="foo")
+        record_failure(project_dir, issue=55, root_cause="COMPONENT_API", details="foo")
+
+        file = project_dir / ".claude" / "memory" / "failures.jsonl"
+        lines = [ln for ln in file.read_text().splitlines() if ln.strip()]
+        assert len(lines) == 2, "record_failure is append-only; two calls produce two lines"
+        rec1 = json.loads(lines[0])
+        rec2 = json.loads(lines[1])
+        # event_id is based on (issue, date, project, root_cause, details) —
+        # if date is the same (same day), the event_ids must be equal.
+        if rec1["date"] == rec2["date"]:
+            assert rec1["event_id"] == rec2["event_id"], (
+                "Same-day same-project same-fields must produce identical event_id"
+            )
+
+    def test_event_id_field_written_by_record_failure(self, tmp_path):
+        """record_failure must write project and event_id fields on the record."""
+        project_dir = tmp_path / "coolproject"
+        project_dir.mkdir()
+        record_failure(project_dir, issue=77, root_cause="MULTI_MODEL", details="oops")
+
+        file = project_dir / ".claude" / "memory" / "failures.jsonl"
+        rec = json.loads(file.read_text().strip())
+        assert "event_id" in rec, "event_id must be present on written record"
+        assert "project" in rec, "project must be present on written record"
+        assert rec["project"] == "coolproject", (
+            f"project must be derived from project_dir.name; got {rec['project']!r}"
+        )
+        assert len(rec["event_id"]) == 40, "event_id must be SHA-1 hex (40 chars)"
+
+    def test_ensure_event_id_uses_project_field_when_present(self):
+        """ensure_event_id must derive id from project field if already set on record,
+        matching what _event_id(... project=...) would produce."""
+        rec = {
+            "issue": 33,
+            "date": "2026-05-20",
+            "project": "myapp",
+            "root_cause": "ENUM_VALUE",
+            "details": "",
+        }
+        result = ensure_event_id(rec)
+        expected = _event_id(33, "2026-05-20", "myapp", "ENUM_VALUE", "")
+        assert result["event_id"] == expected, (
+            f"ensure_event_id must use project field; expected {expected!r}, got {result['event_id']!r}"
+        )

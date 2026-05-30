@@ -386,15 +386,22 @@ def record_failure(
     """
     _date = datetime.now().strftime("%Y-%m-%d")
     _details = details or ""
+    # Derive project name from project_dir at record time so that two failures
+    # from different projects that are otherwise identical get different event_ids.
+    # Mirrors the convention in aggregate_metrics_to_global._derive_project():
+    # the directory name of project_dir is the repo/project name.
+    _project = project_dir.name
     record: dict = {
         "issue": int(issue),
         "date": _date,
         "recorded_at": _utc_now_iso(),
         "root_cause": root_cause,
-        # Stable content-hash dedup key (M4).  project is "" at write time;
-        # aggregate_metrics_to_global.py injects it on the way to the shard,
-        # but the event_id is already present so ensure_event_id() is a no-op.
-        "event_id": _event_id(int(issue), _date, "", root_cause, _details),
+        "project": _project,
+        # Stable content-hash dedup key (M4).  Project is included at write
+        # time so cross-project failures with identical other fields get
+        # distinct event_ids.  ensure_event_id() is a no-op on re-read because
+        # the field is already present.
+        "event_id": _event_id(int(issue), _date, _project, root_cause, _details),
     }
     if files:
         record["files"] = list(files)
