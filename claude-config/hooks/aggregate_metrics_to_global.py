@@ -25,6 +25,7 @@ are not duplicated.
 Always exits 0 (fail-open). Stdlib only.
 """
 
+import hashlib
 import json
 import sys
 from datetime import datetime
@@ -41,6 +42,106 @@ def log(msg: str) -> None:
             )
     except Exception:
         pass
+
+
+def _event_id(issue, date: str, project: str, root_cause: str, details: str) -> str:
+    """Stable content-hash for a failure record (M4 — mirrors state_manager._event_id).
+
+    Duplicated here to keep this Stop hook stdlib-only (no sys.path manipulation).
+    SHA-1 of pipe-delimited salient fields; collision-resistant enough for dedup.
+    """
+    payload = f"{issue}|{date}|{project}|{root_cause}|{details}"
+    return hashlib.sha1(payload.encode("utf-8"), usedforsecurity=False).hexdigest()
+
+
+def ensure_event_id(record: dict) -> dict:
+    """Guarantee ``event_id`` is present on a failure record (M4 backward-compat).
+
+    Records written before event_id was introduced lack the field.  This helper
+    synthesises a stable hash from salient fields and injects it in-place,
+    allowing deduplication to always key on ``event_id``.
+    """
+    if "event_id" in record:
+        return record
+    record["event_id"] = _event_id(
+        issue=record.get("issue", 0),
+        date=record.get("date", ""),
+        project=record.get("project", ""),
+        root_cause=record.get("root_cause", ""),
+        details=record.get("details", ""),
+    )
+    return record
+
+
+def normalize_record(record: dict) -> list:
+    """Normalize a possibly-legacy compound failure record into canonical form (M5).
+
+    Historical rows sometimes have the shape::
+
+        {"type": "...", "issues": [1, 2], "root_causes": ["A", "B"], "date": "..."}
+
+    rather than the canonical per-failure shape::
+
+        {"issue": N, "root_cause": "...", "date": "...", ...}
+
+    This helper expands a compound row into one record per (issue × root_cause)
+    pair.  When the cartesian product is ambiguous (issues and root_causes lists
+    differ in length and are both non-trivially sized), it emits a single
+    normalized record with the first root_cause (or ``"LEGACY_COMPOUND"``).
+
+    A synthesised ``recorded_at`` is derived from ``date+"T00:00:00Z"`` so the
+    telemetry gate never treats these as perpetually-new after they have been
+    consumed once.
+
+    Normal (non-compound) records are returned in a single-element list
+    unchanged.
+    """
+    # Fast path: already in canonical shape.
+    if "issue" in record and "root_cause" in record:
+        return [record]
+
+    # Legacy compound shape detection.
+    issues = record.get("issues") or []
+    root_causes = record.get("root_causes") or []
+    date = record.get("date", "2000-01-01")
+    base_recorded_at = date + "T00:00:00Z"
+
+    if not issues:
+        # Has neither issue nor issues — synthesise a single stub record.
+        stub = {
+            "issue": 0,
+            "date": date,
+            "recorded_at": base_recorded_at,
+            "root_cause": root_causes[0] if root_causes else "LEGACY_COMPOUND",
+        }
+        ensure_event_id(stub)
+        return [stub]
+
+    # Unambiguous expansion: 1 issue or 1 root_cause — simple cross-product.
+    # Ambiguous: both lists have >1 element and different lengths → use first.
+    if len(issues) > 1 and len(root_causes) > 1 and len(issues) != len(root_causes):
+        single_rc = root_causes[0] if root_causes else "LEGACY_COMPOUND"
+        out = {
+            "issue": int(issues[0]),
+            "date": date,
+            "recorded_at": base_recorded_at,
+            "root_cause": single_rc,
+        }
+        ensure_event_id(out)
+        return [out]
+
+    expanded = []
+    for iss in issues:
+        for rc in (root_causes or ["LEGACY_COMPOUND"]):
+            rec = {
+                "issue": int(iss),
+                "date": date,
+                "recorded_at": base_recorded_at,
+                "root_cause": rc,
+            }
+            ensure_event_id(rec)
+            expanded.append(rec)
+    return expanded
 
 
 def _derive_project(source_dir: Path) -> str:
@@ -62,8 +163,9 @@ def _load_source(
 ) -> None:
     """Read one JSONL file and merge records into *seen* (last record wins).
 
-    Injects ``project`` if the record does not already carry it. Bad lines are
-    skipped silently.
+    Injects ``project`` if the record does not already carry it.  Normalizes
+    legacy compound rows via ``normalize_record()`` (M5) and ensures every
+    failure record has an ``event_id`` (M4).  Bad lines are skipped silently.
     """
     try:
         with open(file, encoding="utf-8") as fh:
@@ -77,10 +179,20 @@ def _load_source(
                     continue
                 if not isinstance(record, dict):
                     continue
-                # Use existing project tag on re-aggregation; else derive it.
-                record.setdefault("project", project_name)
-                key = (record.get("issue"), record.get("date"), record.get("project"))
-                seen[key] = record  # last wins
+                # Normalize legacy compound rows first (M5).
+                # For metrics records (have "status" field), skip normalization.
+                if "status" not in record:
+                    records = normalize_record(record)
+                else:
+                    records = [record]
+                for record in records:
+                    # Use existing project tag on re-aggregation; else derive it.
+                    record.setdefault("project", project_name)
+                    # Ensure event_id for dedup (M4 backward-compat).
+                    if "status" not in record:
+                        ensure_event_id(record)
+                    key = (record.get("issue"), record.get("date"), record.get("project"))
+                    seen[key] = record  # last wins
     except OSError:
         pass  # file vanished between glob and open — harmless
 
@@ -135,8 +247,11 @@ def _get_host_name() -> str:
 def write_host_shard(failures: list, agents_root: Path) -> int:
     """Append new failure records to telemetry/<host>/failures.jsonl.
 
-    Deduplicates against existing shard content by (issue, date, project) key
-    so re-running is idempotent. Only genuinely new records are appended.
+    Deduplicates against existing shard content by ``event_id`` (M4) so that
+    two same-day same-issue failures with *different* root_cause both survive.
+    Backward-compat: records without ``event_id`` have one synthesised by
+    ``ensure_event_id()`` before the key comparison.
+
     Returns count of records appended. Fails open on IOError.
 
     Args:
@@ -155,8 +270,8 @@ def write_host_shard(failures: list, agents_root: Path) -> int:
         shard_dir.mkdir(parents=True, exist_ok=True)
         shard_file = shard_dir / "failures.jsonl"
 
-        # Load existing keys to dedup
-        existing_keys: set = set()
+        # Load existing event_ids to dedup (M4)
+        existing_ids: set = set()
         if shard_file.exists():
             try:
                 with open(shard_file, encoding="utf-8") as fh:
@@ -166,12 +281,8 @@ def write_host_shard(failures: list, agents_root: Path) -> int:
                             continue
                         try:
                             rec = json.loads(raw)
-                            key = (
-                                rec.get("issue"),
-                                rec.get("date"),
-                                rec.get("project"),
-                            )
-                            existing_keys.add(key)
+                            ensure_event_id(rec)
+                            existing_ids.add(rec["event_id"])
                         except json.JSONDecodeError:
                             continue
             except OSError:
@@ -181,11 +292,12 @@ def write_host_shard(failures: list, agents_root: Path) -> int:
         appended = 0
         with open(shard_file, "a", encoding="utf-8") as fh:
             for record in failures:
-                key = (record.get("issue"), record.get("date"), record.get("project"))
-                if key in existing_keys:
+                ensure_event_id(record)
+                eid = record["event_id"]
+                if eid in existing_ids:
                     continue
                 fh.write(json.dumps(record, separators=(",", ":")) + "\n")
-                existing_keys.add(key)  # prevent within-batch duplicates
+                existing_ids.add(eid)  # prevent within-batch duplicates
                 appended += 1
 
         return appended
@@ -200,14 +312,38 @@ def _collect_failures(source_dirs: list) -> list:
 
     Used to feed write_host_shard() — mirrors the read side of aggregate()
     but returns records as a list rather than writing them.
+
+    Deduplicates by ``event_id`` (M4) so that two same-day same-issue failures
+    with different root_cause are both preserved.  Normalizes legacy compound
+    rows via ``normalize_record()`` (M5).  Backward-compat records without
+    ``event_id`` have one synthesised by ``ensure_event_id()``.
     """
-    seen: dict = {}
+    seen: dict = {}  # event_id -> record (last wins within a source)
     for source_dir in sorted(source_dirs):
         file = source_dir / "failures.jsonl"
         if not file.exists():
             continue
         project_name = _derive_project(source_dir)
-        _load_source(file, project_name, seen)
+        try:
+            with open(file, encoding="utf-8") as fh:
+                for raw in fh:
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    try:
+                        record = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(record, dict):
+                        continue
+                    # Normalize legacy compound rows (M5)
+                    records = normalize_record(record)
+                    for rec in records:
+                        rec.setdefault("project", project_name)
+                        ensure_event_id(rec)
+                        seen[rec["event_id"]] = rec  # last wins
+        except OSError:
+            pass
     return list(seen.values())
 
 

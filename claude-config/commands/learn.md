@@ -46,7 +46,7 @@ Analyzes accumulated failures and successes to extract patterns and update the k
 
 ## Process
 
-### Step 0: Pull + Read Watermark
+### Step 0: Pull + Read Watermark + Materialize Union
 
 **Always run first** — even on `--dry-run`.  Shards from other machines must
 be present before counting or analyzing.
@@ -68,17 +68,34 @@ NEW_COUNT=$(python3 ~/agents/claude-config/scripts/telemetry_gate.py \
   --count-only 2>/dev/null || echo 0)
 
 echo "New failures since last learn: $NEW_COUNT (watermark: $LAST_LEARN_AT)"
+
+# 0d. Materialize the cross-machine union into a temp file.
+#     EVERY downstream step (Steps 1–6) reads UNION_FILE, never a local path.
+#     The union is a snapshot: records added after this moment are NOT included,
+#     so the watermark advanced at Step 6.6 precisely covers this snapshot.
+TS=$(date -u +%Y%m%d-%H%M%S)
+UNION_FILE="/tmp/learn-union-${TS}.jsonl"
+# Concatenate all host shard failure files; normalize_record is handled by
+# telemetry_gate's _iter_shard_records internals during counting.
+# We cat the raw shards here; the clustering steps below parse JSON themselves.
+cat ~/agents/telemetry/*/failures.jsonl 2>/dev/null > "$UNION_FILE"
+echo "Union snapshot: $UNION_FILE ($(wc -l < "$UNION_FILE") lines)"
+
+# 0e. Compute consumed_max from the union snapshot (B2 — used at Step 6.6).
+CONSUMED_MAX=$(python3 ~/agents/claude-config/scripts/telemetry_gate.py \
+  --compute-consumed-max 2>/dev/null || echo "")
 ```
 
 ### Step 1: Load Outcome Data
 
-Read the cross-machine union of all host shards (failures only for clustering).
+Read from the union snapshot materialized in Step 0 (`$UNION_FILE`).
+**Never read `.claude/memory/failures.jsonl` directly for cross-machine learn** —
+that file is a local aggregation, not the authoritative cross-machine union.
 Apply a 90-day rolling window.
 
 ```bash
-# Union read — all host shards
-FAILURES=$(cat ~/agents/telemetry/*/failures.jsonl 2>/dev/null)
-FAILURE_COUNT=$(echo "$FAILURES" | grep -c '^{' 2>/dev/null || echo 0)
+# Read from the Step 0 snapshot — ALWAYS use $UNION_FILE for failure clustering.
+FAILURE_COUNT=$(grep -c '^{' "$UNION_FILE" 2>/dev/null || echo 0)
 
 # 90-day window filter (use python for reliable cross-platform ISO comparison)
 WINDOW_START=$(python3 -c "
@@ -91,7 +108,7 @@ print(cutoff.strftime('%Y-%m-%dT%H:%M:%SZ'))
 METRIC_COUNT=$(wc -l < ~/.claude/memory/metrics.jsonl 2>/dev/null || echo 0)
 
 echo "Loading outcomes..."
-echo "  Failures (union, 90d window): $FAILURE_COUNT"
+echo "  Failures (union snapshot, 90d window): $FAILURE_COUNT"
 echo "  Metrics (local):  $METRIC_COUNT"
 echo "  New since watermark: $NEW_COUNT"
 ```
@@ -103,11 +120,13 @@ No outcome data found. Run some issues through /orchestrate first.
 
 ### Step 2: Parse and Cluster Failures
 
-Read each failure record and group by `root_cause`:
+Read each failure record from `$UNION_FILE` and group by `root_cause`.
+**All jq/parse commands below operate on `$UNION_FILE`** (the snapshot from Step 0),
+never on `.claude/memory/failures.jsonl` or any local path.
 
 ```bash
-# Extract root causes and count
-cat .claude/memory/failures.jsonl | \
+# Extract root causes and count — reads union snapshot
+cat "$UNION_FILE" | \
   jq -r '.root_cause' | \
   sort | uniq -c | sort -rn
 ```
@@ -129,8 +148,8 @@ For each root cause with 3+ occurrences:
 #### 3a. Extract Common Attributes
 
 ```bash
-# Find common files affected
-cat .claude/memory/failures.jsonl | \
+# Find common files affected — reads union snapshot
+cat "$UNION_FILE" | \
   jq -r 'select(.root_cause == "ENUM_VALUE") | .files[]' | \
   sort | uniq -c | sort -rn | head -5
 ```
@@ -297,54 +316,80 @@ For each suggested agent update from Step 6:
 
 **Idempotency**: Before inserting, check if a `## Learned Prevention: {ROOT_CAUSE}` section already exists. If so, update the count and date rather than duplicating.
 
-### Step 6.6: Commit Watermark + Auto-PR (only when `--apply` and NOT `--dry-run`)
+### Step 6.6: Branch + Commit Watermark + Auto-PR (only when `--apply` and NOT `--dry-run`)
 
-After all pattern updates are written:
+After all pattern updates are written in Steps 6.5.  This step uses the
+`$CONSUMED_MAX` computed in Step 0d (NOT wall-clock `now()`).
 
-1. **Compute new watermark timestamp**:
+**Branch FIRST, then commit (M6)** — never commit on `main`.
+
+1. **Create/switch to a learn branch from latest origin/main** (M6):
    ```bash
-   NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+   cd ~/agents
    HOST=$(python3 -c "
    import sys; sys.path.insert(0,'$HOME/agents/lib')
    from project_resolver import get_host_name; print(get_host_name())
    " 2>/dev/null || hostname -s)
+   TS=$(date -u +%Y%m%d-%H%M%S)
+   BRANCH="learn/auto-${HOST}-${TS}"
+   git fetch origin
+   git checkout -b "$BRANCH" origin/main
    ```
 
-2. **Write watermark atomically** (temp+rename — POSIX atomic on same filesystem):
-   ```python
-   import json, pathlib
-   state_path = pathlib.Path.home() / "agents" / "telemetry" / "_state.json"
-   tmp = state_path.with_suffix(".json.tmp")
-   state = {"last_learn_at": NOW, "last_learn_host": HOST, "version": 1}
-   tmp.write_text(json.dumps(state, indent=2) + "\n")
-   tmp.rename(state_path)  # atomic on APFS / ext4
-   ```
-
-3. **Stage and commit** telemetry shard(s), watermark, and any agent file changes:
+2. **Re-apply pattern changes onto the new branch** (cherry-pick or re-write from
+   the in-memory state — the branch is freshly cut from origin/main so the
+   working tree starts clean):
    ```bash
-   cd ~/agents
+   # Copy updated pattern files into the working tree (they were written to disk
+   # in Step 6.5 but we are now on a fresh branch — git will see them as unstaged).
+   # If Step 6.5 already wrote to the working tree, nothing more to do here.
+   ```
+
+3. **Write watermark atomically to consumed_max** (B2 + M7 monotonic):
+   ```bash
+   # $CONSUMED_MAX was set in Step 0e — it is the max recorded_at from the
+   # union snapshot, never wall-clock now().
+   if [ -n "$CONSUMED_MAX" ]; then
+     python3 ~/agents/claude-config/scripts/telemetry_gate.py \
+       --write-watermark "$CONSUMED_MAX" --host "$HOST"
+     # Exit 0 = advanced; exit 2 = no-op (already at/beyond consumed_max — OK).
+   fi
+   ```
+
+4. **Stage and commit** telemetry shard(s), watermark, and any agent file changes:
+   ```bash
    git add telemetry/ claude-config/agents/ \
        .claude/memory/patterns-full.md \
        .claude/memory/pattern-events.jsonl 2>/dev/null || true
-   git commit -m "learn: apply patterns + advance watermark to $NOW"
+   git commit -m "learn: apply patterns + advance watermark to $CONSUMED_MAX"
    ```
 
-4. **Auto-PR via /ship-style guarded merge** (reuse steps 4-8 of ship.md —
+5. **Auto-PR via /ship-style guarded merge** (reuse steps 4-8 of ship.md —
    do NOT reinvent; reference ship.md for the branch/push/PR/wait/merge sequence):
    ```bash
-   BRANCH="learn/auto-$(date -u +%Y%m%d-%H%M%S)"
-   git checkout -b "$BRANCH"
    git push --force-with-lease origin HEAD
    gh pr create \
      --title "learn: auto-apply patterns $(date -u +%Y-%m-%d)" \
      --body "Auto-generated by /learn --apply.
    Gate: $NEW_COUNT new failures since $LAST_LEARN_AT.
-   Watermark advanced to: $NOW
+   Watermark advanced to: $CONSUMED_MAX (max consumed recorded_at — not wall-clock now).
    Host: $HOST"
    # Wait for CI, verify HEAD parity, squash merge (per ship.md §4-8)
    gh pr checks --watch
    gh pr merge --squash --delete-branch
    ```
+
+6. **After merge: reset local main to origin/main**:
+   ```bash
+   git checkout main
+   git pull --ff-only
+   ```
+
+**Monotonic watermark invariant (M7)**: `--write-watermark` calls
+`write_watermark_monotonic()` which re-reads `_state.json` immediately before
+writing.  If a concurrent `/learn --apply` on another machine merged and the
+rebase pulled a newer watermark, the monotonic guard ensures we never move it
+backward.
 
 **Idempotency**: If a concurrent `/learn --apply` already merged (watermark advanced),
 re-read `_state.json` from the working tree after rebase. If new count drops below

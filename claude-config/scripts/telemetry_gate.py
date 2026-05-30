@@ -21,6 +21,7 @@ Stdlib only. No LLM, no network.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -73,6 +74,69 @@ def _record_timestamp(record: dict) -> datetime:
 
 
 # ---------------------------------------------------------------------------
+# Legacy-record normalization (M5)
+# ---------------------------------------------------------------------------
+
+def _normalize_record(record: dict) -> list:
+    """Normalize a possibly-legacy compound failure record into canonical form.
+
+    Historical rows sometimes have the shape::
+
+        {"type": "...", "issues": [1, 2], "root_causes": ["A", "B"], "date": "..."}
+
+    This helper expands them into one canonical record per (issue × root_cause)
+    pair, or emits a single stub when expansion is ambiguous.  A synthesised
+    ``recorded_at`` derived from ``date+"T00:00:00Z"`` ensures these rows
+    never appear perpetually-new after their max ``recorded_at`` is consumed.
+
+    Normal (canonical) records are returned in a single-element list unchanged.
+    """
+    # Fast path: already canonical.
+    if "issue" in record and "root_cause" in record:
+        return [record]
+
+    issues = record.get("issues") or []
+    root_causes = record.get("root_causes") or []
+    date = record.get("date", "2000-01-01")
+    base_recorded_at = date + "T00:00:00Z"
+
+    if not issues:
+        stub = {
+            "issue": 0,
+            "date": date,
+            "recorded_at": base_recorded_at,
+            "root_cause": root_causes[0] if root_causes else "LEGACY_COMPOUND",
+        }
+        return [stub]
+
+    # Ambiguous multi-list expansion → use first of each.
+    if len(issues) > 1 and len(root_causes) > 1 and len(issues) != len(root_causes):
+        return [{
+            "issue": int(issues[0]),
+            "date": date,
+            "recorded_at": base_recorded_at,
+            "root_cause": root_causes[0] if root_causes else "LEGACY_COMPOUND",
+        }]
+
+    expanded = []
+    for iss in issues:
+        for rc in (root_causes or ["LEGACY_COMPOUND"]):
+            expanded.append({
+                "issue": int(iss),
+                "date": date,
+                "recorded_at": base_recorded_at,
+                "root_cause": rc,
+            })
+    return expanded
+
+
+def _event_id(issue, date: str, project: str, root_cause: str, details: str) -> str:
+    """Stable content-hash for dedup (M4 — mirrors state_manager._event_id)."""
+    payload = f"{issue}|{date}|{project}|{root_cause}|{details}"
+    return hashlib.sha1(payload.encode("utf-8"), usedforsecurity=False).hexdigest()
+
+
+# ---------------------------------------------------------------------------
 # Core logic
 # ---------------------------------------------------------------------------
 
@@ -95,17 +159,15 @@ def load_watermark(state_path: Path) -> datetime:
         return epoch
 
 
-def count_new_failures(telemetry_root: Path, since: datetime) -> int:
-    """Count failure records across all host shards where timestamp > since.
+def _iter_shard_records(telemetry_root: Path):
+    """Yield normalized failure records from all host shards (M5).
 
-    Reads ``telemetry/<host>/failures.jsonl`` for every host subdirectory.
-    Records without ``recorded_at`` fall back to ``date+"T00:00:00Z"``.
-    Returns 0 if the telemetry root does not exist.
+    Iterates every ``telemetry/<host>/failures.jsonl``.  Legacy compound rows
+    are expanded via ``_normalize_record()`` so they never appear perpetually-new.
+    Malformed lines and vanished shards are silently skipped (fail-open).
     """
     if not telemetry_root.exists():
-        return 0
-
-    count = 0
+        return
     for host_dir in telemetry_root.iterdir():
         if not host_dir.is_dir():
             continue
@@ -124,13 +186,100 @@ def count_new_failures(telemetry_root: Path, since: datetime) -> int:
                         continue
                     if not isinstance(record, dict):
                         continue
-                    ts = _record_timestamp(record)
-                    if ts > since:
-                        count += 1
+                    for normalized in _normalize_record(record):
+                        yield normalized
         except OSError:
             pass  # shard vanished — skip
 
+
+def count_new_failures(telemetry_root: Path, since: datetime) -> int:
+    """Count failure records across all host shards where timestamp > since.
+
+    Reads ``telemetry/<host>/failures.jsonl`` for every host subdirectory.
+    Normalizes legacy compound rows (M5).
+    Records without ``recorded_at`` fall back to ``date+"T00:00:00Z"``.
+    Returns 0 if the telemetry root does not exist.
+    """
+    count = 0
+    for record in _iter_shard_records(telemetry_root):
+        ts = _record_timestamp(record)
+        if ts > since:
+            count += 1
     return count
+
+
+def compute_consumed_max(telemetry_root: Path, since: datetime) -> datetime | None:
+    """Return the maximum ``recorded_at`` of all failure records with ts > since (B2).
+
+    Used by /learn Step 6.6 to advance the watermark to **max consumed
+    recorded_at** rather than wall-clock now().  This guarantees any record
+    stamped after the snapshot (``recorded_at > consumed_max``) is still
+    counted on the next run.
+
+    Returns ``None`` if there are no new records (gate not tripped by volume).
+    """
+    consumed_max: datetime | None = None
+    for record in _iter_shard_records(telemetry_root):
+        ts = _record_timestamp(record)
+        if ts > since:
+            if consumed_max is None or ts > consumed_max:
+                consumed_max = ts
+    return consumed_max
+
+
+def write_watermark_monotonic(
+    state_path: Path,
+    consumed_max: datetime,
+    host: str,
+) -> bool:
+    """Write last_learn_at = max(existing, consumed_max) atomically (M7).
+
+    Monotonicity guarantee: re-reads the current _state.json immediately before
+    writing (post-rebase) and refuses to move the watermark backward.  Uses
+    temp+rename for POSIX atomicity.
+
+    Args:
+        state_path: Path to telemetry/_state.json.
+        consumed_max: Max ``recorded_at`` from the consumed snapshot (B2).
+        host: Canonical hostname for ``last_learn_host`` field.
+
+    Returns:
+        True if the watermark was advanced; False if the existing watermark was
+        already >= consumed_max (no write performed — no-op).
+    """
+    # Re-read current watermark immediately before write (M7 monotonicity).
+    existing = load_watermark(state_path)
+    # Never move backward.
+    if existing >= consumed_max:
+        return False
+
+    new_ts = consumed_max.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+    state: dict = {
+        "last_learn_at": new_ts,
+        "last_learn_host": host,
+        "version": 1,
+    }
+    # Preserve any extra fields from the existing file.
+    if state_path.exists():
+        try:
+            existing_data = json.loads(state_path.read_text(encoding="utf-8"))
+            for k, v in existing_data.items():
+                if k not in state:
+                    state[k] = v
+        except Exception:
+            pass
+
+    tmp = state_path.with_suffix(".json.tmp")
+    try:
+        tmp.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+        tmp.rename(state_path)  # atomic on APFS / ext4
+        return True
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
 
 
 def check_gate(
@@ -238,6 +387,32 @@ def main() -> int:
         help="Print new failure count and exit 0 (no gate check).",
     )
     parser.add_argument(
+        "--compute-consumed-max",
+        action="store_true",
+        dest="compute_consumed_max",
+        help=(
+            "Print max recorded_at of new failures (consumed_max for B2 watermark) "
+            "and exit 0.  Prints empty string if no new failures."
+        ),
+    )
+    parser.add_argument(
+        "--write-watermark",
+        metavar="CONSUMED_MAX",
+        dest="write_watermark",
+        help=(
+            "Advance last_learn_at to max(existing, CONSUMED_MAX) atomically (M7 "
+            "monotonic write).  CONSUMED_MAX must be an ISO-8601 UTC string.  "
+            "Exits 0 on success; exits 2 if watermark is already >= CONSUMED_MAX "
+            "(no-op — not an error in practice, just informational)."
+        ),
+    )
+    parser.add_argument(
+        "--host",
+        default=None,
+        dest="host",
+        help="Host name for --write-watermark (default: auto-detected).",
+    )
+    parser.add_argument(
         "--agents-root",
         type=Path,
         default=Path.home() / "agents",
@@ -259,6 +434,36 @@ def main() -> int:
         wm = load_watermark(state_path)
         n = count_new_failures(agents_root / "telemetry", wm)
         print(str(n))
+        return 0
+
+    if args.compute_consumed_max:
+        state_path = agents_root / "telemetry" / "_state.json"
+        wm = load_watermark(state_path)
+        cmax = compute_consumed_max(agents_root / "telemetry", wm)
+        if cmax is not None:
+            # Microsecond precision (M3): format as YYYY-MM-DDTHH:MM:SS.ffffffZ
+            print(cmax.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z")
+        else:
+            print("")
+        return 0
+
+    if args.write_watermark:
+        import socket
+        state_path = agents_root / "telemetry" / "_state.json"
+        try:
+            consumed_max = _parse_iso_utc(args.write_watermark)
+        except Exception as exc:
+            print(f"ERROR: could not parse CONSUMED_MAX={args.write_watermark!r}: {exc}", file=sys.stderr)
+            return 1
+        host = args.host or (socket.gethostname() or "unknown").split(".")[0].lower()
+        try:
+            advanced = write_watermark_monotonic(state_path, consumed_max, host)
+        except OSError as exc:
+            print(f"ERROR: could not write watermark: {exc}", file=sys.stderr)
+            return 1
+        if not advanced:
+            print(f"no-op: existing watermark >= {args.write_watermark}", file=sys.stderr)
+            return 2  # non-zero but not an error; caller can ignore
         return 0
 
     tripped = check_gate(
