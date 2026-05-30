@@ -73,7 +73,7 @@ def ensure_event_id(record: dict) -> dict:
     return record
 
 
-def normalize_record(record: dict) -> list:
+def normalize_record(record: dict, project: str = "") -> list:
     """Normalize a possibly-legacy compound failure record into canonical form (M5).
 
     Historical rows sometimes have the shape::
@@ -95,10 +95,25 @@ def normalize_record(record: dict) -> list:
 
     Normal (non-compound) records are returned in a single-element list
     unchanged.
+
+    Args:
+        record: The raw record dict from the JSONL source file.
+        project: The project name to inject on every synthesised record
+            **before** ``ensure_event_id()`` runs.  This is critical for
+            cross-project deduplication: two otherwise-identical legacy
+            compound rows from different projects must produce different
+            ``event_id`` hashes so neither clobbers the other in ``seen``.
+            Pass the value from ``_derive_project(source_dir)`` at each
+            call site.  Records that already carry a ``project`` field have
+            their own value preserved (``setdefault``); the parameter is
+            only the fallback for freshly-synthesised records.
     """
     # Fast path: already in canonical shape.
     if "issue" in record and "root_cause" in record:
         return [record]
+
+    # Use the record's own project if present; fall back to the caller-supplied value.
+    effective_project = record.get("project") or project
 
     # Legacy compound shape detection.
     issues = record.get("issues") or []
@@ -113,6 +128,7 @@ def normalize_record(record: dict) -> list:
             "date": date,
             "recorded_at": base_recorded_at,
             "root_cause": root_causes[0] if root_causes else "LEGACY_COMPOUND",
+            "project": effective_project,
         }
         ensure_event_id(stub)
         return [stub]
@@ -126,6 +142,7 @@ def normalize_record(record: dict) -> list:
             "date": date,
             "recorded_at": base_recorded_at,
             "root_cause": single_rc,
+            "project": effective_project,
         }
         ensure_event_id(out)
         return [out]
@@ -138,6 +155,7 @@ def normalize_record(record: dict) -> list:
                 "date": date,
                 "recorded_at": base_recorded_at,
                 "root_cause": rc,
+                "project": effective_project,
             }
             ensure_event_id(rec)
             expanded.append(rec)
@@ -188,7 +206,12 @@ def _load_source(
                 # Normalize legacy compound rows first (M5).
                 # For metrics records (have "status" field), skip normalization.
                 if "status" not in record:
-                    records = normalize_record(record)
+                    # Pass project_name so synthesised legacy records carry the
+                    # correct project BEFORE ensure_event_id() hashes them (M5
+                    # cross-project fix).  The fast path (canonical records) is
+                    # unaffected — it returns [record] immediately without
+                    # touching the project field.
+                    records = normalize_record(record, project=project_name)
                 else:
                     records = [record]
                 for record in records:
@@ -347,8 +370,10 @@ def _collect_failures(source_dirs: list) -> list:
                         continue
                     if not isinstance(record, dict):
                         continue
-                    # Normalize legacy compound rows (M5)
-                    records = normalize_record(record)
+                    # Normalize legacy compound rows (M5); pass project_name so
+                    # synthesised records carry the correct project before
+                    # ensure_event_id() hashes them (cross-project fix).
+                    records = normalize_record(record, project=project_name)
                     for rec in records:
                         rec.setdefault("project", project_name)
                         ensure_event_id(rec)

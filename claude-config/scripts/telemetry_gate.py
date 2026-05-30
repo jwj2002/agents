@@ -90,10 +90,20 @@ def _normalize_record(record: dict) -> list:
     never appear perpetually-new after their max ``recorded_at`` is consumed.
 
     Normal (canonical) records are returned in a single-element list unchanged.
+
+    The record's own ``project`` field (if present) is propagated to every
+    synthesised child record.  This keeps the gate's output consistent with
+    the aggregate hook's cross-project fix (normalize_record in
+    aggregate_metrics_to_global.py).  The gate uses ``_normalize_record`` only
+    for timestamp extraction and counting — not for cross-project dedup — so
+    this is a consistency improvement rather than a dedup correction.
     """
     # Fast path: already canonical.
     if "issue" in record and "root_cause" in record:
         return [record]
+
+    # Propagate the record's own project (if any) to synthesised children.
+    effective_project = record.get("project", "")
 
     issues = record.get("issues") or []
     root_causes = record.get("root_causes") or []
@@ -101,32 +111,40 @@ def _normalize_record(record: dict) -> list:
     base_recorded_at = date + "T00:00:00Z"
 
     if not issues:
-        stub = {
+        stub: dict = {
             "issue": 0,
             "date": date,
             "recorded_at": base_recorded_at,
             "root_cause": root_causes[0] if root_causes else "LEGACY_COMPOUND",
         }
+        if effective_project:
+            stub["project"] = effective_project
         return [stub]
 
     # Ambiguous multi-list expansion → use first of each.
     if len(issues) > 1 and len(root_causes) > 1 and len(issues) != len(root_causes):
-        return [{
+        out: dict = {
             "issue": int(issues[0]),
             "date": date,
             "recorded_at": base_recorded_at,
             "root_cause": root_causes[0] if root_causes else "LEGACY_COMPOUND",
-        }]
+        }
+        if effective_project:
+            out["project"] = effective_project
+        return [out]
 
     expanded = []
     for iss in issues:
         for rc in (root_causes or ["LEGACY_COMPOUND"]):
-            expanded.append({
+            child: dict = {
                 "issue": int(iss),
                 "date": date,
                 "recorded_at": base_recorded_at,
                 "root_cause": rc,
-            })
+            }
+            if effective_project:
+                child["project"] = effective_project
+            expanded.append(child)
     return expanded
 
 
