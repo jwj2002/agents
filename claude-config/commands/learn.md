@@ -24,35 +24,76 @@ Analyzes accumulated failures and successes to extract patterns and update the k
 
 ## What This Command Does
 
-1. **Loads outcome data** from `.claude/memory/`
+0. **Pulls latest shards** and reads the watermark from `telemetry/_state.json`
+1. **Loads outcome data** from `telemetry/*/failures.jsonl` (cross-machine union)
 2. **Clusters failures** by root cause
 3. **Calculates metrics** (success rates, trends)
 4. **Extracts new patterns** from recurring failures
 5. **Updates patterns-full.md** with learned knowledge
 6. **Suggests agent updates** for high-frequency patterns
+6.6. **Commits + auto-PRs** watermark + patterns (when `--apply`)
+7.5. **Surfaces gate advisory** regardless of `--apply`
 
 ---
 
 ## Prerequisites
 
-- `.claude/memory/failures.jsonl` exists (can be empty)
-- `.claude/memory/metrics.jsonl` exists (can be empty)
-- Git repository (for agent update suggestions)
+- `~/agents/telemetry/_state.json` exists (created by PATCH; zero-state epoch is fine)
+- `~/agents/telemetry/` directory is committed to git (created by Stop hook on first failure)
+- Git repository (for agent update suggestions and auto-PR)
 
 ---
 
 ## Process
 
-### Step 1: Load Outcome Data
+### Step 0: Pull + Read Watermark
+
+**Always run first** — even on `--dry-run`.  Shards from other machines must
+be present before counting or analyzing.
 
 ```bash
-# Count available data
-FAILURE_COUNT=$(wc -l < .claude/memory/failures.jsonl 2>/dev/null || echo 0)
-METRIC_COUNT=$(wc -l < .claude/memory/metrics.jsonl 2>/dev/null || echo 0)
+cd ~/agents
+
+# 0a. Pull latest shards (fast-forward only — no merge commits on shards)
+git pull --ff-only
+# If diverged: STOP with message:
+#   "Resolve git divergence before running /learn: git -C ~/agents pull --ff-only"
+
+# 0b. Read watermark (last time /learn --apply succeeded)
+LAST_LEARN_AT=$(python3 ~/agents/claude-config/scripts/telemetry_gate.py \
+  --print-watermark 2>/dev/null || echo "2000-01-01T00:00:00Z")
+
+# 0c. Count new failures across all host shards since watermark
+NEW_COUNT=$(python3 ~/agents/claude-config/scripts/telemetry_gate.py \
+  --count-only 2>/dev/null || echo 0)
+
+echo "New failures since last learn: $NEW_COUNT (watermark: $LAST_LEARN_AT)"
+```
+
+### Step 1: Load Outcome Data
+
+Read the cross-machine union of all host shards (failures only for clustering).
+Apply a 90-day rolling window.
+
+```bash
+# Union read — all host shards
+FAILURES=$(cat ~/agents/telemetry/*/failures.jsonl 2>/dev/null)
+FAILURE_COUNT=$(echo "$FAILURES" | grep -c '^{' 2>/dev/null || echo 0)
+
+# 90-day window filter (use python for reliable cross-platform ISO comparison)
+WINDOW_START=$(python3 -c "
+from datetime import datetime, timedelta, timezone
+cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+print(cutoff.strftime('%Y-%m-%dT%H:%M:%SZ'))
+" 2>/dev/null || echo "1970-01-01T00:00:00Z")
+
+# For metrics (success rate), read the merged global file (local dashboard)
+METRIC_COUNT=$(wc -l < ~/.claude/memory/metrics.jsonl 2>/dev/null || echo 0)
 
 echo "Loading outcomes..."
-echo "  Failures: $FAILURE_COUNT"
-echo "  Metrics:  $METRIC_COUNT"
+echo "  Failures (union, 90d window): $FAILURE_COUNT"
+echo "  Metrics (local):  $METRIC_COUNT"
+echo "  New since watermark: $NEW_COUNT"
 ```
 
 If no data exists, report and exit:
@@ -256,6 +297,63 @@ For each suggested agent update from Step 6:
 
 **Idempotency**: Before inserting, check if a `## Learned Prevention: {ROOT_CAUSE}` section already exists. If so, update the count and date rather than duplicating.
 
+### Step 6.6: Commit Watermark + Auto-PR (only when `--apply` and NOT `--dry-run`)
+
+After all pattern updates are written:
+
+1. **Compute new watermark timestamp**:
+   ```bash
+   NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+   HOST=$(python3 -c "
+   import sys; sys.path.insert(0,'$HOME/agents/lib')
+   from project_resolver import get_host_name; print(get_host_name())
+   " 2>/dev/null || hostname -s)
+   ```
+
+2. **Write watermark atomically** (temp+rename — POSIX atomic on same filesystem):
+   ```python
+   import json, pathlib
+   state_path = pathlib.Path.home() / "agents" / "telemetry" / "_state.json"
+   tmp = state_path.with_suffix(".json.tmp")
+   state = {"last_learn_at": NOW, "last_learn_host": HOST, "version": 1}
+   tmp.write_text(json.dumps(state, indent=2) + "\n")
+   tmp.rename(state_path)  # atomic on APFS / ext4
+   ```
+
+3. **Stage and commit** telemetry shard(s), watermark, and any agent file changes:
+   ```bash
+   cd ~/agents
+   git add telemetry/ claude-config/agents/ \
+       .claude/memory/patterns-full.md \
+       .claude/memory/pattern-events.jsonl 2>/dev/null || true
+   git commit -m "learn: apply patterns + advance watermark to $NOW"
+   ```
+
+4. **Auto-PR via /ship-style guarded merge** (reuse steps 4-8 of ship.md —
+   do NOT reinvent; reference ship.md for the branch/push/PR/wait/merge sequence):
+   ```bash
+   BRANCH="learn/auto-$(date -u +%Y%m%d-%H%M%S)"
+   git checkout -b "$BRANCH"
+   git push --force-with-lease origin HEAD
+   gh pr create \
+     --title "learn: auto-apply patterns $(date -u +%Y-%m-%d)" \
+     --body "Auto-generated by /learn --apply.
+   Gate: $NEW_COUNT new failures since $LAST_LEARN_AT.
+   Watermark advanced to: $NOW
+   Host: $HOST"
+   # Wait for CI, verify HEAD parity, squash merge (per ship.md §4-8)
+   gh pr checks --watch
+   gh pr merge --squash --delete-branch
+   ```
+
+**Idempotency**: If a concurrent `/learn --apply` already merged (watermark advanced),
+re-read `_state.json` from the working tree after rebase. If new count drops below
+threshold, commit only the watermark update (no pattern changes — gate was already
+satisfied by the first run).
+
+**`--dry-run` guard**: Step 6.6 is completely skipped when `--dry-run` is set.
+No watermark write, no commit, no PR.
+
 ### Step 7: Output Summary
 
 ```
@@ -290,6 +388,19 @@ Next steps:
   • Review updated patterns-full.md
   • Manually apply suggested agent updates
   • Continue using /orchestrate to gather more data
+═══════════════════════════════════════════════════════════
+```
+
+### Step 7.5: Gate Advisory (always shown)
+
+Surface the gate status regardless of `--apply` or `--dry-run`:
+
+```
+═══════════════════════════════════════════════════════════
+Gate status:  $NEW_COUNT new failure(s) since last learn ($LAST_LEARN_AT)
+Threshold:    5  |  Fallback ceiling: 3 days
+Status:       [TRIPPED / not tripped]
+Next run:     $([ TRIPPED ] && echo "now (run /learn --apply)" || echo "poller will check in ≤12h")
 ═══════════════════════════════════════════════════════════
 ```
 

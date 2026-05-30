@@ -17,7 +17,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 _log_file = Path.home() / ".claude" / "hooks.log"
@@ -33,6 +33,21 @@ try:
     HAS_YAML = True
 except ImportError:
     HAS_YAML = False
+
+
+def _utc_now_iso() -> str:
+    """ISO-8601 UTC timestamp with seconds precision, no microseconds.
+
+    Returns strings like ``"2026-05-29T14:23:45Z"``.  Used as ``recorded_at``
+    on every new metrics/failure record so the telemetry gate can compare
+    records across machines using a sortable timestamp.
+    """
+    return (
+        datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def _state_path(project_dir: Path) -> Path:
@@ -261,6 +276,7 @@ def record_metrics(
     record: dict = {
         "issue": int(issue),
         "date": datetime.now().strftime("%Y-%m-%d"),
+        "recorded_at": _utc_now_iso(),
         "status": status,
         "complexity": complexity,
         "stack": stack,
@@ -323,6 +339,7 @@ def record_failure(
     record: dict = {
         "issue": int(issue),
         "date": datetime.now().strftime("%Y-%m-%d"),
+        "recorded_at": _utc_now_iso(),
         "root_cause": root_cause,
     }
     if files:
@@ -378,7 +395,7 @@ def flip_to_correction(
             )
             return False
 
-        lines = [l for l in target.read_text(encoding="utf-8").splitlines() if l.strip()]
+        lines = [ln for ln in target.read_text(encoding="utf-8").splitlines() if ln.strip()]
         last_record: dict | None = None
         for line in lines:
             try:
@@ -397,6 +414,7 @@ def flip_to_correction(
         # Build the corrected record from the last one.
         corrected = dict(last_record)
         corrected["date"] = datetime.now().strftime("%Y-%m-%d")
+        corrected["recorded_at"] = _utc_now_iso()
         corrected["first_pass_correct"] = False
         existing = corrected.get("corrections")
         if isinstance(existing, list):

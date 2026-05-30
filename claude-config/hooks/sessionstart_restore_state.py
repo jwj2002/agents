@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -75,6 +76,43 @@ def get_active_work(yaml_content: str) -> dict:
 
 def main() -> int:
     _hook_in = json.load(sys.stdin)
+
+    # 0. Pull latest agent shards (fail-open — divergence warns but does not abort session).
+    _agents_root = Path.home() / "agents"
+    if _agents_root.is_dir():
+        try:
+            _pull = subprocess.run(
+                ["git", "-C", str(_agents_root), "pull", "--ff-only", "--quiet"],
+                capture_output=True,
+                timeout=10,
+            )
+            if _pull.returncode != 0:
+                logging.warning(
+                    "git pull --ff-only failed on agents repo — shards may be stale. "
+                    "Resolve with: git -C ~/agents pull --ff-only"
+                )
+                print(
+                    "**Advisory**: agents repo diverged from origin — "
+                    "run `git -C ~/agents pull --ff-only` to sync latest shards.\n"
+                )
+            else:
+                # Pull succeeded — check whether the telemetry gate is tripped.
+                _gate_script = _agents_root / "claude-config" / "scripts" / "telemetry_gate.py"
+                if _gate_script.exists():
+                    try:
+                        _gate = subprocess.run(
+                            ["python3", str(_gate_script), "--verbose"],
+                            capture_output=True,
+                            text=True,
+                            timeout=5,
+                        )
+                        if _gate.returncode == 0:  # gate tripped
+                            _gate_msg = _gate.stdout.strip() or "gate tripped"
+                            print(f"**Advisory**: /learn gate tripped — {_gate_msg}\n")
+                    except Exception as _gate_exc:
+                        logging.warning(f"telemetry_gate check failed (non-fatal): {_gate_exc}")
+        except (subprocess.TimeoutExpired, OSError, Exception) as _pull_exc:
+            logging.warning(f"git pull --ff-only failed (non-fatal): {_pull_exc}")
 
     project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
     global_claude_dir = Path.home() / ".claude"
@@ -143,8 +181,8 @@ def main() -> int:
         print("**CRITICAL**: You were in the middle of an orchestrate workflow.")
         print("Continue with the current phase using the Task tool:")
         print()
-        print(f"1. Read `.claude/commands/orchestrate.md` for phase instructions")
-        print(f"2. Check for existing artifacts in `.agents/outputs/`")
+        print("1. Read `.claude/commands/orchestrate.md` for phase instructions")
+        print("2. Check for existing artifacts in `.agents/outputs/`")
         print(f"3. Continue the `{phase}` phase for issue #{issue}")
         print()
         print("If the phase was completed, proceed to the next phase in the workflow.")
