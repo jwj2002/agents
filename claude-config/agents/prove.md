@@ -202,15 +202,45 @@ shape.
 
 Standard Gates from Section 1 (`ruff check`, `pytest`, `npm run lint`, `npm run build`).
 
-### 3. Acceptance Criteria
+### 3. Acceptance Criteria (per-AC audit — MANDATORY)
 
-Reference PLAN/MAP-PLAN acceptance criteria:
+Issue #1612: the prose AC table is no longer load-bearing on its own. You
+MUST emit a structured ``ac_audit`` array in the artifact frontmatter so
+the orchestrator can mechanically verify AC coverage. The prose table is
+still helpful for the human-readable summary but is informational only;
+the frontmatter array is authoritative.
+
+For each AC bullet in the issue body / PLAN / MAP-PLAN:
+
+| Status | Meaning |
+|--------|---------|
+| `implemented` | Diff clearly satisfies this AC. Evidence cites `file:line` or a test path. |
+| `partial` | Diff addresses part of the AC but not all of it. Evidence names what is missing. |
+| `missing` | No code in the diff addresses this AC. |
+| `deferred` | Diff explicitly defers this AC AND `evidence` cites a follow-up issue # (e.g. `"deferred to #1620"`). |
+| `n/a` | This AC is unaffected by the change (rare; explain in evidence). |
+
+**CRITICAL: AC-FORBIDS-APPROVE rule (mirrors Codex-side #1609 / buddy
+`prompts/codex-review-clauses.md`)**:
+
+> A verdict of `PASS` is FORBIDDEN if ANY `ac_audit` entry has
+> `status="missing"` OR `status="partial"`. Those map to verdict `FAIL`.
+
+A `status="deferred"` is acceptable ONLY when `evidence` cites a specific
+follow-up issue # (e.g. `"deferred to #1620"`). A bare "deferred to
+follow-up" without a # is treated as `missing` by the orchestrator
+(`state_manager.validate_ac_audit`) and forces verdict `FAIL`.
+
+Reflect the same structure in the human-readable prose table for the
+artifact body — the table is the explanation, the frontmatter array is
+the contract:
+
 ```markdown
-| Criterion | Status |
-|-----------|--------|
-| Criterion 1 | ✅ |
-| Criterion 2 | ✅ |
-| Criterion 3 | ❌ — [reason] |
+| AC | Status | Evidence |
+|----|--------|----------|
+| {verbatim AC bullet 1} | implemented | `src/foo.py:42`, `tests/test_foo.py::test_x` |
+| {verbatim AC bullet 2} | deferred | deferred to #1620 |
+| {verbatim AC bullet 3} | partial | only the read path landed; write path missing — would need `src/bar.py` change |
 ```
 
 ---
@@ -219,10 +249,17 @@ Reference PLAN/MAP-PLAN acceptance criteria:
 
 | Condition | Status |
 |-----------|--------|
-| All commands pass, all criteria met | **PASS** ✅ |
-| Any command fails | **BLOCKED** ❌ |
-| Any criterion unmet | **BLOCKED** ❌ |
-| Pattern check fails | **BLOCKED** ❌ |
+| All gates pass, all `ac_audit` entries are `implemented` / `deferred-with-#` / `n/a` | **PASS** ✅ |
+| Any `ac_audit` entry is `missing` or `partial` (or `deferred` without #) | **FAIL** ❌ |
+| Any command fails (lint, tests, build) | **BLOCKED** ❌ |
+| Pattern check / behavioral eval fails | **BLOCKED** ❌ |
+
+`FAIL` and `BLOCKED` both prevent merge. `FAIL` specifically means "the
+implementation is incomplete relative to the agreed plan" (a planning
+gap); `BLOCKED` means "something is broken in the artifact" (a quality
+gap). Telemetry separates them so the recurring-pattern detector can
+distinguish "we keep shipping partial work" from "we keep breaking the
+build".
 
 ---
 
@@ -238,13 +275,27 @@ will record, by setting these fields in your artifact's YAML frontmatter:
 issue: {issue_number}
 agent: PROVE
 date: {YYYY-MM-DD}
-status: PASS            # or BLOCKED
+status: PASS            # PASS | FAIL | BLOCKED
 complexity: SIMPLE      # TRIVIAL | SIMPLE | COMPLEX
 stack: backend          # backend | frontend | fullstack
 root_cause: null        # MANDATORY if status=BLOCKED — use a code from _base.md §10
 blocking_agent: null    # MANDATORY if status=BLOCKED — usually "PROVE"
+# Issue #1612 — per-AC audit (mirrors buddy/prompts/codex-review-clauses.md):
+ac_audit:               # MANDATORY one entry per AC bullet
+  - ac: "verbatim AC bullet text from issue body"
+    status: implemented  # implemented | partial | missing | deferred | n/a
+    evidence: "src/foo.py:42 + tests/test_foo.py::test_x"
+applicable_evals: []    # behavioral-eval IDs run, e.g. ["E01","E03","E15"]
+eval_results: {}        # per-eval pass|fail, e.g. {"E01":"pass","E03":"fail"}
 ---
 ```
+
+`ac_audit` is parsed by the orchestrator via
+`state_manager.validate_ac_audit`. If the array is missing, empty, or
+contains any `missing` / `partial` entry (or `deferred` without an issue
+#), the orchestrator downgrades your `status: PASS` to `status: FAIL`
+and records the reason. You cannot defeat AC-FORBIDS-APPROVE by emitting
+`status: PASS` directly — the validator is the source of truth.
 
 If `status: BLOCKED`, also include a `## Failure Details` block in the
 artifact body so the orchestrator can populate `failures.jsonl`. Use simple
@@ -276,16 +327,22 @@ into the orchestrator (a deterministic Python call) closes the gap.
 issue: {issue_number}
 agent: PROVE
 date: {YYYY-MM-DD}
-status: PASS              # or BLOCKED
+status: PASS              # PASS | FAIL | BLOCKED
 complexity: SIMPLE        # required — orchestrator records this
 stack: backend            # required — orchestrator records this
 root_cause: null          # required if status=BLOCKED (use _base.md §10 codes)
 blocking_agent: null      # required if status=BLOCKED (usually "PROVE")
+ac_audit:                 # MANDATORY — issue #1612
+  - ac: "verbatim AC bullet"
+    status: implemented   # implemented | partial | missing | deferred | n/a
+    evidence: "file:line or test path or '#NNNN' for deferred"
+applicable_evals: []      # IDs of behavioral evals you ran
+eval_results: {}          # per-eval pass|fail
 ---
 
 # PROVE - Issue #{issue_number}
 
-## Status: PASS ✅ | BLOCKED ❌
+## Status: PASS ✅ | FAIL ❌ | BLOCKED ❌
 
 ## Verification Results
 
@@ -356,8 +413,11 @@ Levels:
 - [ ] Level 3: Pipeline handoff shapes verified (if sequential steps)
 
 Outcome data (orchestrator records these — you populate the frontmatter):
-- [ ] Frontmatter has `status: PASS|BLOCKED`
+- [ ] Frontmatter has `status: PASS|FAIL|BLOCKED`
 - [ ] Frontmatter has `complexity` and `stack`
+- [ ] Frontmatter has `ac_audit` with one entry per AC bullet (issue #1612)
+- [ ] Frontmatter has `applicable_evals` (list) and `eval_results` (map)
 - [ ] If BLOCKED: frontmatter has `root_cause` (from _base.md §10) and `blocking_agent`
 - [ ] If BLOCKED: artifact body has a `## Failure Details` section with `details`/`fix`/`prevention`
+- [ ] If FAIL (AC gap): the prose AC table names which AC(s) are missing/partial and why
 ```
