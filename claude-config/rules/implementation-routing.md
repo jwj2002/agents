@@ -82,6 +82,43 @@ sections as the `[PROMPT]` positional or via stdin where the plugin allows.
 **When to skip:** TRIVIAL changes (one-file typo, copy edit) — the per-AC
 overhead isn't worth it. For everything MODERATE+, include the fragment.
 
+### Chokepoint wrapper (buddy#1613)
+
+Buddy ships a Python chokepoint at `scripts/codex_review_gate/main.py` that
+every Codex review for buddy work flows through. It runs configured
+mechanical gates BEFORE invoking `codex exec`; a gate exit code in `2-8`
+synthesizes a `REQUEST_CHANGES` verdict locally without calling Codex.
+Other non-zero exits (or crashes) fail-OPEN so Codex still runs.
+
+```bash
+python3 -m scripts.codex_review_gate.main \
+    --branch-sha $(git rev-parse HEAD) \
+    --plan /tmp/codex-1610-review.md \
+    --verdict-out /tmp/verdict-1610.json \
+    [--gates name="argv ..." ...] \
+    --codex-args -- --skip-git-repo-check --sandbox read-only "$(cat /tmp/codex-1610-review.md)"
+```
+
+The wrapper writes one row per invocation to
+`<store>/codex-gate-log.jsonl` (path resolved with test-isolation
+honoring `BUDDY_CODEX_GATE_LOG_PATH` → `BUDDY_TEST_STORE_DIR` →
+`PYTEST_CURRENT_TEST` → `BUDDY_HOME` → default). Critically: every row
+carries `gatesPassed = passed AND NOT bypassed`. Emergency bypass via
+`BUDDY_CODEX_GATE_ENFORCE=0` is allowed but the resulting verdict
+carries `bypassed=true, gatesPassed=false`. The pre-push hook at
+`buddy/scripts/pre-push` (and equivalent CI check) refuses any branch
+SHA whose latest log row lacks `gatesPassed=true`.
+
+**Why** (#1613 Harold loop-closer 5 of 5): the "305 reviews logged, 0
+gates ran" + "bypassed bypass" classes are unrecoverable without
+structural enforcement. The chokepoint is the structural answer.
+
+**When to skip:** TRIVIAL changes still skip Codex entirely; nothing to
+gate. For COMPLEX+ Codex reviews on buddy, prefer the chokepoint over
+calling `codex exec` directly. For now, `--gates` may be empty — the
+gate scripts are a separate follow-up — but the telemetry + bypass
+plumbing already enforces gatesPassed semantics.
+
 ## Step 2: Announce Routing Briefly
 
 Examples:
