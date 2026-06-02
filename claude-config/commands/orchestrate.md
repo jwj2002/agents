@@ -326,10 +326,19 @@ worktree setup, resume mode), **read `templates/orchestrate-parallel.md`**.
 
 **This is the canonical outcome-recording site.** PROVE specifies the data
 via its artifact frontmatter (`status`, `complexity`, `stack`, `agents_run`,
-and — if BLOCKED — `root_cause`, `blocking_agent`, `files`, `prevention`);
-this step performs the deterministic write. PROVE does NOT write to
-`.claude/memory/` directly (see issue #104 — embedding the write in PROVE's
-prompt was unreliable).
+`ac_audit`, `applicable_evals`, `eval_results`, and — if BLOCKED —
+`root_cause`, `blocking_agent`, `files`, `prevention`); this step performs
+the deterministic write. PROVE does NOT write to `.claude/memory/` directly
+(see issue #104 — embedding the write in PROVE's prompt was unreliable).
+
+**AC-FORBIDS-APPROVE (issue #1612)**: this step also runs
+`state_manager.validate_ac_audit` on PROVE's `ac_audit` frontmatter. A
+PROVE artifact that emitted `status: PASS` is downgraded to `status: FAIL`
+when the audit finds any `missing` / `partial` entry, or any `deferred`
+entry whose evidence does not cite a follow-up issue # (`#NNNN` or
+`GH-NNNN`). The downgrade reason is persisted in `prove-log.jsonl`. PROVE
+cannot defeat the rule by emitting `PASS` directly — the validator is
+authoritative.
 
 `agents_run` is **derived from `.agents/outputs/`** by scanning for
 `<phase>-<issue>-<mmddyy>.md` artifacts and sorting by mtime — the
@@ -347,17 +356,48 @@ if [ -z "$PROVE_ART" ] || [ ! -f "$PROVE_ART" ]; then
   echo "WARNING: no PROVE artifact found for issue ${ISSUE}; skipping outcome recording"
 else
   python3 - <<PYEOF
-import sys, re
+import sys, re, subprocess
 sys.path.insert(0, '$HOME/.claude/hooks')
 from pathlib import Path
-from state_manager import record_metrics, record_failure, derive_agents_run
+from state_manager import (
+    count_acceptance_bullets,
+    derive_agents_run,
+    record_failure,
+    record_metrics,
+    record_prove_audit,
+    validate_ac_audit,
+)
+
+# YAML is preferred (per issue #1612 the frontmatter has nested
+# ac_audit/applicable_evals/eval_results structures). Fall back to a
+# best-effort regex for scalar fields when yaml is unavailable.
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
 
 art = Path("$PROVE_ART").read_text(encoding="utf-8")
 fm_match = re.search(r"^---\n(.*?)\n---", art, re.DOTALL | re.MULTILINE)
-fm = fm_match.group(1) if fm_match else ""
+fm_text = fm_match.group(1) if fm_match else ""
+
+fm_data = {}
+if HAS_YAML and fm_text:
+    try:
+        parsed = yaml.safe_load(fm_text)
+    except yaml.YAMLError:
+        parsed = None
+    # Codex-side concern: yaml.safe_load can return a string/list/None for
+    # syntactically valid non-map frontmatter — normalize to dict so
+    # downstream .get calls don't crash.
+    if isinstance(parsed, dict):
+        fm_data = parsed
 
 def field(name, default=None):
-    m = re.search(rf"^{name}:\s*(.+)$", fm, re.MULTILINE)
+    """Get a scalar field. Prefers parsed yaml; falls back to regex."""
+    if name in fm_data and not isinstance(fm_data[name], (list, dict)):
+        return fm_data[name]
+    m = re.search(rf"^{name}:\s*(.+)$", fm_text, re.MULTILINE)
     return m.group(1).strip() if m else default
 
 status     = field("status", "PASS")
@@ -369,10 +409,53 @@ if not agents_run:
     agents_run = []
 root_cause = field("root_cause") if status == "BLOCKED" else None
 
+# Issue #1612 — per-AC audit. Validate before recording so the verdict
+# we persist reflects AC-FORBIDS-APPROVE.
+ac_audit         = fm_data.get("ac_audit")
+applicable_evals = fm_data.get("applicable_evals") or []
+eval_results     = fm_data.get("eval_results") or {}
+
+# Coverage gate: fetch the issue body and count its AC bullets so the
+# validator can detect "PROVE silently omitted an AC" (Codex R1 finding).
+# Network/gh failure → fall back to 0 (skip the count check; emit-only
+# validation still catches missing/partial/deferred-no-#).
+expected_ac_count = 0
+try:
+    body = subprocess.run(
+        ["gh", "issue", "view", str(int("$ISSUE")), "--json", "body", "--jq", ".body"],
+        check=True, capture_output=True, text=True, timeout=15,
+    ).stdout
+    expected_ac_count = count_acceptance_bullets(body)
+except (subprocess.SubprocessError, FileNotFoundError, ValueError):
+    expected_ac_count = 0
+
+downgrade_reason = None
+if status == "PASS":
+    audit = validate_ac_audit(
+        ac_audit if isinstance(ac_audit, list) else None,
+        expected_ac_count=expected_ac_count or None,
+    )
+    if audit.get("downgrade_to") == "FAIL":
+        downgrade_reason = "; ".join(
+            f"{m['ac']}: {m['reason']}" for m in audit.get("missing", [])
+        )
+        status = "FAIL"
+        print(f"PROVE PASS downgraded to FAIL: {downgrade_reason}")
+
 record_metrics(
     Path("."), int("$ISSUE"), status, complexity, stack, agents_run,
     root_cause=root_cause,
-    blocking_agent=("PROVE" if status == "BLOCKED" else None),
+    blocking_agent=("PROVE" if status in ("BLOCKED", "FAIL") else None),
+)
+
+# Always log the per-AC audit row, regardless of verdict — clean PASS
+# runs are also valuable signal for the recurring-pattern detector.
+record_prove_audit(
+    Path("."), int("$ISSUE"), status,
+    ac_audit if isinstance(ac_audit, list) else [],
+    applicable_evals=applicable_evals if isinstance(applicable_evals, list) else None,
+    eval_results=eval_results if isinstance(eval_results, dict) else None,
+    downgrade_reason=downgrade_reason,
 )
 
 if status == "BLOCKED" and root_cause:

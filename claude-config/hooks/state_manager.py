@@ -571,3 +571,235 @@ def derive_agents_run(project_dir: Path, issue: int) -> list[str]:
     # ran when.
     matches.sort()
     return [phase for _, phase in matches]
+
+
+# ── PROVE per-AC audit (issue #1612) ──────────────────────────────────────
+
+
+_VALID_AC_STATUSES = frozenset({"implemented", "partial", "missing", "deferred", "n/a"})
+
+# Reasonable issue-reference shapes accepted as evidence for status="deferred".
+# Plain "#1234" or "issue #1234" or "GH-1234" all count; bare prose without a
+# referenced number does NOT — that's the load-bearing rule that prevents
+# "deferred to a follow-up" from becoming an APPROVE escape hatch.
+_DEFERRED_REF_RE = re.compile(r"#\d+|GH-\d+", re.IGNORECASE)
+
+
+def _ac_label(entry: dict, idx: int) -> str:
+    """Human-readable label for an AC entry in failure summaries.
+
+    Prefers ``ac`` (verbatim bullet text), trimmed. Falls back to the index.
+    """
+    text = entry.get("ac") if isinstance(entry, dict) else None
+    if isinstance(text, str) and text.strip():
+        snippet = text.strip().splitlines()[0]
+        return snippet[:80] + ("…" if len(snippet) > 80 else "")
+    return f"AC#{idx + 1}"
+
+
+def count_acceptance_bullets(issue_body: str) -> int:
+    """Count markdown task items under an "Acceptance" heading.
+
+    Scans ``issue_body`` for the first heading containing the word
+    ``acceptance`` (case-insensitive) and counts ``- [ ]`` / ``- [x]``
+    bullets until the next ``## ``/``### `` heading or end-of-body.
+
+    Returns 0 when no Acceptance section can be located — the caller
+    should treat that as "cannot enforce one-row-per-AC" and fall back
+    to the emit-only validator.
+
+    Args:
+        issue_body: The full GitHub issue body markdown.
+
+    Returns:
+        Number of AC bullets found, or 0 when the section is absent.
+    """
+    if not isinstance(issue_body, str) or not issue_body:
+        return 0
+    lines = issue_body.splitlines()
+    in_ac = False
+    count = 0
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            # New heading. Decide whether we're entering or leaving the AC block.
+            if in_ac:
+                break
+            heading = stripped.lstrip("# ").lower()
+            if "acceptance" in heading:
+                in_ac = True
+            continue
+        if not in_ac:
+            continue
+        # Match markdown task items: "- [ ] ..." or "- [x] ..." (case
+        # insensitive). Allow indented variants but reject deeply nested
+        # sub-items (4+ spaces) — those are typically clarifications, not
+        # top-level ACs.
+        if re.match(r"^(\s{0,3}- \[[ xX]\] )", line):
+            count += 1
+    return count
+
+
+def validate_ac_audit(ac_audit: list | None, expected_ac_count: int | None = None) -> dict:
+    """Validate a PROVE ``ac_audit`` array against the AC-FORBIDS-APPROVE rule.
+
+    Mirrors the Codex-side rule from issue #1609: a PROVE verdict of PASS
+    is FORBIDDEN if ANY ac_audit entry has ``status="missing"`` or
+    ``status="partial"``. A ``status="deferred"`` entry is acceptable ONLY
+    when ``evidence`` cites a follow-up issue # (e.g. ``"deferred to #1620"``).
+    A bare "deferred" without a # is treated as missing.
+
+    When ``expected_ac_count`` is provided (the orchestrator passes the
+    count derived from the issue body's Acceptance section), the
+    validator also FAILS if ``len(ac_audit) < expected_ac_count``. This
+    closes the "PROVE silently omits an AC" bypass that an emit-only
+    validator misses.
+
+    Args:
+        ac_audit: List of dicts shaped
+            ``{"ac": str, "status": str, "evidence": str}``. May be None
+            (missing array entirely → cannot validate; treat as failure).
+        expected_ac_count: Number of AC bullets the issue body declares.
+            ``None`` means "skip the count check" (used by unit tests +
+            issues where the AC section can't be parsed).
+
+    Returns:
+        ``{"valid": bool, "downgrade_to": str|None, "missing": list[dict]}``
+        where ``missing`` enumerates the offending entries with a ``reason``
+        field. ``downgrade_to`` is ``"FAIL"`` when the audit forbids APPROVE,
+        else ``None``. ``valid`` is False iff ``ac_audit`` is missing,
+        empty, or contains an entry with an invalid status string.
+
+    The function is pure (no I/O). Callers persist the result via
+    ``record_prove_audit``.
+    """
+    missing: list[dict] = []
+    if not isinstance(ac_audit, list) or not ac_audit:
+        return {
+            "valid": False,
+            "downgrade_to": "FAIL",
+            "missing": [{
+                "ac": "(no ac_audit array)",
+                "status": "missing",
+                "reason": "PROVE artifact has no ac_audit entries; cannot verify AC coverage",
+            }],
+        }
+
+    valid = True
+    # Coverage gate: if the issue declares N ACs and PROVE only emits M < N,
+    # the audit silently misses (N - M) ACs. Force missing entries for the
+    # uncovered slots so the verdict downgrades.
+    if isinstance(expected_ac_count, int) and expected_ac_count > len(ac_audit):
+        for slot in range(len(ac_audit), expected_ac_count):
+            missing.append({
+                "ac": f"AC#{slot + 1}",
+                "status": "missing",
+                "reason": (
+                    f"issue declares {expected_ac_count} AC bullets but "
+                    f"ac_audit has only {len(ac_audit)} entries; "
+                    f"AC #{slot + 1} omitted"
+                ),
+            })
+
+    for idx, entry in enumerate(ac_audit):
+        if not isinstance(entry, dict):
+            valid = False
+            missing.append({
+                "ac": _ac_label({}, idx),
+                "status": "invalid",
+                "reason": f"ac_audit[{idx}] is not an object",
+            })
+            continue
+        status = entry.get("status")
+        if status not in _VALID_AC_STATUSES:
+            valid = False
+            missing.append({
+                "ac": _ac_label(entry, idx),
+                "status": str(status),
+                "reason": f"unknown status {status!r}; expected one of {sorted(_VALID_AC_STATUSES)}",
+            })
+            continue
+        if status in ("missing", "partial"):
+            missing.append({
+                "ac": _ac_label(entry, idx),
+                "status": status,
+                "reason": f"AC #{idx + 1} marked {status}",
+            })
+        elif status == "deferred":
+            evidence = entry.get("evidence")
+            if not isinstance(evidence, str) or not _DEFERRED_REF_RE.search(evidence):
+                missing.append({
+                    "ac": _ac_label(entry, idx),
+                    "status": "missing",
+                    "reason": "deferred without follow-up issue # — treated as missing",
+                })
+        # implemented + n/a are clean; nothing to record.
+
+    downgrade = "FAIL" if missing else None
+    return {"valid": valid, "downgrade_to": downgrade, "missing": missing}
+
+
+def record_prove_audit(
+    project_dir: Path,
+    issue: int,
+    verdict: str,
+    ac_audit: list | None,
+    applicable_evals: list[str] | None = None,
+    eval_results: dict[str, str] | None = None,
+    downgrade_reason: str | None = None,
+) -> None:
+    """Append one PROVE per-AC audit row to ``.claude/memory/prove-log.jsonl``.
+
+    Companion to ``record_metrics`` — keeps the AC discipline trail separate
+    so /learn and the recurring-pattern detector can analyze AC coverage
+    independently of the overall PASS/BLOCKED metric stream.
+
+    Schema (per issue #1612):
+
+        {
+          "ts": "...UTC iso...",
+          "issue": N,
+          "phase": "PROVE",
+          "verdict": "PASS|FAIL|BLOCKED",
+          "ac_audit": [...],
+          "applicable_evals": [...],
+          "eval_results": {...},
+          "downgrade_reason": "..." (optional)
+        }
+
+    Args:
+        project_dir: Project root. File lives at
+            ``<project_dir>/.claude/memory/prove-log.jsonl``.
+        issue: GitHub issue number.
+        verdict: ``"PASS"``, ``"FAIL"``, or ``"BLOCKED"``. ``FAIL`` is the
+            new verdict that AC-FORBIDS-APPROVE downgrades a PASS to.
+        ac_audit: The verbatim ac_audit array PROVE emitted (or ``[]`` if
+            absent).
+        applicable_evals: The behavioral-eval IDs PROVE ran (e.g.
+            ``["E01", "E03", "E15"]``).
+        eval_results: Per-eval pass/fail map (e.g.
+            ``{"E01": "pass", "E03": "fail"}``).
+        downgrade_reason: When ``verdict="FAIL"`` because ``validate_ac_audit``
+            forced the downgrade, the human-readable reason.
+
+    Returns: None. Errors are logged; the function never raises.
+    """
+    record: dict = {
+        "ts": _utc_now_iso(),
+        "issue": int(issue),
+        "phase": "PROVE",
+        "verdict": verdict,
+        "ac_audit": list(ac_audit) if ac_audit else [],
+    }
+    if applicable_evals:
+        record["applicable_evals"] = list(applicable_evals)
+    if eval_results:
+        record["eval_results"] = dict(eval_results)
+    if downgrade_reason:
+        record["downgrade_reason"] = downgrade_reason
+
+    target = _memory_dir(project_dir) / "prove-log.jsonl"
+    try:
+        _append_jsonl(target, record)
+    except OSError as e:
+        logging.warning(f"record_prove_audit: could not append to {target}: {e}")
