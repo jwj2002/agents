@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from state_manager import (  # type: ignore[import-not-found]
+    count_acceptance_bullets,
     record_prove_audit,
     validate_ac_audit,
 )
@@ -233,3 +234,106 @@ def test_record_prove_audit_omits_optional_fields_when_absent(project_dir):
     assert "applicable_evals" not in rows[0]
     assert "eval_results" not in rows[0]
     assert "downgrade_reason" not in rows[0]
+
+
+# ── count_acceptance_bullets ────────────────────────────────────────────────
+
+
+def test_count_acceptance_bullets_under_h2():
+    body = """\
+## What
+
+Some prose.
+
+## Acceptance
+
+- [ ] First AC
+- [ ] Second AC
+- [x] Third AC (already checked)
+
+## Out of scope
+
+- [ ] Not an AC bullet
+"""
+    assert count_acceptance_bullets(body) == 3
+
+
+def test_count_acceptance_bullets_under_h3():
+    body = "### Acceptance criteria\n\n- [ ] One\n- [ ] Two\n"
+    assert count_acceptance_bullets(body) == 2
+
+
+def test_count_acceptance_bullets_zero_when_no_section():
+    body = "## Background\n\nNo acceptance criteria here."
+    assert count_acceptance_bullets(body) == 0
+
+
+def test_count_acceptance_bullets_zero_on_empty_input():
+    assert count_acceptance_bullets("") == 0
+    assert count_acceptance_bullets(None) == 0  # type: ignore[arg-type]
+
+
+def test_count_acceptance_bullets_stops_at_next_heading():
+    """Bullets after a subsequent heading should not be counted."""
+    body = """\
+## Acceptance
+- [ ] AC 1
+- [ ] AC 2
+## Out of scope
+- [ ] Not an AC
+"""
+    assert count_acceptance_bullets(body) == 2
+
+
+# ── coverage gate (expected_ac_count) ───────────────────────────────────────
+
+
+def test_emit_fewer_than_expected_is_failure():
+    """Codex R1 bypass fix: 5 expected ACs, only 4 emitted (all
+    implemented) → FAIL because AC #5 is silently omitted."""
+    audit = validate_ac_audit(
+        [
+            {"ac": "AC 1", "status": "implemented", "evidence": "src/a.py"},
+            {"ac": "AC 2", "status": "implemented", "evidence": "src/b.py"},
+            {"ac": "AC 3", "status": "implemented", "evidence": "src/c.py"},
+            {"ac": "AC 4", "status": "implemented", "evidence": "src/d.py"},
+        ],
+        expected_ac_count=5,
+    )
+    assert audit["downgrade_to"] == "FAIL"
+    assert any("AC #5" in m["reason"] for m in audit["missing"])
+
+
+def test_emit_equal_to_expected_is_pass():
+    audit = validate_ac_audit(
+        [
+            {"ac": "AC 1", "status": "implemented", "evidence": "src/a.py"},
+            {"ac": "AC 2", "status": "implemented", "evidence": "src/b.py"},
+        ],
+        expected_ac_count=2,
+    )
+    assert audit["downgrade_to"] is None
+
+
+def test_emit_more_than_expected_is_pass():
+    """Tolerate over-counting; under-counting is the load-bearing case."""
+    audit = validate_ac_audit(
+        [
+            {"ac": "AC 1", "status": "implemented", "evidence": "src/a.py"},
+            {"ac": "AC 2", "status": "implemented", "evidence": "src/b.py"},
+            {"ac": "AC 3 (bonus)", "status": "implemented", "evidence": "src/c.py"},
+        ],
+        expected_ac_count=2,
+    )
+    assert audit["downgrade_to"] is None
+
+
+def test_expected_ac_count_none_skips_coverage_check():
+    """Backward compat: callers that don't pass the count keep the
+    emit-only validation behavior (unit tests, issues with no parseable
+    AC section)."""
+    audit = validate_ac_audit(
+        [{"ac": "AC 1", "status": "implemented", "evidence": "src/a.py"}],
+        expected_ac_count=None,
+    )
+    assert audit["downgrade_to"] is None

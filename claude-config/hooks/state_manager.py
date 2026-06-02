@@ -597,7 +597,50 @@ def _ac_label(entry: dict, idx: int) -> str:
     return f"AC#{idx + 1}"
 
 
-def validate_ac_audit(ac_audit: list | None) -> dict:
+def count_acceptance_bullets(issue_body: str) -> int:
+    """Count markdown task items under an "Acceptance" heading.
+
+    Scans ``issue_body`` for the first heading containing the word
+    ``acceptance`` (case-insensitive) and counts ``- [ ]`` / ``- [x]``
+    bullets until the next ``## ``/``### `` heading or end-of-body.
+
+    Returns 0 when no Acceptance section can be located — the caller
+    should treat that as "cannot enforce one-row-per-AC" and fall back
+    to the emit-only validator.
+
+    Args:
+        issue_body: The full GitHub issue body markdown.
+
+    Returns:
+        Number of AC bullets found, or 0 when the section is absent.
+    """
+    if not isinstance(issue_body, str) or not issue_body:
+        return 0
+    lines = issue_body.splitlines()
+    in_ac = False
+    count = 0
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            # New heading. Decide whether we're entering or leaving the AC block.
+            if in_ac:
+                break
+            heading = stripped.lstrip("# ").lower()
+            if "acceptance" in heading:
+                in_ac = True
+            continue
+        if not in_ac:
+            continue
+        # Match markdown task items: "- [ ] ..." or "- [x] ..." (case
+        # insensitive). Allow indented variants but reject deeply nested
+        # sub-items (4+ spaces) — those are typically clarifications, not
+        # top-level ACs.
+        if re.match(r"^(\s{0,3}- \[[ xX]\] )", line):
+            count += 1
+    return count
+
+
+def validate_ac_audit(ac_audit: list | None, expected_ac_count: int | None = None) -> dict:
     """Validate a PROVE ``ac_audit`` array against the AC-FORBIDS-APPROVE rule.
 
     Mirrors the Codex-side rule from issue #1609: a PROVE verdict of PASS
@@ -606,10 +649,19 @@ def validate_ac_audit(ac_audit: list | None) -> dict:
     when ``evidence`` cites a follow-up issue # (e.g. ``"deferred to #1620"``).
     A bare "deferred" without a # is treated as missing.
 
+    When ``expected_ac_count`` is provided (the orchestrator passes the
+    count derived from the issue body's Acceptance section), the
+    validator also FAILS if ``len(ac_audit) < expected_ac_count``. This
+    closes the "PROVE silently omits an AC" bypass that an emit-only
+    validator misses.
+
     Args:
         ac_audit: List of dicts shaped
             ``{"ac": str, "status": str, "evidence": str}``. May be None
             (missing array entirely → cannot validate; treat as failure).
+        expected_ac_count: Number of AC bullets the issue body declares.
+            ``None`` means "skip the count check" (used by unit tests +
+            issues where the AC section can't be parsed).
 
     Returns:
         ``{"valid": bool, "downgrade_to": str|None, "missing": list[dict]}``
@@ -634,6 +686,21 @@ def validate_ac_audit(ac_audit: list | None) -> dict:
         }
 
     valid = True
+    # Coverage gate: if the issue declares N ACs and PROVE only emits M < N,
+    # the audit silently misses (N - M) ACs. Force missing entries for the
+    # uncovered slots so the verdict downgrades.
+    if isinstance(expected_ac_count, int) and expected_ac_count > len(ac_audit):
+        for slot in range(len(ac_audit), expected_ac_count):
+            missing.append({
+                "ac": f"AC#{slot + 1}",
+                "status": "missing",
+                "reason": (
+                    f"issue declares {expected_ac_count} AC bullets but "
+                    f"ac_audit has only {len(ac_audit)} entries; "
+                    f"AC #{slot + 1} omitted"
+                ),
+            })
+
     for idx, entry in enumerate(ac_audit):
         if not isinstance(entry, dict):
             valid = False

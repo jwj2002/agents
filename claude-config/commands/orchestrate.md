@@ -356,10 +356,11 @@ if [ -z "$PROVE_ART" ] || [ ! -f "$PROVE_ART" ]; then
   echo "WARNING: no PROVE artifact found for issue ${ISSUE}; skipping outcome recording"
 else
   python3 - <<PYEOF
-import sys, re
+import sys, re, subprocess
 sys.path.insert(0, '$HOME/.claude/hooks')
 from pathlib import Path
 from state_manager import (
+    count_acceptance_bullets,
     derive_agents_run,
     record_failure,
     record_metrics,
@@ -380,13 +381,17 @@ art = Path("$PROVE_ART").read_text(encoding="utf-8")
 fm_match = re.search(r"^---\n(.*?)\n---", art, re.DOTALL | re.MULTILINE)
 fm_text = fm_match.group(1) if fm_match else ""
 
+fm_data = {}
 if HAS_YAML and fm_text:
     try:
-        fm_data = yaml.safe_load(fm_text) or {}
+        parsed = yaml.safe_load(fm_text)
     except yaml.YAMLError:
-        fm_data = {}
-else:
-    fm_data = {}
+        parsed = None
+    # Codex-side concern: yaml.safe_load can return a string/list/None for
+    # syntactically valid non-map frontmatter — normalize to dict so
+    # downstream .get calls don't crash.
+    if isinstance(parsed, dict):
+        fm_data = parsed
 
 def field(name, default=None):
     """Get a scalar field. Prefers parsed yaml; falls back to regex."""
@@ -410,9 +415,26 @@ ac_audit         = fm_data.get("ac_audit")
 applicable_evals = fm_data.get("applicable_evals") or []
 eval_results     = fm_data.get("eval_results") or {}
 
+# Coverage gate: fetch the issue body and count its AC bullets so the
+# validator can detect "PROVE silently omitted an AC" (Codex R1 finding).
+# Network/gh failure → fall back to 0 (skip the count check; emit-only
+# validation still catches missing/partial/deferred-no-#).
+expected_ac_count = 0
+try:
+    body = subprocess.run(
+        ["gh", "issue", "view", str(int("$ISSUE")), "--json", "body", "--jq", ".body"],
+        check=True, capture_output=True, text=True, timeout=15,
+    ).stdout
+    expected_ac_count = count_acceptance_bullets(body)
+except (subprocess.SubprocessError, FileNotFoundError, ValueError):
+    expected_ac_count = 0
+
 downgrade_reason = None
 if status == "PASS":
-    audit = validate_ac_audit(ac_audit if isinstance(ac_audit, list) else None)
+    audit = validate_ac_audit(
+        ac_audit if isinstance(ac_audit, list) else None,
+        expected_ac_count=expected_ac_count or None,
+    )
     if audit.get("downgrade_to") == "FAIL":
         downgrade_reason = "; ".join(
             f"{m['ac']}: {m['reason']}" for m in audit.get("missing", [])
