@@ -488,7 +488,14 @@ CONFIG_CHANGED=$(git diff-tree -r --name-only ORIG_HEAD HEAD -- claude-config/ c
 
 if [ -n "$CONFIG_CHANGED" ]; then
     echo "[post-merge] Config files changed — re-running installer..."
-    "$REPO_DIR/claude-config/install.sh" 2>&1 | sed 's/^/[post-merge] /'
+    # Prefer the orchestrator so BOTH Claude and Codex re-sync (Codex skill
+    # symlinks are created by codex-config/install.sh). Fall back to the
+    # Claude installer alone if the orchestrator is absent.
+    if [ -x "$REPO_DIR/install-all.sh" ]; then
+        "$REPO_DIR/install-all.sh" 2>&1 | sed 's/^/[post-merge] /'
+    else
+        "$REPO_DIR/claude-config/install.sh" 2>&1 | sed 's/^/[post-merge] /'
+    fi
 else
     echo "[post-merge] No config changes — skipping install"
 fi
