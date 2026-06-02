@@ -54,6 +54,34 @@ Use the Codex plugin commands instead of inventing ad-hoc prompts:
 /codex:rescue               # delegate implementation when Claude is stuck
 ```
 
+### AC-FORBIDS-APPROVE + scope-freeze clauses
+
+When invoking Codex for any **CODE review** (post-PATCH) or **SPEC review** that
+the prompt arguments allow you to extend, **append the per-AC audit + scope-
+freeze clauses** from the buddy-managed prompt fragment:
+
+```
+specs/../prompts/codex-review-clauses.md      (buddy repo)
+```
+
+The fragment contains three sections to append to your Codex prompt:
+1. Per-AC audit (`ac_audit` array with `implemented|partial|missing|deferred|n/a` statuses)
+2. Scope-freeze (`new_concerns` escape hatch instead of REQUEST_CHANGES drift)
+3. Output JSON schema additions
+
+**Why:** issue #1609 (Harold-borrowed loop-closer). Without these clauses,
+Codex can return APPROVE on partial AC coverage — the Mavis Surface spec
+review hit this 4 rounds in a row. Companion: PROVE-side enforcement of the
+same `ac_audit` shape lives in issue #1612.
+
+**Mechanics:** for the spec-review workflow's R1-R4 `/tmp/codex-spec-r*.md`
+prompt files, append the three sections at the end before passing to
+`codex review`. For `/codex:review` plugin invocations, include the
+sections as the `[PROMPT]` positional or via stdin where the plugin allows.
+
+**When to skip:** TRIVIAL changes (one-file typo, copy edit) — the per-AC
+overhead isn't worth it. For everything MODERATE+, include the fragment.
+
 ## Step 2: Announce Routing Briefly
 
 Examples:
