@@ -111,3 +111,26 @@ Split into phased PRs, each leaving main in a working state:
 - Force push to shared branches
 - Skip CI with `--no-verify`
 - Merge without rebasing on latest main
+- `git stash` someone else's uncommitted work to clear the tree and walk away
+  (stash-and-forget). If a dirty tree blocks a pull, see "Working tree hygiene"
+  below — never bury WIP you did not create in an anonymous stash.
+
+## Working tree hygiene in `~/agents` (autonomous runs)
+
+`~/agents` accumulates two kinds of dirtiness that an unattended run must handle
+**without stashing-and-forgetting** (which has silently buried real WIP — see
+the four orphaned stashes cleaned up 2026-06-02):
+
+- **Telemetry shard churn** (`telemetry/<host>/*.jsonl`) is tracked *by design*
+  for cross-machine aggregation (`feat(learn): cross-machine git-sharded
+  telemetry`). It is meant to be **committed**, not stashed and not gitignored.
+  An autonomous run that finds only telemetry dirty should commit the shard
+  (`chore(telemetry): shard update`), not stash it.
+- **Unrelated WIP** (anything else uncommitted): if you must reset the tree,
+  **commit it to a throwaway branch first** (`wip/<date>-<context>`) so it is
+  recoverable, then return to your task. Never `git stash` it anonymously.
+
+Rationale: the SessionStart hook and the learn-gate poller both `git pull
+--ff-only` and assume a clean-enough tree; the failure mode is runs that stash
+to get there and never restore. Committing (telemetry) or branching (other WIP)
+keeps every change recoverable.
