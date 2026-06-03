@@ -56,17 +56,35 @@ scoping is the failure mode that birthed this rule.
 
 ### Part 2 — Shipped-state collision check (for extensions)
 
-For every column / enum value / CHECK constraint the spec extends:
+**EXHAUSTIVENESS REQUIREMENT** (post-2026-06-03 lesson — repeat
+incidents proved load-bearing). For every table the spec touches,
+inventory the **FULL** shipped column list BEFORE proposing any
+addition. Do not grep only the columns you think you're adding —
+grep every column the spec mentions ANYWHERE (including comments,
+type declarations, voice tool schemas, frontend types).
 
 ```bash
-# Find the owning migration for every table you're modifying.
-grep -rn "CREATE TABLE <table>\|ALTER TABLE <table>" db/migrations/ \
-    | sort -u
+# Step 1: list EVERY column shipped on each table the spec mentions.
+table_name=tasks  # repeat for every table cited in the spec
+psql "$DATABASE_URL" -c "\d $table_name"
 
-# Open each owning migration and read the FULL column list + CHECK constraints.
-# Note: also check for the SAME CHECK constraint being rewritten by later
-# migrations (the canonical shipped state is the LAST migration that
-# touched the constraint, not the FIRST).
+# Or read from migration history (offline):
+grep -rn "$table_name" db/migrations/ scripts/init-db.sql | grep -E "ADD COLUMN|CREATE TABLE|priority|kind|status" | sort -u
+```
+
+Then grep the spec for EVERY column name it touches:
+
+```bash
+spec_file=specs/<feature>.md
+grep -oE '\`[a-z_][a-z0-9_]*\`' "$spec_file" \
+    | sort -u \
+    | grep -v '^\`\(specs\|src\|db\|frontend\|backend\|tests\|docs\)' \
+    > /tmp/spec-tokens.txt
+
+# Cross-check every token in /tmp/spec-tokens.txt against the
+# shipped column list. Any token that matches a shipped column =
+# potential collision; verify the shape (type, enum values, CHECK,
+# default) before approving the spec's usage.
 ```
 
 For each column / enum value / CHECK clause your spec proposes adding:
@@ -75,8 +93,18 @@ For each column / enum value / CHECK clause your spec proposes adding:
 |---|---|
 | Does an existing column already exist with the same role? | Reuse it (e.g., `tasks.kanban_blocker` exists; don't add `blocked_on`). Document the reuse decision. |
 | Does an existing enum value cover the case? | Reuse it; don't add a duplicate-by-meaning value. |
+| Does an existing column have a CONFLICTING shape? (e.g., your spec proposes `priority: low/medium/high/urgent` but shipped is `low/normal/high/urgent`) | Either translate at the boundary OR change the spec to match shipped. **Don't write the shipped column with the new shape — the CHECK will reject it at insert time.** |
 | If you're REWRITING a CHECK constraint (DROP + ADD), does your replacement preserve ALL currently-allowed values? | If not, the migration WILL fail on existing rows with the dropped value. Either keep the dropped value OR add a data-migration step. |
 | Does the FK column you're adding already have an index via a multi-column composite? | If yes, your new single-column index is redundant. |
+| Does a sibling spec (in the same V1 wave) ALSO touch this table? | Coordinate: enumerate columns added by ALL sibling specs before adding yours. (2026-05-24 PersonConsolidation V1 added `tasks.assignee_entity_id`; an unrelated spec drafted before that migration landed would have missed it.) |
+
+**The 2026-06-03 R3 lesson: the grep is exhaustive ONLY if it covers
+EVERY column the spec mentions, not just the columns the spec is
+proposing to add.** A `priority` enum collision is a CHECK collision
+even when the spec doesn't propose adding a `priority` column —
+because the spec INSERTS into that column from another source. Same
+for `assignee`-shaped fields, `status`-shaped fields, any column the
+spec writes-through from another table.
 
 ---
 
