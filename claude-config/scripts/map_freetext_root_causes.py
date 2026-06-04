@@ -38,16 +38,41 @@ RULES = [
     ("DOCUMENTATION", [r"didn'?t document", r"didn'?t specify"]),
 ]
 
-_TOKEN_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]+$")  # no spaces => already coded
+# Recognized coded vocabulary (seed). A spaceless token is treated as a code
+# ONLY if it is a known member here — otherwise it falls through to UNMAPPED.
+# This enforces the spec's typo-guard (a typo'd code like "VERIFICATON_GAP" is
+# NOT in the set, so it surfaces as UNMAPPED instead of becoming a phantom code)
+# and blocks lowercase single words ("regression") from being promoted to fake
+# codes. Extend deliberately (decision-3 governance): a new code earns a slot
+# here only when an UNMAPPED cluster recurs with a genuinely distinct prevention.
+_VALID_ROOT_CAUSES = frozenset({
+    # mapped-from-free-text classes
+    "VERIFICATION_GAP", "SCOPE_CREEP", "AMBIGUITY_UNRESOLVED", "DOCUMENTATION",
+    # agent-emitted codes observed in telemetry
+    "ENUM_VALUE", "COMPONENT_API", "MISSING_TEST", "LINT_ERROR", "MULTI_MODEL",
+    "STUB_HANDLERS", "ASYNCPG_POOL_VS_CONNECTION", "PIPECAT_PIPELINE_DEADLOCK",
+    "OPENAI_STRICT_SCHEMA", "LLM_OUTPUT_SCHEMA", "SQL_RESERVED_WORD",
+    "WRONG_TABLE_NAME", "INVALID_SQL_CONSTRUCT", "MISSING_SERVICE_WIRING",
+    "WRONG_CONN_ID_SCOPE", "MISSING_INTERFACE_METHODS", "SEQUENTIAL_IO",
+    "BLOCKING_FIRE_AND_FORGET", "PATH_EXPANSION", "SERVER_DEP_MANAGEMENT",
+    "STRUCTURE_VIOLATION", "LEGACY_COMPOUND",
+})
 
 
 def classify(root_cause):
-    """Map a root_cause string to a coded value, or 'UNMAPPED' (fail-safe)."""
+    """Map a root_cause string to a coded value, NO_ROOT_CAUSE, or UNMAPPED.
+
+    - empty / missing / "?"          -> NO_ROOT_CAUSE  (recording noise, not signal)
+    - spaceless KNOWN-vocab token    -> that code      (case-normalized pass-through)
+    - free-text matching a rule      -> the matched code
+    - anything else (incl. unknown spaceless tokens / typo'd codes) -> UNMAPPED
+      (surfaced for governance; never force-bucketed)
+    """
     if not root_cause or not root_cause.strip() or root_cause.strip() == "?":
-        return "UNMAPPED"
+        return "NO_ROOT_CAUSE"
     rc = root_cause.strip()
-    if _TOKEN_RE.match(rc):          # already a code (any case) -> normalize, pass through
-        return rc.upper()
+    if " " not in rc and rc.upper() in _VALID_ROOT_CAUSES:
+        return rc.upper()            # recognized code -> normalize, pass through
     low = rc.lower()
     for code, pats in RULES:
         if any(re.search(p, low) for p in pats):
