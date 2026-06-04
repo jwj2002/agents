@@ -164,10 +164,18 @@ below reflect distinct failures — a record synced across N host shards counts
 once, not N times.
 
 ```bash
-# Extract root causes and count — reads the event_id-deduped union snapshot
-cat "$UNION_FILE" | \
-  jq -r '.root_cause' | \
-  sort | uniq -c | sort -rn
+# Cluster by CODED root_cause via the retro-map (READ-SIDE — raw telemetry is
+# never mutated). Free-text causes are mapped onto coded classes so semantically
+# identical failures (the "assume-without-verify" family -> VERIFICATION_GAP)
+# cluster instead of appearing as unique-string singletons. Unmatched free-text
+# stays UNMAPPED (surfaced as signal, never force-bucketed -> worst case is
+# "not learned yet", never "learned wrong").
+python3 ~/agents/claude-config/scripts/map_freetext_root_causes.py "$UNION_FILE"
+
+# AUDIT the mapping (which raw strings landed in a code) before trusting a cluster:
+#   python3 ~/agents/claude-config/scripts/map_freetext_root_causes.py "$UNION_FILE" --mine VERIFICATION_GAP
+# Raw uncoded view (compare / spot classifier gaps):
+#   cat "$UNION_FILE" | jq -r '.root_cause' | sort | uniq -c | sort -rn
 ```
 
 Expected output:
@@ -183,6 +191,19 @@ Expected output:
 ### Step 3: Analyze Each Cluster
 
 For each root cause with 3+ occurrences:
+
+#### 3a-detail. Mine `detail` for SPECIFIC preventions (anti-flattening)
+
+A coded cluster is grouped for **frequency**, but the prevention checklist must be
+**specific** — generated from the original free-text within the cluster, NOT one
+generic rule. Cluster by code for counting; generate preventions from `detail`:
+
+```bash
+# The distinct preventions inside a coded cluster (one specific item per root cause):
+python3 ~/agents/claude-config/scripts/map_freetext_root_causes.py "$UNION_FILE" --mine VERIFICATION_GAP
+# e.g. -> "validate projectionMode is numeric", "verify column dependencies",
+#         "validate label semantics match data" — 11 specific items, not one vague rule.
+```
 
 #### 3a. Extract Common Attributes
 
