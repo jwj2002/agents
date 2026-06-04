@@ -284,6 +284,10 @@ def record_metrics(
     agent_versions: dict[str, str] | None = None,
     first_pass_correct: bool | None = None,
     corrections: list | None = None,
+    *,
+    tier_corrected_to: str | None = None,
+    guards_fired: list[str] | None = None,
+    codex_overturned: dict | None = None,
 ) -> None:
     """Append a single record to ``.claude/memory/metrics.jsonl``.
 
@@ -317,6 +321,20 @@ def record_metrics(
             added retroactively by flip_to_correction).
         corrections: List of correction reason strings. Only present
             after /correction has been run at least once.
+        tier_corrected_to: Final complexity tier when the issue was
+            re-classified mid-flight (e.g. "COMPLEX" when it started
+            as "SIMPLE"). Omitted when no re-tier occurred.
+        guards_fired: Names of pattern-guards that fired during the
+            run (e.g. ["ENUM_VALUE", "VERIFICATION_GAP"]). Only names
+            in ``_VALID_GUARDS`` are written; unknown names are dropped
+            with a WARNING log. Omitted entirely when empty after
+            filtering. DORMANT — schema only; no producer yet.
+        codex_overturned: Dict with shape
+            ``{"state": "not_run"|"confirmed"|"overturned",
+            "category": str}`` recording whether Codex review changed
+            the PROVE verdict. Both ``state`` and ``category`` must
+            pass validation; the whole dict is dropped (with a WARNING)
+            if either is invalid. DORMANT — schema only; no producer yet.
 
     Returns: None. Errors are logged to ``~/.claude/hooks.log``; the
     function never raises into the orchestrator.
@@ -342,6 +360,35 @@ def record_metrics(
         record["first_pass_correct"] = first_pass_correct
     if corrections is not None:
         record["corrections"] = list(corrections)
+
+    if tier_corrected_to:
+        record["tier_corrected_to"] = str(tier_corrected_to)
+
+    if guards_fired is not None:
+        valid = [g for g in guards_fired if g in _VALID_GUARDS]
+        dropped = set(guards_fired) - set(valid)
+        if dropped:
+            logging.warning(
+                "record_metrics: dropped unknown guards %r", dropped
+            )
+        if valid:
+            record["guards_fired"] = valid
+
+    if codex_overturned is not None:
+        _state = codex_overturned.get("state", "")
+        _cat = codex_overturned.get("category", "")
+        if _state not in _VALID_CODEX_STATES:
+            logging.warning(
+                "record_metrics: dropped codex_overturned with invalid "
+                "state %r", _state
+            )
+        elif _cat not in _VALID_CODEX_CATEGORIES:
+            logging.warning(
+                "record_metrics: dropped codex_overturned with invalid "
+                "category %r", _cat
+            )
+        else:
+            record["codex_overturned"] = dict(codex_overturned)
 
     target = _memory_dir(project_dir) / "metrics.jsonl"
     try:
@@ -583,6 +630,14 @@ _VALID_AC_STATUSES = frozenset({"implemented", "partial", "missing", "deferred",
 # referenced number does NOT — that's the load-bearing rule that prevents
 # "deferred to a follow-up" from becoming an APPROVE escape hatch.
 _DEFERRED_REF_RE = re.compile(r"#\d+|GH-\d+", re.IGNORECASE)
+
+_VALID_GUARDS = frozenset({
+    "VERIFICATION_GAP", "ENUM_VALUE", "COMPONENT_API",
+})
+_VALID_CODEX_STATES = frozenset({"not_run", "confirmed", "overturned"})
+_VALID_CODEX_CATEGORIES = frozenset({
+    "auth", "migration", "enum_contract", "cross_module", "secrets",
+})
 
 
 def _ac_label(entry: dict, idx: int) -> str:
