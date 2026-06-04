@@ -6,21 +6,13 @@
     <key>Label</key>
     <string>com.claude-learn-gate-poller</string>
     <key>ProgramArguments</key>
+    <!-- Logic lives in claude-config/scripts/learn-gate-poller.sh so it is
+         readable/testable and editable without re-deploying this plist.
+         `bash -lc` = login shell so git/gh credential helpers are on PATH. -->
     <array>
         <string>/bin/bash</string>
         <string>-lc</string>
-        <string>
-          LOG="$HOME/Library/Logs/claude-learn/poller.log"
-          mkdir -p "$(dirname "$LOG")"
-          cd "$HOME/agents" \
-          &amp;&amp; git pull --ff-only --quiet 2&gt;&gt;"$LOG" \
-          &amp;&amp; python3 claude-config/scripts/telemetry_gate.py --verbose \
-               &gt;&gt;"$LOG" 2&gt;&amp;1 \
-          &amp;&amp; claude --print "/learn --apply --cross-project --validate" \
-               &gt;&gt;"$LOG" 2&gt;&amp;1 \
-          || echo "[$(date -Iseconds)] gate not tripped or pull failed — skip" \
-               &gt;&gt;"$LOG"
-        </string>
+        <string>exec "$HOME/agents/claude-config/scripts/learn-gate-poller.sh"</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/jasonjob/agents</string>

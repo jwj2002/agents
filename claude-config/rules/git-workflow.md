@@ -111,3 +111,24 @@ Split into phased PRs, each leaving main in a working state:
 - Force push to shared branches
 - Skip CI with `--no-verify`
 - Merge without rebasing on latest main
+- `git stash` to clear the working tree and not restore it later (stash-and-forget).
+  If a dirty tree blocks a pull, see "Working tree hygiene" below.
+
+## Working tree hygiene in `~/agents` (autonomous runs)
+
+If uncommitted changes block a `git pull --ff-only`, never stash anonymously.
+Instead, **commit the WIP to a throwaway branch first** so it is recoverable:
+
+```bash
+git checkout -b wip/$(date +%Y%m%d)-<context>
+git add -A && git commit -m "wip: save state before reset"
+git checkout -        # return to the original branch
+```
+
+Rationale: anonymous stashes silently bury real work. Four orphaned stashes were
+found and cleaned up 2026-06-02 because unattended runs stashed to get a clean
+`pull --ff-only` and never restored. A named branch keeps every change recoverable.
+
+> Note: the perpetually-dirty-tree problem caused by telemetry shards
+> (`telemetry/<host>/*.jsonl`) is tracked as Win C under issue #220 and will be
+> resolved in lockstep with REC 0.1. Do not stash or commit shards unilaterally.
