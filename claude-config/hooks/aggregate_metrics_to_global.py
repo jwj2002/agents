@@ -162,6 +162,38 @@ def normalize_record(record: dict, project: str = "") -> list:
     return expanded
 
 
+_DECISION_FIELDS = ("tier_corrected_to", "guards_fired", "codex_overturned")
+
+
+def _merge_decision_fields(base: dict, candidates: list) -> None:
+    """Carry forward decision-provenance fields to *base* from *candidates*.
+
+    For each field in _DECISION_FIELDS: if *base* lacks the field, copy the
+    value from the newest-recorded_at candidate that has it. Mutable values
+    (lists/dicts) are copied, not aliased. Mutates *base* in-place.
+    """
+    for field in _DECISION_FIELDS:
+        if field not in base:
+            # Newest donor wins: a provenance fact should be carried from the
+            # most recent record that actually has it, not the first one we
+            # happen to encounter in source/line order (Codex review #4).
+            donors = sorted(
+                (c for c in candidates if field in c),
+                key=lambda c: c.get("recorded_at", ""),
+                reverse=True,
+            )
+            if donors:
+                val = donors[0][field]
+                # Copy mutable containers so carry-forward never aliases the
+                # source record still held in all_metrics (Codex review #2).
+                if isinstance(val, list):
+                    base[field] = list(val)
+                elif isinstance(val, dict):
+                    base[field] = dict(val)
+                else:
+                    base[field] = val
+
+
 def _derive_project(source_dir: Path) -> str:
     """Return the repo-root name for a given memory directory.
 
@@ -178,6 +210,7 @@ def _load_source(
     file: Path,
     project_name: str,
     seen: dict,
+    all_metrics: dict,
 ) -> None:
     """Read one JSONL file and merge records into *seen* (last record wins).
 
@@ -190,6 +223,10 @@ def _load_source(
     in the local ``~/.claude/memory/`` view.  Metrics records (which have a
     ``status`` field) retain the legacy ``(issue, date, project)`` key because
     they don't have meaningful event_ids.
+
+    *all_metrics* accumulates every metrics record seen for each key so that
+    _merge_decision_fields() can carry forward provenance fields from older
+    records if the newest-recorded_at winner lacks them (issue #217, AC4b).
     """
     try:
         with open(file, encoding="utf-8") as fh:
@@ -226,7 +263,19 @@ def _load_source(
                     else:
                         # Metrics records: legacy (issue, date, project) key is fine.
                         key = (record.get("issue"), record.get("date"), record.get("project"))
-                    seen[key] = record  # last wins
+                        # Pick newest by recorded_at (ISO strings sort lexicographically).
+                        # Strict `>` so a true tie keeps the first-seen record
+                        # (deterministic) rather than silently letting the
+                        # last-processed source win (Codex review #1).
+                        existing = seen.get(key)
+                        if existing is None:
+                            seen[key] = record
+                        elif record.get("recorded_at", "") > existing.get("recorded_at", ""):
+                            seen[key] = record
+                        # Accumulate all metrics records for field-level carry-forward.
+                        all_metrics.setdefault(key, []).append(record)
+                        continue
+                    seen[key] = record  # last wins (failures)
     except OSError:
         pass  # file vanished between glob and open — harmless
 
@@ -237,13 +286,20 @@ def aggregate(kind: str, source_dirs: list, global_dir: Path) -> int:
     Returns the number of records written.
     """
     seen: dict = {}  # key=event_id (failures) or (issue,date,project) (metrics) -> record
+    all_metrics: dict = {}  # (issue,date,project) -> list of all metrics records for that key
 
     for source_dir in sorted(source_dirs):
         file = source_dir / f"{kind}.jsonl"
         if not file.exists():
             continue
         project_name = _derive_project(source_dir)
-        _load_source(file, project_name, seen)
+        _load_source(file, project_name, seen, all_metrics)
+
+    # Field-level carry-forward: if the newest-recorded_at winner for a key
+    # lacks a decision-provenance field, recover it from any older record.
+    for key, base in seen.items():
+        if key in all_metrics:
+            _merge_decision_fields(base, all_metrics[key])
 
     global_dir.mkdir(parents=True, exist_ok=True)
     global_file = global_dir / f"{kind}.jsonl"

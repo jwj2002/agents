@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from .vault_common import get_project_memory_dir
 
@@ -77,6 +76,15 @@ def agent_metrics(period: str | None = None, project: str | None = None) -> dict
 
     top_failures = sorted(cause_counts.items(), key=lambda x: -x[1])[:5]
 
+    # Per-host re-tier rate
+    by_complexity_retier: dict = defaultdict(lambda: {"retier_count": 0, "total": 0})
+    for r in records:
+        c = r.get("complexity", "UNKNOWN")
+        by_complexity_retier[c]["total"] += 1
+        corrected = r.get("tier_corrected_to")
+        if corrected and corrected != c:
+            by_complexity_retier[c]["retier_count"] += 1
+
     return {
         "period": period,
         "total_records": total,
@@ -95,4 +103,11 @@ def agent_metrics(period: str | None = None, project: str | None = None) -> dict
             for k, v in sorted(by_stack.items())
         },
         "top_failures": [{"cause": c, "count": n} for c, n in top_failures],
+        "per_host_re_tier_rate": {
+            k: {
+                **v,
+                "rate": round(v["retier_count"] / v["total"], 3) if v["total"] else 0,
+            }
+            for k, v in sorted(by_complexity_retier.items())
+        },
     }
