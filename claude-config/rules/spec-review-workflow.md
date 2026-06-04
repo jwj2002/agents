@@ -548,3 +548,32 @@ And ensures:
 - ✅ Immutable references (git commits)
 - ✅ Clear version history
 - ✅ Efficient workflow
+
+---
+
+## Companion rules — the §3 self-review enforcement layer
+
+`§3` of this document is the self-review checklist that catches the
+majority of spec defects. The 2026-06-03 Workspace V1 + AggregateKanban
+V1 R1 review proved §3 can be skipped silently — 17 of 21 blockers
+were preventable by §3 if invoked.
+
+To make §3 impossible to skip silently, these companion rules
+auto-load on `specs/**`:
+
+| Rule | Catches |
+|---|---|
+| `spec-self-review.md` | Loud pre-commit gate; restates §3 with "not optional" + when-to-bypass |
+| `spec-schema-collision-check.md` | Schema drops / renames / consolidations / **extensions** — exhaustive grep + shipped-state collision check |
+| `spec-state-machine-truth-table.md` | Multi-section state contracts where each section reads correct but the cross-section state machine contradicts itself |
+| `spec-new-substrate-domain-sweep.md` | 5-question domain expertise check for any spec proposing a NEW persistence substrate (sync/index/queue/cache) |
+
+These rules were born from the same R1 incident (root-cause
+analysis: `~/projects/buddy/.agents/outputs/r1-root-cause-analysis.md`,
+proposals: `r1-corrective-proposals.md`). They take the §3 discipline
+and make it loud + file-pattern-triggered.
+
+When a R1/R2/R3 finding surfaces a lesson likely to recur in other
+projects, promote it to a global rule per the **"Promoting project
+memory to global rules"** procedure in `~/.claude/CLAUDE.md`. Don't
+let it stay project-local indefinitely.
