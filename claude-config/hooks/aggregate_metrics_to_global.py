@@ -168,16 +168,30 @@ _DECISION_FIELDS = ("tier_corrected_to", "guards_fired", "codex_overturned")
 def _merge_decision_fields(base: dict, candidates: list) -> None:
     """Carry forward decision-provenance fields to *base* from *candidates*.
 
-    For each field in _DECISION_FIELDS: if *base* lacks the field and any
-    candidate has it, copy the value from the first candidate that has it.
-    Mutates *base* in-place.
+    For each field in _DECISION_FIELDS: if *base* lacks the field, copy the
+    value from the newest-recorded_at candidate that has it. Mutable values
+    (lists/dicts) are copied, not aliased. Mutates *base* in-place.
     """
     for field in _DECISION_FIELDS:
         if field not in base:
-            for cand in candidates:
-                if field in cand:
-                    base[field] = cand[field]
-                    break
+            # Newest donor wins: a provenance fact should be carried from the
+            # most recent record that actually has it, not the first one we
+            # happen to encounter in source/line order (Codex review #4).
+            donors = sorted(
+                (c for c in candidates if field in c),
+                key=lambda c: c.get("recorded_at", ""),
+                reverse=True,
+            )
+            if donors:
+                val = donors[0][field]
+                # Copy mutable containers so carry-forward never aliases the
+                # source record still held in all_metrics (Codex review #2).
+                if isinstance(val, list):
+                    base[field] = list(val)
+                elif isinstance(val, dict):
+                    base[field] = dict(val)
+                else:
+                    base[field] = val
 
 
 def _derive_project(source_dir: Path) -> str:
@@ -250,10 +264,13 @@ def _load_source(
                         # Metrics records: legacy (issue, date, project) key is fine.
                         key = (record.get("issue"), record.get("date"), record.get("project"))
                         # Pick newest by recorded_at (ISO strings sort lexicographically).
+                        # Strict `>` so a true tie keeps the first-seen record
+                        # (deterministic) rather than silently letting the
+                        # last-processed source win (Codex review #1).
                         existing = seen.get(key)
                         if existing is None:
                             seen[key] = record
-                        elif record.get("recorded_at", "") >= existing.get("recorded_at", ""):
+                        elif record.get("recorded_at", "") > existing.get("recorded_at", ""):
                             seen[key] = record
                         # Accumulate all metrics records for field-level carry-forward.
                         all_metrics.setdefault(key, []).append(record)

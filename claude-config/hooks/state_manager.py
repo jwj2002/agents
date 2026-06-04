@@ -361,7 +361,7 @@ def record_metrics(
     if corrections is not None:
         record["corrections"] = list(corrections)
 
-    if tier_corrected_to:
+    if tier_corrected_to is not None:
         record["tier_corrected_to"] = str(tier_corrected_to)
 
     if guards_fired is not None:
