@@ -3,7 +3,7 @@
 **Date:** 2026-06-04
 **Author:** server-a (Claude Opus 4.8, Linux server). Reviewed adversarially by scratch (Mac) + laptop-wsl.
 **Parent:** `docs/claude-workflow-improvement-plan.md` §3.8 + the cross-agent review's REC 3 ("close the feedback loop").
-**Status:** DRAFT v0.3 — Blocker 3 (shard-commit gap) downscoped per re-verify; dedup hardened to field-level. Awaiting diff re-verify.
+**Status:** DRAFT v0.4 — Jason's cross-fleet decision = **channel hub** (data off the code repo). REC 0 core unchanged; REC 0.1 redefined to hub reporting. Ready for final sign-off.
 
 ---
 
@@ -36,6 +36,20 @@ slice — cross-fleet sync is its own infrastructure rec, not a field-add.
 |---|---|
 | 🔴 **Blocker 3 — shard never committed.** Verified: `telemetry/<host>/` dirs are untracked; no hook git-adds/commits/pushes them. So write→**commit**→push→pull→read is broken at commit; "cross-host compare" reads only the local host. | **Downscoped (option b).** REC 0 DoD = **per-host re-tier rate**, read from the **local global rollup** (`~/.claude/memory/metrics.jsonl`, which already carries the field via field-agnostic aggregation — verified). `write_metrics_shard()` **and** the commit/push/pull sync move to **REC 0.1 (telemetry sync)**. Net: REC 0 shrinks to 2 files (no `aggregate` change, no shard). |
 | 🟠 **Dedup — record-level newest-wins drops a provenance fact** if a later record for the key omits the field. `tier_corrected_to` is "what happened," not mutable state. | **Field-level carry-forward** for the decision-provenance fields: newest-`recorded_at` wins for mutable/outcome fields (status, first_pass_correct, …), then **carry forward** `tier_corrected_to`/`guards_fired`/`codex_overturned` from ANY record for the key if the newest lacks them. Collision test must **FAIL on the current last-wins code** (tautology guard). |
+
+## CHANGELOG v0.3 → v0.4 (cross-fleet architecture decided)
+
+Jason chose the **channel hub** for cross-fleet telemetry (verified context: inbound `git pull --ff-only`
+already runs at session start, `sessionstart_restore_state.py:84`, purpose-built for shards; only the
+outbound path was missing). Rationale for hub over finishing the git push: **don't version append-only
+telemetry DATA in the CODE repo** — per-session commits churn history unboundedly. The hub keeps data
+off git and still gives true cross-fleet aggregation.
+
+**Impact: REC 0 core is UNCHANGED** (per-host write→read on the frozen schema). Only **REC 0.1** is
+redefined — from "git `write_metrics_shard` + commit/push/pull" to **"report decision-bearing metrics
+over the ai-channels hub + hub-side aggregation."** The git-shard path is dropped for cross-fleet
+metrics. (Reconciling the *existing* failure-shard git approach with the hub is itself a follow-up, not
+in REC 0.)
 
 ---
 
@@ -107,11 +121,12 @@ Record-building keeps the "include only if supplied" convention so PASS records 
   where `tier_corrected_to` is present and ≠ `complexity`, grouped by initial `complexity` — reading
   the **local global rollup** `~/.claude/memory/metrics.jsonl` (which already carries `tier_corrected_to`
   via field-agnostic aggregation — verified). No shard read, no cross-host dependency.
-- **Shard + Sync (REC 0.1, NOT this rec):** `write_metrics_shard()` (field-agnostic, decision-bearing
-  **projection** with **retention** — metrics are every-task vs. sparse failures, so no blind mirror of
-  `write_host_shard`) **plus** the mechanism that actually makes shards cross-fleet: who git-adds each
-  host's shard, commit cadence, push/pull, and — the real concern — **high-frequency telemetry commits
-  churning the `agents` repo history + merge handling.** That is sync infrastructure, sized separately.
+- **Cross-fleet (REC 0.1, NOT this rec) — decided: CHANNEL HUB.** Report the decision-bearing metric
+  **projection** over the ai-channels hub (not git), with hub-side aggregation, so cross-fleet
+  comparison reads aggregated data **without versioning telemetry in the code repo.** Open sub-questions
+  for REC 0.1: report cadence (per-session vs. batched), hub persistence/durability, and the
+  aggregation read-path. The earlier git `write_metrics_shard`/commit/push/pull approach is **dropped**
+  for cross-fleet metrics (it would churn the `agents` repo history with per-session data commits).
 
 ### 3.4 Field semantics
 
@@ -207,7 +222,7 @@ This is stated, not hidden. Closing it = sibling **REC 0.2** (§8). REC 0 adds *
 | REC | Scope | Depends on |
 |---|---|---|
 | **REC 0** (this) | `tier_corrected_to` write→read **per-host** (state_manager + agent_metrics) + frozen dormant fields | — |
-| **REC 0.1** | **Telemetry sync:** `write_metrics_shard()` (projection + retention) + commit/push/pull mechanism (cadence, repo-churn, merge handling, auth) that makes shards **cross-fleet** | REC 0 frozen schema |
+| **REC 0.1** | **Cross-fleet telemetry via CHANNEL HUB** (Jason's decision): report decision-bearing metric projection over the ai-channels hub + hub-side aggregation; data stays off the code repo. Open: cadence, hub persistence, aggregation read-path | REC 0 frozen schema |
 | **REC 0.2** | Low-tier write-sites: record `/quick` + plan-mode SIMPLE outcomes | REC 0 frozen schema |
 | **REC 1 / REC 3** | Artifact producers (PLAN evidence, MAP contract-sheet, PropTypes citation) that make `guards_fired` **derived/falsifiable** | REC 0 field defn |
 
