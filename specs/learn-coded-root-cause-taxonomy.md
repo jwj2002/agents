@@ -19,15 +19,18 @@ telemetry today:
   implementation"*, *"assumed projectionMode is always numeric"*) — a unique
   string per occurrence that can **never cluster**.
 
-**Measured impact (2026-06-04 fleet run):** the `mymoney-dev` corpus contains
-**24 free-text failures that are all semantically `VERIFICATION_GAP`** — the
-documented #1 failure pattern (63%). Because each is a distinct string, the
-frequency gate saw **24 singletons, 0 patterns ≥5**, and the entire fleet
-`/learn` promoted **nothing**. The single highest-value, highest-frequency lesson
-in the data is **structurally invisible** to the learner.
+**Measured impact (2026-06-04 fleet run, deduped base ~45):** the `mymoney-dev`
+corpus has **~25 free-text failures**; of these **~11 are semantically
+`VERIFICATION_GAP`** (the long-documented #1 failure *class*), and the rest split
+across **`SCOPE_CREEP`, `AMBIGUITY_UNRESOLVED`, `DOCUMENTATION`**. Because each is
+a distinct string, the frequency gate saw **~25 singletons, 0 patterns ≥5**, and
+the entire fleet `/learn` promoted **nothing** — even the ~11-instance
+`VERIFICATION_GAP` signal was invisible.
 
 > The taxonomy — not the transport — is the binding constraint. Even with perfect
-> cross-fleet sync (REC 0.1), free-text root_causes will not aggregate.
+> cross-fleet sync (REC 0.1), free-text root_causes will not aggregate. **But the
+> fix must avoid the inverse failure** (over-bucketing distinct classes into one
+> coarse code) — see §5/§7.
 
 ## 2. Goal
 
@@ -52,10 +55,14 @@ SQL_CORRECTNESS, LLM_OUTPUT_SCHEMA, SERVICE_WIRING, …` (extensible).
 A one-shot `map_freetext_root_causes.py` pass classifies historical free-text
 `root_cause` strings onto coded values (keyword/rule-based first; the
 "assumed/stated … without verify/validate/check" family → `VERIFICATION_GAP`).
-Run over the committed shards once. This **collapses the 24 invisible
-`mymoney-dev` singletons into one 24-occurrence `VERIFICATION_GAP` cluster** that
-trips the ≥5 gate immediately — turning blocker #2 into a learnable pattern in a
-single backfill.
+Run over the committed shards once. Empirically (verified on the 2026-06-04 data)
+this collapses the **~11 verify-family `mymoney-dev` rows into one
+`VERIFICATION_GAP` cluster** that trips the ≥5 gate — while the **non-verify rows
+map to their OWN codes** (`SCOPE_CREEP`, `AMBIGUITY_UNRESOLVED`, `DOCUMENTATION`),
+becoming their own clusters as they recur. **Critical:** the mapper must NOT
+greedily sweep all 25 into `VERIFICATION_GAP` — that re-creates the coarse
+blindness in the opposite direction. Rows that match no rule **stay free-text**
+(never force-mapped to `OTHER`), since forcing is its own signal loss.
 
 ### 3.3 Capture point
 PROVE/PATCH outcome recording emits the coded `root_cause` (the agent already
@@ -65,13 +72,25 @@ reasons about which guard/phase failed); the free-text becomes `detail`.
 
 - **AC1** `record_failure()` writes a coded `root_cause` + free-text `detail`;
   legacy records without `detail` still parse.
-- **AC2** `_VALID_ROOT_CAUSES` validation is fail-open (unknown code logged, never
-  raises) — mirrors `_VALID_AC_STATUSES`.
-- **AC3** the retro-map pass maps the 24 `mymoney-dev` "assume-don't-verify"
-  rows onto `VERIFICATION_GAP`; a post-map `/learn --dry-run` shows
-  `VERIFICATION_GAP ≥ 5` as an apply-eligible cluster (currently 0).
+- **AC2** validation is fail-open at the RECORD layer (a bad code never breaks
+  recording), BUT an unknown code is **rejected/normalized against
+  `_VALID_ROOT_CAUSES`, not merely logged** — else a typo (`VERIFICATON_GAP`)
+  silently becomes a new singleton, reintroducing the exact bug this fixes.
+- **AC3** the retro-map maps the **verify-family SUBSET (~11, ≥5)** onto
+  `VERIFICATION_GAP`; a post-map `/learn --dry-run` shows it apply-eligible
+  (currently 0). **Precision check (required):** non-verify rows
+  (`SCOPE_CREEP`/`AMBIGUITY_UNRESOLVED`/`DOCUMENTATION`) are NOT swept into
+  `VERIFICATION_GAP` (false-positive mapping rate ≈ 0).
 - **AC4** `/learn` clustering (Step 2) and the ≥5 gate operate on coded
   `root_cause`; `detail` is surfaced as evidence, not used as a cluster key.
+- **AC5 (detail-mining — prevents rule-flattening).** Prevention-checklist
+  generation (Step 5/6) MUST mine the `detail` texts WITHIN a coded cluster, so a
+  cluster yields **specific** preventions ("validate projectionMode is numeric"),
+  not one generic "verify things" rule. Cluster by code for FREQUENCY; generate
+  preventions from `detail`.
+- **AC6 (granularity governance).** Split a code when its sub-clusters have
+  DISTINCT preventions; unmappable rows **stay free-text** (never force-swept to
+  `OTHER`). Prevents the mega-bucket (inverse) failure.
 
 ## 5. Non-goals
 

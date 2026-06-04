@@ -80,8 +80,11 @@ UNION_FILE="/tmp/learn-union-${TS}.jsonl"
 # every other machine's telemetry/ tree — so the same failure appears in
 # multiple host shards. A raw `cat` over-counts those synced records, inflating
 # Step 2's clustering (a record present on 2 boxes looks like "2 occurrences").
-# Dedup by event_id (falling back to issue/date/project/root_cause for legacy
-# rows that predate event_id) so each distinct failure is counted exactly once.
+# Dedup by event_id so each distinct failure is counted exactly once. Legacy
+# rows predating event_id fall back to the SAME field set the canonical
+# event_id hashes (issue|date|project|root_cause|details, per
+# aggregate_metrics_to_global._event_id) — including `details`, so two
+# genuinely-different failures sharing the first four fields are NOT over-merged.
 python3 - "$UNION_FILE" <<'DEDUP_UNION'
 import glob, json, os, sys
 out = sys.argv[1]
@@ -98,7 +101,8 @@ for f in sorted(glob.glob(os.path.expanduser("~/agents/telemetry/*/failures.json
                 except json.JSONDecodeError:
                     continue
                 key = r.get("event_id") or (
-                    r.get("issue"), r.get("date"), r.get("project"), r.get("root_cause"))
+                    r.get("issue"), r.get("date"), r.get("project"),
+                    r.get("root_cause"), r.get("details", ""))
                 if key in seen:
                     continue
                 seen.add(key)

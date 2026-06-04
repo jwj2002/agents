@@ -1,7 +1,7 @@
 schema_version: 1
 id: LR-007
 rule: Before declaring a dependency, assumption, or contract "resolved" or "verified," cite file:line evidence for the claim. Stating something is true without reading the actual code is the single most common failure class (VERIFICATION_GAP).
-source: "Fleet /learn run 2026-06-04: 24 distinct mymoney-dev failures of the 'Agent assumed/stated X without verifying Y' form (e.g. 'stated dependency resolved but didn't verify exact implementation', 'documented expected data shapes but didn't add validation', 'assumed projectionMode is always numeric'). All semantically VERIFICATION_GAP — the documented #1 failure pattern (63%) — but logged as unique free-text strings, so the >=5 frequency gate never recognized them as one pattern. Formalized manually because the auto-learner is structurally blind to free-text root_causes."
+source: "Fleet /learn run 2026-06-04: of ~25 free-text mymoney-dev failures, ~11 are the verify-family 'Agent assumed/stated X without verifying Y' (e.g. 'stated dependency resolved but didn't verify exact implementation', 'documented expected data shapes but didn't add validation', 'assumed projectionMode is always numeric'). These map to VERIFICATION_GAP — the long-documented #1 failure class — but each was logged as a unique free-text string, so the >=5 frequency gate never recognized them as one pattern. (The other ~14 free-text rows are distinct classes: SCOPE_CREEP, AMBIGUITY_UNRESOLVED, DOCUMENTATION — not verify failures.) Formalized manually because the auto-learner is structurally blind to free-text root_causes."
 confidence: 0.9
 applies_to: all projects
 approved: false
