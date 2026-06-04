@@ -75,11 +75,40 @@ echo "New failures since last learn: $NEW_COUNT (watermark: $LAST_LEARN_AT)"
 #     so the watermark advanced at Step 6.6 precisely covers this snapshot.
 TS=$(date -u +%Y%m%d-%H%M%S)
 UNION_FILE="/tmp/learn-union-${TS}.jsonl"
-# Concatenate all host shard failure files; normalize_record is handled by
-# telemetry_gate's _iter_shard_records internals during counting.
-# We cat the raw shards here; the clustering steps below parse JSON themselves.
-cat ~/agents/telemetry/*/failures.jsonl 2>/dev/null > "$UNION_FILE"
-echo "Union snapshot: $UNION_FILE ($(wc -l < "$UNION_FILE") lines)"
+# Concatenate all host shard failure files, then DEDUP BY event_id. A failure
+# worked on one machine is committed to that host's shard, which then SYNCS to
+# every other machine's telemetry/ tree — so the same failure appears in
+# multiple host shards. A raw `cat` over-counts those synced records, inflating
+# Step 2's clustering (a record present on 2 boxes looks like "2 occurrences").
+# Dedup by event_id (falling back to issue/date/project/root_cause for legacy
+# rows that predate event_id) so each distinct failure is counted exactly once.
+python3 - "$UNION_FILE" <<'DEDUP_UNION'
+import glob, json, os, sys
+out = sys.argv[1]
+seen, rows = set(), []
+for f in sorted(glob.glob(os.path.expanduser("~/agents/telemetry/*/failures.jsonl"))):
+    try:
+        with open(f, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                key = r.get("event_id") or (
+                    r.get("issue"), r.get("date"), r.get("project"), r.get("root_cause"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append(line)
+    except OSError:
+        pass
+with open(out, "w", encoding="utf-8") as fh:
+    fh.write(("\n".join(rows) + "\n") if rows else "")
+DEDUP_UNION
+echo "Union snapshot (event_id-deduped): $UNION_FILE ($(wc -l < "$UNION_FILE") lines)"
 
 # 0e. Compute consumed_max from the union snapshot (B2 — used at Step 6.6).
 #     Pass --snapshot "$UNION_FILE" so the watermark is the max recorded_at of
@@ -126,9 +155,12 @@ No outcome data found. Run some issues through /orchestrate first.
 Read each failure record from `$UNION_FILE` and group by `root_cause`.
 **All jq/parse commands below operate on `$UNION_FILE`** (the snapshot from Step 0),
 never on `.claude/memory/failures.jsonl` or any local path.
+`$UNION_FILE` is **already event_id-deduped** (Step 0d), so occurrence counts
+below reflect distinct failures — a record synced across N host shards counts
+once, not N times.
 
 ```bash
-# Extract root causes and count — reads union snapshot
+# Extract root causes and count — reads the event_id-deduped union snapshot
 cat "$UNION_FILE" | \
   jq -r '.root_cause' | \
   sort | uniq -c | sort -rn
