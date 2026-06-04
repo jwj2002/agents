@@ -76,7 +76,10 @@ def agent_metrics(period: str | None = None, project: str | None = None) -> dict
 
     top_failures = sorted(cause_counts.items(), key=lambda x: -x[1])[:5]
 
-    # Per-host re-tier rate
+    # Per-host re-tier rate. NOTE: "per-host" = THIS host only — the source is the
+    # local rollup (~/.claude/memory/metrics.jsonl), not a cross-machine view. The
+    # breakdown is grouped by ORIGINAL complexity tier (how often a tier got
+    # re-classified mid-flight), NOT by machine. Cross-fleet segmentation is REC 0.1.
     by_complexity_retier: dict = defaultdict(lambda: {"retier_count": 0, "total": 0})
     for r in records:
         c = r.get("complexity", "UNKNOWN")
