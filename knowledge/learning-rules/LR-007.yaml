@@ -1,0 +1,8 @@
+schema_version: 1
+id: LR-007
+rule: Before declaring a dependency, assumption, or contract "resolved" or "verified," cite file:line evidence for the claim. Stating something is true without reading the actual code is the single most common failure class (VERIFICATION_GAP).
+source: "Fleet /learn run 2026-06-04: 24 distinct mymoney-dev failures of the 'Agent assumed/stated X without verifying Y' form (e.g. 'stated dependency resolved but didn't verify exact implementation', 'documented expected data shapes but didn't add validation', 'assumed projectionMode is always numeric'). All semantically VERIFICATION_GAP — the documented #1 failure pattern (63%) — but logged as unique free-text strings, so the >=5 frequency gate never recognized them as one pattern. Formalized manually because the auto-learner is structurally blind to free-text root_causes."
+confidence: 0.9
+applies_to: all projects
+approved: false
+created_at: '2026-06-04'
