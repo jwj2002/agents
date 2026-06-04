@@ -3,7 +3,7 @@
 **Date:** 2026-06-04
 **Author:** server-a (Claude Opus 4.8, Linux server). Reviewed adversarially by scratch (Mac) + laptop-wsl.
 **Parent:** `docs/claude-workflow-improvement-plan.md` §3.8 + the cross-agent review's REC 3 ("close the feedback loop").
-**Status:** DRAFT v0.4 — Jason's cross-fleet decision = **channel hub** (data off the code repo). REC 0 core unchanged; REC 0.1 redefined to hub reporting. Ready for final sign-off.
+**Status:** DRAFT v0.5 — cross-fleet transport = a **message hub** (data off the code repo); hub named generically per policy; REC 0.1 collector homed in `~/agents`. REC 0 core unchanged. Green pending final pass.
 
 ---
 
@@ -39,7 +39,7 @@ slice — cross-fleet sync is its own infrastructure rec, not a field-add.
 
 ## CHANGELOG v0.3 → v0.4 (cross-fleet architecture decided)
 
-Jason chose the **channel hub** for cross-fleet telemetry (verified context: inbound `git pull --ff-only`
+Jason chose a **message hub** for cross-fleet telemetry (verified context: inbound `git pull --ff-only`
 already runs at session start, `sessionstart_restore_state.py:84`, purpose-built for shards; only the
 outbound path was missing). Rationale for hub over finishing the git push: **don't version append-only
 telemetry DATA in the CODE repo** — per-session commits churn history unboundedly. The hub keeps data
@@ -47,9 +47,18 @@ off git and still gives true cross-fleet aggregation.
 
 **Impact: REC 0 core is UNCHANGED** (per-host write→read on the frozen schema). Only **REC 0.1** is
 redefined — from "git `write_metrics_shard` + commit/push/pull" to **"report decision-bearing metrics
-over the ai-channels hub + hub-side aggregation."** The git-shard path is dropped for cross-fleet
+over a message hub + hub-side aggregation."** The git-shard path is dropped for cross-fleet
 metrics. (Reconciling the *existing* failure-shard git approach with the hub is itself a follow-up, not
 in REC 0.)
+
+## CHANGELOG v0.4 → v0.5 (naming policy + collector home)
+
+- **Naming policy (mandatory, all docs):** the message hub is referenced **by capability, never by
+  name.** Scrubbed every prior occurrence of the transport's proper name → generic "message hub";
+  verified zero name leaks. The spec must never name the transport.
+- **REC 0.1 collector home = `~/agents`** (Jason): the hub is an **external, unnamed dependency**;
+  REC 0.1's agent-side emit, the persistent collector participant, its store, and the cross-fleet
+  read-path all live in `~/agents` — no change to the hub's own project.
 
 ---
 
@@ -121,12 +130,16 @@ Record-building keeps the "include only if supplied" convention so PASS records 
   where `tier_corrected_to` is present and ≠ `complexity`, grouped by initial `complexity` — reading
   the **local global rollup** `~/.claude/memory/metrics.jsonl` (which already carries `tier_corrected_to`
   via field-agnostic aggregation — verified). No shard read, no cross-host dependency.
-- **Cross-fleet (REC 0.1, NOT this rec) — decided: CHANNEL HUB.** Report the decision-bearing metric
-  **projection** over the ai-channels hub (not git), with hub-side aggregation, so cross-fleet
-  comparison reads aggregated data **without versioning telemetry in the code repo.** Open sub-questions
-  for REC 0.1: report cadence (per-session vs. batched), hub persistence/durability, and the
-  aggregation read-path. The earlier git `write_metrics_shard`/commit/push/pull approach is **dropped**
-  for cross-fleet metrics (it would churn the `agents` repo history with per-session data commits).
+- **Cross-fleet (REC 0.1, NOT this rec) — decided: MESSAGE HUB.** Report the decision-bearing metric
+  **projection** over a message hub (not git), with hub-side aggregation, so cross-fleet comparison
+  reads aggregated data **without versioning telemetry in the code repo.** The hub is an **external,
+  unnamed dependency** (referenced by capability, never by name); the **collector lives in `~/agents`**
+  — agent-side emit, the persistent collector participant, its store, and the cross-fleet read-path all
+  ship in `~/agents` alongside the telemetry system (no change to the hub's own project). Open
+  sub-questions for REC 0.1: report cadence (per-session vs. batched), hub persistence/durability, and
+  the aggregation read-path. The earlier git `write_metrics_shard`/commit/push/pull approach is
+  **dropped** for cross-fleet metrics (it would churn the `agents` repo history with per-session data
+  commits).
 
 ### 3.4 Field semantics
 
@@ -222,7 +235,7 @@ This is stated, not hidden. Closing it = sibling **REC 0.2** (§8). REC 0 adds *
 | REC | Scope | Depends on |
 |---|---|---|
 | **REC 0** (this) | `tier_corrected_to` write→read **per-host** (state_manager + agent_metrics) + frozen dormant fields | — |
-| **REC 0.1** | **Cross-fleet telemetry via CHANNEL HUB** (Jason's decision): report decision-bearing metric projection over the ai-channels hub + hub-side aggregation; data stays off the code repo. Open: cadence, hub persistence, aggregation read-path | REC 0 frozen schema |
+| **REC 0.1** | **Cross-fleet telemetry via a MESSAGE HUB** (Jason's decision): report decision-bearing metric projection over an external, unnamed message hub + hub-side aggregation; **collector + store + read-path home in `~/agents`**; data stays off the code repo. Open: cadence, hub persistence, aggregation read-path | REC 0 frozen schema |
 | **REC 0.2** | Low-tier write-sites: record `/quick` + plan-mode SIMPLE outcomes | REC 0 frozen schema |
 | **REC 1 / REC 3** | Artifact producers (PLAN evidence, MAP contract-sheet, PropTypes citation) that make `guards_fired` **derived/falsifiable** | REC 0 field defn |
 
