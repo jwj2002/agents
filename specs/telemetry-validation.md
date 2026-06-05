@@ -1,215 +1,241 @@
-# Telemetry Validation — Spec (DRAFT)
+# Telemetry Validation — Spec (DRAFT v2)
 
 **Date:** 2026-06-05
-**Author:** scratch, with Jason. Grounded in the 2026-06-04 `/learn` findings + a verified
-audit of the current telemetry.
-**Status:** DRAFT. **Prerequisite** to the Team Knowledge MVP (the sensor everything else
-aims with). The validation *methodology* (§2, §4) is a candidate **public BKM**.
+**Author:** scratch, with Jason. Fleet-reviewed (agent-b = validity/adjudication, server-a =
+capture/transport, laptop-wsl = proxy-validation). Grounded in the 2026-06-04 `/learn`
+findings + a verified audit of the current telemetry.
+**Status:** DRAFT v2 — incorporates the three lane reviews. **Prerequisite** to the Team
+Knowledge MVP (the sensor everything else aims with). The validation *methodology* is a
+candidate **public BKM**.
 
 ---
 
-## 0. Governing principle — fully automated, or it has gaps
+## 0. Governing principles
 
-> **Telemetry capture must be fully automated: zero manual steps, and the system must
-> detect when it stops capturing.** Every optional or human-dependent telemetry step
-> observed this session became a gap — `first_pass_correct`/`duration` unpopulated, the
-> `/learn` loop never fired (epoch watermark for months, invisible), the `/correction`
-> flip depends on someone *noticing*. **Manual = silent gaps = invalid measurement.**
+### 0.1 Fully automated, or it has gaps — with a *dead-man's-switch* watchdog
+Capture must be fully automated: **zero manual steps.** Every optional/human-dependent step
+this session became a silent gap (`first_pass_correct` unpopulated, `/learn` never fired for
+months, the `/correction` flip depends on someone noticing).
 
-Three consequences, each load-bearing:
+**The watchdog must be a dead-man's-switch, not a self-check** (server-a — the crux): *no
+local mechanism can watch itself; it dies with the thing it watches.* Mechanism: the capture
+hook writes a **heartbeat**; the existing **launchd poller (#221, runs every 12h independent
+of Claude Code sessions)** checks heartbeat-staleness and **pushes per-host coverage status
+to the hub** — **a host that goes silent IS the fleet alarm** (absence is the signal; reuses
+REC 0.1's fan-in). Layered: local heartbeat → independent poller → hub escalation.
 
-1. **Automated capture.** Instrument at the **session/task level** (a universal Stop /
-   PostToolUse hook), not inside the orchestrate pipeline — so *every* unit emits, not just
-   orchestrated work (closes selection bias: `/quick`, plan-mode, freeform are currently
-   invisible). Decision signals are **derived from artifacts**, never self-reported.
-2. **Coverage watchdog (the part people miss — we lived it).** A fully-automated sensor that
-   *silently stops* is worse than a manual one, because nobody notices. The telemetry must
-   **monitor and alarm on its own coverage**: "0 token records this week," "this host's
-   shard hasn't updated in N days," "PROVE outcomes dropped to zero." **An automated sensor
-   must prove it is still running.**
-3. **"Automated" ≠ "measure everything."** Some work has no valid code-quality measurement
-   (§2.5). The system **auto-classifies and *default-excludes*** rather than manufacturing
-   garbage. *Measuring the wrong thing is a worse validity failure than not measuring.*
+### 0.2 Agent-agnostic by *design*, Claude-first by *implementation* (NEW — top principle)
+The telemetry **schema**, the **adjudication anchor**, and the **validation methodology** are
+**agent-agnostic**; **capture is pluggable per-agent via adapters.** The Claude Code capture
+here is **the first adapter**, not a baked-in assumption — Cursor/Codex/Aider/etc. plug into
+the same schema later (the public version is cross-agent or it's irrelevant).
+
+This isn't only for reach — **it improves validity.** Agent-agnostic capture leans on the
+**external, artifact-based signals that exist regardless of agent** (git/PR defects, rework,
+CI, linter/type findings, tokens-where-exposed) and away from **agent-internal self-reports**
+(phases, decision fields) — which are the weakest, most gameable signals. *Agent-agnostic and
+high-validity point the same direction.* Sequencing mirrors the trust profile: agnostic by
+design now (cheap), Claude adapter for the team MVP, more adapters for public.
+
+### 0.3 "Automated" ≠ "measure everything" — and default-exclude is itself watched
+Some work has no valid code-quality measurement (§2.5). The system **auto-classifies and
+default-excludes** rather than manufacturing garbage (*measuring wrong > not measuring*). But
+**default-exclude is a gaming surface** (agent-b): agents can route hard/risky work into
+excluded buckets. So exclusion itself is watchdog'd (§0.1 + §2.5).
+
+### 0.4 Every target has an anti-gaming companion (NEW — agent-b)
+*"A target without a guardrail becomes a policy."* Every metric promoted to a **target** must
+ship with (a) an explicit **anti-gaming companion metric** and (b) a periodic proxy-validity
+re-check (§2.3). Diagnostics need no companion; targets always do.
 
 ---
 
 ## 1. Token capture — a valid efficiency sensor
 
-**Status today: tokens are NOT captured anywhere** (verified — no `token`/`cost`/`usage`
-field in any telemetry writer). The entire token-optimization goal currently has **no
-sensor.** This is the #1 gap.
+**Status today: tokens are NOT captured anywhere** (verified). The token-optimization goal
+has no sensor. #1 gap.
 
-### 1.1 Capture the breakdown, not a number
-Per **task and per phase** (MAP/PLAN/PATCH/PROVE), capture:
-`{input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, model}`.
-**Source:** Claude Code's existing OpenTelemetry metrics (`claude_code.token.usage`,
-already broken down by type/model) + per-session usage — read by a collector hook and
-**attributed to the current task/phase**. We tap an existing sensor; we don't build one.
+### 1.1 Source + the hidden prerequisite
+`claude_code.token.usage` (OTEL, broken down by type/model) is the right source — **but OTEL
+is *pushed* to an exporter, not sitting in a file** (server-a). So **build item 1.5 (a
+sleeper): configure OTEL → a readable local sink** (OTLP/file exporter) *before* the
+collector. The collector then reads it and attributes usage.
 
-### 1.2 Cost, not raw tokens (a validity requirement)
-With prompt caching, a cache-read token costs ~10% of a fresh input token and output tokens
-are most expensive — so **raw token count is not a valid cost measure.** Compute
-**price-weighted cost (\$)** from the breakdown × per-model pricing. Cost > token sum.
+### 1.2 Capture the cache-aware **cost**, not raw tokens
+Per unit: `{input, output, cache_creation, cache_read, model}` → **price-weighted cost (\$)**.
+Cache-read ≈ 10% of fresh input; output is dearest — so **raw token count is not a valid cost
+measure.** Raw tokens/cost are **diagnostics only, never targets** (Goodhart).
 
-### 1.3 Raw tokens / cost is a PERVERSE target (Goodhart)
-Minimizing tokens → terser prompts, less context, worse code. So **raw tokens and cost are
-*diagnostics only*, never targets.**
+### 1.3 Unit honesty: per-session first, per-task/phase where derivable (server-a)
+The Stop hook captures **per-session**, not per-logical-task — and **task attribution is THE
+hard problem, not a footnote.** A logical task spans **main + child (subagent) sessions** →
+sum across them. **Per-phase attribution only exists for orchestrated work** (phases are
+subagent sessions joined via OTEL session-id); freeform has no phases. v1-real: **per-session
+cost cleanly now; per-task/phase as an orchestrated-work refinement** (derive task from
+orchestrate-state/branch/issue when present, else the unit *is* the session).
 
-### 1.4 The reframe that makes token-optimization quality-*aligned*
-Phase-attributed capture reveals that **most token waste is *rework*, not verbosity** — a
-PROVE bounce, a re-PATCH, re-fed context after a failure burn tokens **and** signal a
-quality miss; they are the same event. So the legitimate target is **"eliminate *wasted*
-tokens (rework + redundant context),"** which *lowers cost and raises quality together.*
+### 1.4 Waste, not verbosity, is the target
+Most token waste is **rework** (a PROVE bounce, a re-PATCH, re-fed context) — which burns
+tokens **and** signals a quality miss; same event. The legitimate target is **"eliminate
+*wasted* tokens,"** which lowers cost and raises quality together.
 
-### 1.5 Token metrics + their role
-| Metric | Role |
-|---|---|
-| raw tokens / phase | diagnostic only |
-| price-weighted **cost** / task (cache-aware) | diagnostic |
-| **waste-token share** (rework + redundant context) | **target** (quality-aligned) |
-| **cost per first-pass-correct outcome**, normalized by complexity | **headline efficiency measure** |
-
----
-
-## 2. Ground-truth anchor — what makes every proxy valid
-
-**The problem:** every quality metric we have (`first_pass_correct`, `status`, ac-audit) is
-a **proxy** with unknown construct validity. Without an independent ground-truth you cannot
-tell a valid proxy from a gameable one — you might optimize `first_pass_correct` and just be
-passing the gate more easily. **The ground-truth anchor converts measurement *theater* into
-*valid* measurement.**
-
-### 2.1 Automated ground-truth sources (human dropped from the dependency path)
-1. **Post-merge-defect auto-tracing (primary — behavioral, real, automatable).** A script
-   detects when a later PR/commit **fixes / reverts / references** a prior change within a
-   window (e.g. 2 weeks) → auto-marks the original as defective. **Replaces the manual
-   `/correction` flip with automatic detection.** Real-world consequence, derived from
-   git/issue history. *(Critical-path build item — the tracing heuristic needs care: match
-   on referenced issue, reverts, and same-file corrective edits; tune for precision.)*
-2. **Scheduled adversarial-model review (secondary — independent, scalable).** A *different
-   model* — **agent-b / GPT-5** — auto-reviews a sample on a cadence (no human). Genuinely
-   uncorrelated with the Claude fleet's blind spots. The diversity dividend, on measurement.
-3. **Human spot-rating — DROPPED from the dependency path** (full-automation rule). Optional
-   periodic calibration only; the system never *depends* on it.
-
-**Honest tradeoff:** automated ground-truth is **behavioral + model-judged, not
-human-judged.** That is a net validity *gain* — "did the code actually break and need
-fixing?" is more valid than a subjective rating, and it's *complete* instead of sparse.
-
-### 2.2 The proxy-validation loop (the methodology = the BKM)
-Proxies are **hypotheses**; ground-truth **tests** them:
-1. Collect ground-truth on a sample (auto-traced defects + adversarial review).
-2. **Correlate each proxy against it** (does `first_pass_correct` predict low defects? does
-   low rework predict high adversarial-review scores?).
-3. **Keep proxies that correlate; downweight/discard those that don't** — a proxy that
-   doesn't track ground-truth is *not a valid measurement* and must leave the targeting set.
-4. **Re-validate on a cadence** — proxies *drift* (valid today, gamed tomorrow). Validity is
-   **earned and maintained, not assumed once.**
-
-### 2.3 Cold-start honesty
-Ground-truth is **lagging and sparse** (defects take weeks; samples are small). So **v1
-ships with *provisional* (unvalidated) proxies + a ground-truth pipeline that progressively
-validates/prunes them.** Early validity is weak; it strengthens as data accumulates. Stated
-out loud, not pretended away.
+### 1.5 Metrics + anti-gaming companions (agent-b)
+| Metric | Role | Anti-gaming companion(s) |
+|---|---|---|
+| raw tokens / cost per phase | diagnostic | — |
+| **waste-token share** | target | defect rate, PROVE coverage, repeated-reads/failed-commands, excluded-token share. *"No PROVE on implementation" = coverage failure, not a low-waste win.* |
+| **cost per first-pass-correct, by complexity band** | **headline** | exclusion-rate, unclassified-rate, **task-splitting-rate**, complexity distribution; **freeze task boundaries at intake** (not after outcome); **include delayed-defect penalties** in the denominator |
 
 ---
 
-## 2.5 Work-type classification & scope boundaries
+## 2. The adjudication anchor (renamed — *not* "ground-truth")
 
-"Fully automated" is **not** "measure everything." Code-quality metrics attach only to work
-with a verifiable code outcome. Three work-types, each with different valid metrics:
+agent-b's central correction: **don't call automated adjudication "ground truth."** It's an
+**`adjudication_anchor`** with its own validity debt — *more independent than the proxies, but
+imperfect.* A fixed judge becomes the target.
+
+### 2.1 A diverse rotating panel, never a single model (agent-b)
+The anchor is a **multi-signal panel**, not one reviewer:
+- **Behavioral defect tracer** (primary, §2.2) — real-world consequence.
+- **GPT-5 / agent-b adversarial review** on a random **stratified** sample (successes *and*
+  failures — otherwise it only audits known badness).
+- **A Claude reviewer *outside* the producing path** (cross-model overlap sample).
+- **Static analyzers / tests / security scanners** always collected.
+Rules: reviewers **blind to the proxy labels / headline score**; **track inter-rater
+agreement + calibration** against behavioral defects; **preserve dissent** (a model "pass"
+never overwrites a defect signal or another reviewer's concern); **rotate prompts/rubrics +
+seed adversarial cases** to detect judge drift/gaming. *This is the multi-agent requirement —
+and why the hub/telemetry must support diverse agents (§0.2).*
+
+### 2.2 Defect tracer — precision-tiered (server-a + agent-b)
+Because a **contaminated anchor invalidates the entire proxy-validation loop**, **precision ≫
+recall**:
+- **Reverts → HIGH precision** (explicit "this reverts X") — use confidently.
+- explicit "fixes regression from #PR" referencing the original → MEDIUM.
+- **same-file-edit-within-window → NOISE** (files churn for non-defect reasons) — **never
+  auto-mark defective**; weak hint needing corroboration only.
+- **PR granularity, not commit lineage** (your **squash-merge collapses lineage** so "reverts
+  commit X" won't map) — operate via the `gh` API.
+- **Multiple windows (7d / 14d / 30d)** — a fixed 2-week window catches fast crashes, misses
+  slow logic bugs (state the bias).
+- **Human IN for tracer *calibration* (audit its first defect-marks), OUT of steady-state** —
+  the one precise exception to "drop humans."
+
+### 2.3 Proxy-validation loop — ship the *statistical mechanism*, not a disclaimer (laptop-wsl)
+The cold-start is the singleton-sparse problem at the validation layer. Mechanize it:
+- **Minimum-N power gate:** below adequately-powered n, **all** proxies stay **provisional** —
+  neither pruned nor promoted to targeting (the `/learn` ≥5-gate medicine).
+- **Downweight, never discard** at cold-start: discarding = stop collecting = can never
+  re-validate (the same destructive mistake as advancing the epoch watermark). A proxy bad at
+  n=10 can redeem at n=100.
+- **Decide on the CI bound, not the point estimate:** if a proxy's r-CI includes 0 →
+  provisional, not actioned.
+- **Multiple-comparison correction (FDR/Bonferroni):** ~12 candidate proxies at p<.05 → ~0.6
+  spurious "keepers" with zero real signal. Correct, or you keep a bad proxy by chance.
+- **Asymmetric bars:** cheap bar to **keep collecting as a diagnostic**; strict, powered,
+  corrected bar to **promote to a target** (a false-positive target is a Goodhart liability,
+  far worse than a retained diagnostic).
+
+### 2.4 Cold-start honesty
+The anchor is **lagging + sparse** → v1 ships **provisional** proxies + the validation
+pipeline that progressively validates/prunes them. Validity is **earned over time**, weak at
+first. Stated out loud.
+
+---
+
+## 2.5 Work-type classification — artifact-derived, with exclusion watchdogs
 
 | Work-type | Examples | Valid metrics |
 |---|---|---|
-| **Implementation** | issue → code → PR → merge → PROVE | full set (quality + efficiency + defects) |
-| **Deliberative** | spec/design/research/review/discussion | **no code-quality metric** — cost-track only; value judged **downstream** |
+| **Implementation** | code change (local edits/tests *or* PR/merge/PROVE) | full set |
+| **Deliberative** | spec/design/research/review/discussion | no code-quality metric; cost-track; value judged downstream (§ below) |
 | **Ops / admin** | git, config, running things | none |
 
-**The auto-classifier (one observable bright line):** *Did this unit produce a code change
-that went through PR / merge / PROVE?* Read from entry command (`/orchestrate`/`/quick` vs
-freeform/`/spec-review`), whether a code diff was committed/merged, whether PROVE ran, and
-whether the only artifact is a doc/conversation. **All observable → auto-routing, not a
-manual exception.**
+**Classification is artifact-derived, not command-derived** (agent-b): command is *weak
+evidence* (relying on the human choosing the right command re-introduces a manual dependency).
+**Strongest evidence = artifact behavior: diffs, commits, PRs, tests run, CI, issue links,
+files touched.** PR/merge/PROVE is the strongest implementation signal, **but local unmerged
+code edits + test runs already create an implementation-like unit** that must be captured or
+*explicitly* excluded (or pre-PR coding falls through the cracks).
 
-**Deliberative value is measured downstream, never in-session.** A spec/design artifact is
-**linked to the implementation tasks it spawns** and judged by *their* outcomes
-(first-pass-correctness, defects) — automatically, later. Its value is real but **lagging
-and indirect**, never an in-session score. *(Example: a spec session like this one is
-cost-tracked as deliberative, not quality-scored; the spec's value shows up when the code
-built from it succeeds.)*
+**Deliberative value is downstream + loose** (laptop-wsl): linkage requires an **explicit
+machine-readable link** (impl PR cites the spec id — the `Closes #N` discipline), *never*
+proximity/temporal guessing. And it's **joint spec+impl, many-to-many, long-latency** — a
+great spec + weak implementer is indistinguishable from the reverse by outcome alone. So it's
+**directional, aggregate, experimental — not a per-artifact score, not a v1 deliverable.**
+Cost-tracking deliberative work is the safe v1 floor. *(This spec session = cost-tracked
+deliberative.)*
 
-**Default-exclude on uncertainty.** Ambiguous units are excluded from quality metrics (raw
-cost may still be captured, tagged "unclassified") — **never guessed.**
-
-**Unit boundaries:** implementation auto-bounds on PR/commit/issue; deliberative bounds on a
-session or produced doc. Mostly inferable; a real edge to handle.
+**Default-exclude watchdogs (agent-b — exclusion is a gaming surface):** exclusion-rate +
+unclassified-rate alarms (by agent/host/workflow/repo); an **"implementation-like activity but
+excluded" detector** (edits/commits/PRs/tests inside a deliberative/ops session); a
+**PROVE-coverage alarm** (code change, no PROVE/CI/test evidence); **token-coverage
+reconciliation** (per-task tokens must reconcile against global OTEL within tolerance, else
+attribution gaps hide waste); merge/CI **ingestion-freshness** alarm (if GitHub/CI data stops,
+behavioral truth silently degrades).
 
 ---
 
-## 3. The validity bar + per-metric verdicts
+## 3. Validity bar + per-metric verdicts
 
-Every candidate metric must pass four tests: **construct validity** (does it measure the
-thing?), **Goodhart/gameability** (does it degrade behavior as a target?), **confounds**
-(what else drives it — normalize), **reliability** (enough signal, populated).
+Four tests: **construct validity · Goodhart/gameability · confounds · reliability.**
 
 | Metric | Verdict |
 |---|---|
-| `status` PASS/BLOCKED | **WEAK** — "passed gate" ≠ "good code"; gameable |
-| `first_pass_correct` | **REASONABLE** *if normalized for difficulty* — but under-captured today |
-| `root_cause` / failure class | **VALID diagnostic**, survivorship-biased (can't see good practice) |
-| `guards_fired` (self-reported) | **INVALID** — constant-field trap (#223); valid only if artifact-derived |
-| `codex_overturned` | **STRONG** — hard to game; currently dormant |
-| `duration_seconds` | **WEAK** — confounded by task size; normalize; under-captured |
-| `complexity`/`tier_corrected_to` | **PROCESS indicator**, self-reported — not quality |
-| prove-log `ac_audit`/`eval_results` | **REASONABLE** — closest to ground-truth, but agent-self-assessed |
-| **tokens (in/out/cache per phase)** | **MISSING + CRITICAL**; raw = perverse target; use cost-per-good-outcome (§1) |
-| **rework / bounce rate** | **VALID**, hard to game; only partially derivable today; make first-class |
-| code-quality signals (lint/type/coverage/complexity) | **MIXED** — lint/type/finding *density* defensible; coverage% & raw complexity gameable (not targets) |
-| `pattern_applied` / transfer-with-effect | **STRONGEST** — measures real downstream effect (the gold standard) |
+| `status` PASS/BLOCKED | **WEAK** — "passed gate" ≠ "good"; gameable |
+| `first_pass_correct` | **Split the definition** (agent-b): `first_prove_passed` = WEAK/gameable; `first_pass_correct_observed` (no corrective patch / reopened review / failed CI / revert in window) = much stronger. **Validity is *derived from the defect tracer*, not normalization** — standalone it conflates *correct* with *unchecked* (laptop-wsl) |
+| `root_cause` / failure class | **VALID failure-diagnostic; STRUCTURALLY cannot measure quality of *successful* work** — failure telemetry by definition can't see good practice. **Needs a separate positive-signal sensor** (not a normalization fix) |
+| `guards_fired` (self-reported) | **INVALID** unless artifact-derived (constant-field trap, #223) |
+| `codex_overturned` | **STRONG *only when* independently derived + coverage-monitored** (agent-b) — else dormant or avoided by not invoking Codex on risky tasks |
+| `duration_seconds` | **WEAK** — confounded by size; normalize; under-captured |
+| `complexity`/`tier_corrected_to` | PROCESS indicator, self-reported — not quality |
+| prove-log `ac_audit`/`eval_results` | **automated-review *proxy*, not closest-to-ground-truth** (agent-b) — agent-self-assessed (same ceiling as `guards_fired`; #1612 PROVE-side enforcement is the mitigation) |
+| **tokens (cost, cache-aware, per phase)** | **MISSING + CRITICAL**; raw = perverse target; use cost-per-good-outcome (§1) |
+| **rework / bounce rate** | **VALID but gameable** (batch fixes into first patch, skip PROVE, relabel rework as new task) — needs **boundary rules** + churn/review-comment companions |
+| code-quality (lint/type/coverage/complexity) | lint/type/finding **density** = strong diagnostics; **coverage% & raw complexity gameable** (not targets); changed-line-coverage / mutation-score better but still gameable |
+| `pattern_applied` / transfer-with-effect | **strong only if declared *before/during* adoption, evaluated later** (agent-b) — else over-tagged after success / untagged for risky adoptions |
+
+**Cross-spec flag (both reviewers):** the `root_cause` structural blind spot is **one missing
+sensor — *positive-signal capture* (capture what went *right*) — gating two specs** (this one
+and team-knowledge auto-observe). Elevate it as a foundational build item.
 
 ---
 
-## 4. Principles (the spec's spine; also the public BKM)
+## 4. Principles (the spine; also the public BKM)
 
-1. **Normalize everything** — per task-complexity or per good-outcome; never raw counts.
-2. **Separate diagnostics from targets** — label each metric's *role*; most are valid
-   diagnostics but invalid targets (Goodhart).
-3. **Prefer hard-to-game, effect-based metrics** — `codex_overturned`, `pattern_applied`,
-   rework-rate, ac-audit > self-reported `guards_fired`, raw tokens, coverage%.
-4. **Validate proxies against ground-truth** — don't *assert* validity; *measure* it (§2).
-5. **Fix coverage & bias first** — populate the valid fields that exist; close survivorship
-   (capture positive signal) and selection (cover all work-types per §2.5).
-6. **Capture tokens (cost, normalized) — the critical missing sensor.**
-7. **Automate or it has gaps** (§0) — plus a watchdog so silent failure can't hide.
+1. **Automate or it has gaps** — + a dead-man's-switch watchdog.
+2. **Agent-agnostic by design** — universal schema/anchor/methodology; pluggable capture.
+3. **Normalize everything** — per complexity / per good-outcome.
+4. **Separate diagnostics from targets; every target gets an anti-gaming companion.**
+5. **Prefer hard-to-game, *external/behavioral* signals** over agent-internal self-reports.
+6. **The anchor is a diverse panel, not a single judge** — preserve dissent, rotate rubrics.
+7. **Validate proxies against the anchor — statistically** (power gate, downweight-never-discard, CI, FDR, asymmetric bars).
+8. **Add a positive-signal sensor** — failure data structurally can't measure success.
+9. **Fix coverage & bias first; measure exclusion itself.**
 
 ---
 
-## 5. What to build (buildable order)
+## 5. Build order
 
-1. **Universal capture hook** — session/task-level Stop hook; emits for *every* work-type;
-   auto-classifies (§2.5).
-2. **Token collector** — read OTEL token metrics, attribute per task/phase, compute
-   cache-aware cost (§1).
-3. **Coverage watchdog** — alarms on capture gaps (§0.2).
-4. **Post-merge-defect tracer** — the primary automated ground-truth (§2.1); *critical path*.
-5. **Scheduled adversarial review** — agent-b samples + scores (§2.1).
-6. **Proxy-validation job** — periodic correlate-and-prune (§2.2).
-7. Populate/first-class the under-captured valid metrics (`first_pass_correct`, rework).
+1. **Universal session-level capture hook** (Stop-hook slot; every work-type; artifact-derived classification).
+1.5 **OTEL→readable-sink export setup** (hidden prereq, sleeper).
+2. **Token collector** — read OTEL, per-session cost first, cache-aware.
+3. **Dead-man's-switch watchdog** — heartbeat + #221 poller + hub coverage escalation + the §2.5 exclusion watchdogs.
+4. **Precision-tiered defect tracer** — reverts-first, PR-granularity, multi-window, human-calibrated. ⭐ **long pole / critical path** (contaminating it breaks everything; interacts with squash-merge + the §7 git-inconsistency).
+5. **Diverse adjudication panel** — agent-b + outside-path Claude + static analyzers; stratified sampling; dissent preserved.
+6. **Proxy-validation job** — the §2.3 statistical mechanism. **Months-lagging by nature** (ongoing, not this-week).
+7. **Positive-signal sensor** — capture what went right (gates two specs).
+8. Populate/first-class the under-captured valid metrics.
 
 ## 6. Non-goals / deferred
-
-Human-in-the-loop quality rating (full-automation rule) · perfect deliberative-quality
-scoring (judged downstream only) · gameable metrics as targets (coverage%, raw tokens) ·
-measuring ambiguous units (default-exclude).
+Human steady-state dependency · single-model ground-truth · perfect deliberative-quality
+scoring (downstream, experimental) · gameable metrics as targets · measuring ambiguous units ·
+building all per-agent adapters now (Claude adapter first).
 
 ## 7. Relationships
-
-- **Prerequisite to** the Team Knowledge MVP (`specs/team-knowledge-mvp-v1.md`) — it is the
-  sensor the patterns/private-review/measurement pillars aim with.
-- **Reuses** REC 0 decision fields, the #223 retro-map (failure-derived subset only), the
-  existing `state_manager`/`prove-log`/aggregate pipeline.
-- **Methodology is a candidate public BKM** — "validate your agent telemetry against a
-  ground-truth" is rigor the field largely lacks.
-- **Adjacent open spec (flagged by Jason):** git-process consistency — the workflow has been
-  inconsistent (post-merge hook breakage, stash-and-forget, telemetry-churn blocking pulls,
-  shared-file append conflicts). Its own investigation/spec. *(See task.)*
+- **Prerequisite to** the Team Knowledge MVP — the sensor its pillars aim with.
+- **Agent-agnostic design enables the public cross-agent learning/benchmarking network** (§0.2).
+- **The positive-signal-sensor gap gates *two* specs** (this + team-knowledge auto-observe).
+- **Methodology = candidate public BKM** ("validate your agent telemetry against a diverse anchor").
+- **Adjacent open spec (Jason):** git-process consistency (task #21) — interacts with the
+  defect tracer (squash-merge lineage).
