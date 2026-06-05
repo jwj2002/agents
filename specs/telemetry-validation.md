@@ -86,6 +86,35 @@ tokens **and** signals a quality miss; same event. The legitimate target is **"e
 | **waste-token share** | target | defect rate, PROVE coverage, repeated-reads/failed-commands, excluded-token share. *"No PROVE on implementation" = coverage failure, not a low-waste win.* |
 | **cost per first-pass-correct, by complexity band** | **headline** | exclusion-rate, unclassified-rate, **task-splitting-rate**, complexity distribution; **freeze task boundaries at intake** — or at the **first implementation-like artifact** (code edit/test/commit/PR link) when no task id exists; never after outcome; **include delayed-defect penalties** in the denominator |
 
+### 1.6 Tool / MCP / skill utilization + environment-setup overhead (Jason)
+
+A distinct, high-value dimension: **agent-configuration efficiency** — the engine for the
+Private Review's config-optimization and the public "optimize your setup for performance &
+cost" feature. Fully automatable (tool/skill calls are in the session log; package installs
+are observable from Bash) → fits §0.1. Behavioral/observable → hard to game (§0.5).
+
+**Capture (per session, attributed to the active config):**
+- **Utilization:** MCP servers *enabled* vs *invoked*; per-tool call counts (by source:
+  built-in / MCP / which server); per-skill invocations; **last-used** per tool/skill/server.
+- **Environment-setup overhead:** `pip`/`npm`/`apt` installs triggered by a task (which
+  packages, time, tokens), and crucially **whether they repeat across sessions.**
+
+**Token-cost honesty:** Claude Code **lazy-loads tool schemas** (deferred tools / ToolSearch),
+so enabled-but-unused tools are *not* "100 full schemas per prompt." Real cost = the
+deferred-tool **name list**, **active (non-deferred) schemas**, MCP **connection overhead**,
+and **search noise** of sifting many tools. Measure it honestly; don't overclaim the tax.
+
+**Recommendations it enables (the differentiated payoff):**
+- *Disable MCP servers X, Y (0 uses / 30d) → recover ~N context tokens + connection overhead.*
+- *Pre-install `reportlab`/`python-docx` in your base env — installed every doc task (~M
+  tokens + T s, repeated).* (The cleaner cost win — pure repeated overhead.)
+- *Skill Z unused / 60d → remove from config.*
+
+**Validity nuance — frequency × *criticality*, not frequency alone:** a once-used tool may be
+a rarely-but-critically-needed scanner. Recommend pruning only **"unused AND non-critical,"**
+never "unused" (same Goodhart caution — don't strip something load-bearing). Normalize install
+*time* (network confounds); the signal that matters is **repetition**, not raw seconds.
+
 ---
 
 ## 2. The adjudication anchor (renamed — *not* "ground-truth")
@@ -200,6 +229,7 @@ Four tests: **construct validity · Goodhart/gameability · confounds · reliabi
 | **rework / bounce rate** | **VALID but gameable** (batch fixes into first patch, skip PROVE, relabel rework as new task) — needs **boundary rules** + churn/review-comment companions |
 | code-quality (lint/type/coverage/complexity) | lint/type/finding **density** = strong diagnostics; **coverage% & raw complexity gameable** (not targets); changed-line-coverage / mutation-score better but still gameable |
 | `pattern_applied` / transfer-with-effect | **strong only if declared *before/during* adoption, evaluated later** (agent-b) — else over-tagged after success / untagged for risky adoptions |
+| **tool/MCP/skill utilization + env-setup overhead** (§1.6) | **VALID** — behavioral, hard to game, fully automatable; strong cost/config signal. *Recommendations* need **frequency × criticality** (don't prune rare-but-critical); token tax is real but partially mitigated by lazy-loading |
 
 **Cross-spec flag (both reviewers):** the `root_cause` structural blind spot is **one missing
 sensor — *positive-signal capture* (capture what went *right*) — gating two specs** (this one
