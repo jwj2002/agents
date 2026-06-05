@@ -84,7 +84,7 @@ tokens **and** signals a quality miss; same event. The legitimate target is **"e
 |---|---|---|
 | raw tokens / cost per phase | diagnostic | — |
 | **waste-token share** | target | defect rate, PROVE coverage, repeated-reads/failed-commands, excluded-token share. *"No PROVE on implementation" = coverage failure, not a low-waste win.* |
-| **cost per first-pass-correct, by complexity band** | **headline** | exclusion-rate, unclassified-rate, **task-splitting-rate**, complexity distribution; **freeze task boundaries at intake** (not after outcome); **include delayed-defect penalties** in the denominator |
+| **cost per first-pass-correct, by complexity band** | **headline** | exclusion-rate, unclassified-rate, **task-splitting-rate**, complexity distribution; **freeze task boundaries at intake** — or at the **first implementation-like artifact** (code edit/test/commit/PR link) when no task id exists; never after outcome; **include delayed-defect penalties** in the denominator |
 
 ---
 
@@ -107,10 +107,16 @@ never overwrites a defect signal or another reviewer's concern); **rotate prompt
 seed adversarial cases** to detect judge drift/gaming. *This is the multi-agent requirement —
 and why the hub/telemetry must support diverse agents (§0.2).*
 
+**Minimum viable v1 panel (keep the build small — agent-b):** behavioral tracer + GPT-5
+stratified review + static analyzers, *always*; the outside-path Claude overlap can be
+**lower-frequency calibration** if capacity is tight.
+
 ### 2.2 Defect tracer — precision-tiered (server-a + agent-b)
 Because a **contaminated anchor invalidates the entire proxy-validation loop**, **precision ≫
 recall**:
-- **Reverts → HIGH precision** (explicit "this reverts X") — use confidently.
+- **Reverts → HIGH-precision defect/correction signal** (explicit "this reverts X") — use
+  confidently, but note a revert can also undo a *clean* change for changed requirements
+  (high precision, not always a "defect" — label it correction/defect, not defect-only).
 - explicit "fixes regression from #PR" referencing the original → MEDIUM.
 - **same-file-edit-within-window → NOISE** (files churn for non-defect reasons) — **never
   auto-mark defective**; weak hint needing corroboration only.
@@ -224,7 +230,10 @@ and team-knowledge auto-observe). Elevate it as a foundational build item.
 4. **Precision-tiered defect tracer** — reverts-first, PR-granularity, multi-window, human-calibrated. ⭐ **long pole / critical path** (contaminating it breaks everything; interacts with squash-merge + the §7 git-inconsistency).
 5. **Diverse adjudication panel** — agent-b + outside-path Claude + static analyzers; stratified sampling; dissent preserved.
 6. **Proxy-validation job** — the §2.3 statistical mechanism. **Months-lagging by nature** (ongoing, not this-week).
-7. **Positive-signal sensor** — capture what went right (gates two specs).
+7. **Positive-signal sensor** — capture what went *right* (gates two specs). **v1 signal
+   (agent-b, concrete):** successful implementation units with **no correction within 30d +
+   passed CI/PROVE + low review-comment density + no same-area rework** — imperfect, but
+   breaks the failure-only dependency.
 8. Populate/first-class the under-captured valid metrics.
 
 ## 6. Non-goals / deferred
