@@ -50,7 +50,7 @@ _VALID_ROOT_CAUSES = frozenset({
 _NON_PATTERN = frozenset({"UNMAPPED", "NO_ROOT_CAUSE", "MALFORMED"})
 
 # Negation/no-verify variants, on normalized (lowercased, straight-apostrophe) text.
-_DIDNT = r"(?:didn'?t|did not|doesn'?t|don'?t|without)"
+_DIDNT = r"(?:didn'?t|did not|doesn'?t|does not|don'?t|without)"
 
 # Conservative keyword rules on NORMALIZED text. Order matters (first match wins):
 # AMBIGUITY before SCOPE so "didn't consider both interpretations" -> ambiguity, not
@@ -67,7 +67,7 @@ RULES = [
                      r"secondary (deficit|scenario|type)"]),
     ("DOCUMENTATION", [rf"{_DIDNT} document", rf"{_DIDNT} specify",
                        r"missing docs?\b", r"forgot to document"]),
-    ("VERIFICATION_GAP", [r"\bassum(?:e|ed|es|ing|ption)\b",
+    ("VERIFICATION_GAP", [r"\bassum(?:e|ed|es|ing|ption|ptions)\b",
                           rf"{_DIDNT}\b.{{0,30}}(verif|validat|check)",
                           rf"{_DIDNT} add validation",
                           r"stated\b.{0,40}resolved", r"defensive comment without"]),

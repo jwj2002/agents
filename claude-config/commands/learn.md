@@ -85,17 +85,22 @@ UNION_FILE="/tmp/learn-union-${TS}.jsonl"
 # forged/stale/corrupt event_id must not merge two genuinely-different failures.
 # Rows older than 90 days are dropped here so the window actually applies downstream.
 python3 - "$UNION_FILE" <<'DEDUP_UNION'
-import datetime, glob, hashlib, json, os, sys
+import datetime, glob, json, os, sys
+# Reuse the AUTHORITATIVE normalization + hashing so legacy compound rows
+# ({"issues":[...],"root_causes":[...]}) are expanded the SAME way the aggregate
+# Stop hook does — otherwise distinct compound rows collide on an empty key and
+# the survivor loses its root_cause. _event_id recomputes from content (we never
+# trust a provided event_id), fixing both double-count (#3) and forged-id-merge (#4).
+sys.path.insert(0, os.path.expanduser("~/agents/claude-config/hooks"))
+from aggregate_metrics_to_global import normalize_record, _event_id
 out = sys.argv[1]
 cutoff = (datetime.datetime.now(datetime.timezone.utc)
           - datetime.timedelta(days=90)).strftime("%Y-%m-%d")
 
 def canon_key(r):
-    # Mirror aggregate_metrics_to_global._event_id exactly (issue default 0).
-    payload = "{}|{}|{}|{}|{}".format(
-        r.get("issue", 0), r.get("date", ""), r.get("project", ""),
-        r.get("root_cause", ""), r.get("details", ""))
-    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+    return _event_id(issue=r.get("issue", 0), date=r.get("date", ""),
+                     project=r.get("project", ""), root_cause=r.get("root_cause", ""),
+                     details=r.get("details", ""))
 
 seen, rows = set(), []
 skipped_json = skipped_window = 0
@@ -114,15 +119,16 @@ for f in sorted(glob.glob(os.path.expanduser("~/agents/telemetry/*/failures.json
                 if not isinstance(r, dict):
                     skipped_json += 1
                     continue
-                ts = (r.get("recorded_at") or r.get("date") or "")
-                if isinstance(ts, str) and ts[:10] and ts[:10] < cutoff:
-                    skipped_window += 1          # outside the 90-day window
-                    continue
-                key = canon_key(r)               # recompute; never trust event_id
-                if key in seen:
-                    continue
-                seen.add(key)
-                rows.append(line)
+                for rec in normalize_record(r):  # expand legacy compound rows (M5)
+                    ts = (rec.get("recorded_at") or rec.get("date") or "")
+                    if isinstance(ts, str) and ts[:10] and ts[:10] < cutoff:
+                        skipped_window += 1       # outside the 90-day window
+                        continue
+                    key = canon_key(rec)          # recompute; never trust event_id
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    rows.append(json.dumps(rec, separators=(",", ":")))  # write NORMALIZED record
     except OSError:
         pass
 with open(out, "w", encoding="utf-8") as fh:
