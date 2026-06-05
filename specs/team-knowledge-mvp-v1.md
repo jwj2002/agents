@@ -1,9 +1,48 @@
-# Team Knowledge Hub — MVP v1 Spec (DRAFT v2)
+# Team Knowledge Hub — MVP v1 Spec (DRAFT v3)
 
 **Date:** 2026-06-05
 **Author:** scratch (assembling fleet input: server-a=transport, agent-b=trust/security,
 laptop-wsl=pattern model). Reframed per Jason: patterns (not scaffold) as the spine.
 **Status:** DRAFT — for review + fleet lane-verification before any build.
+
+**v3 changes (applied fleet-review fixes + Jason reframes):**
+- **Two deployments** named (team v1 / public vNext) with a swappable trust profile (§0.5).
+- **SENSE → TARGET → INVEST** operating model makes telemetry the *sensor*, not the product
+  (§1.0); ties this spec to `telemetry-validation.md` (the locked sensor spec).
+- **Audit = per-dev shard** `audit/<dev>.jsonl` (was a single `audit/log.jsonl` — JSONL-in-git
+  append conflict), union-on-read (§4).
+- **Component intake gate** hardened: quarantine-clone + manifest + pinned SHA + dangerous-file
+  flagging + no-auto-run (§ Pillar 3 / §6).
+- **Verified-sanitization-before-announce**: you cannot announce until the sanitize check
+  passes and is logged (§ Pillar 3 / §6).
+- **Top-performer privacy mechanism** resolved: opt-in, aggregate-only, k-anon cohort ≥3,
+  bucketed, never a named dev (§ Pillar 2 / §6.1).
+- **`catalog.yaml` schema** specified (§ Pillar 3).
+- **Confidence-gating** on patterns entering the map / consensus (§1.3, §1.6).
+- **Consensus-validation step** (coherence-vs-correctness against telemetry) made an explicit
+  gate before publish (§1.6).
+- **Tool/MCP/skill utilization + env-setup overhead** added to Pillar 2 efficiency scores
+  (mirrors `telemetry-validation.md` §1.6 — the public-version cost wedge).
+
+---
+
+## 0.5. Two deployments, one core (team now, public next)
+
+The pillars and the §2 north-star boundary are identical across both; only the **trust
+profile** swaps (a config, not a fork):
+
+| | **Team v1 (this spec)** | **Public vNext (deferred)** |
+|---|---|---|
+| Membership | static `roster.yaml`, 4 known devs | open registration + reputation |
+| Trust machinery | light (attribution, not auth — §5) | full (signed artifacts, sandboxed import, federation) |
+| **Leads with** | Pillar 1 (the divergence map) | **Pillar 2 + token-cost optimization** (the cold-start wedge) |
+| Pillar 3 (components) | **enabled** (same-team git host) | **disabled at launch** (public code-sharing = too large an attack surface) |
+
+The public hub's value prop = *honest, private feedback on your agent/workflow config and
+your token cost*, for the expanding population of agentic-coding engineers. We design v1 so
+nothing in the core has to be rebuilt to get there — only the trust profile hardens. The
+hard §2 boundary (shared artifacts are **data, never instructions**) is what makes the public
+version even thinkable.
 
 ---
 
@@ -22,7 +61,7 @@ machine, collaborate **agent-to-agent** across **three pillars**:
    artifact (e.g. a voice pipeline) so a teammate can use it as a starting point.
 
 **Out of scope (v1):** open/cross-org federation, crypto PKI, auto-enforcement, semantic
-clustering, large/binary asset stores (deferred — §12).
+clustering, large/binary asset stores (deferred — §10).
 
 ## 2. North star (governing principle — all four agents converged, agent-b sharpest)
 
@@ -50,6 +89,21 @@ context is genuinely shared, else it stays illustrative.
 ---
 
 ## PILLAR 1 — Patterns (within-developer + across-team)
+
+### 1.0 Operating model: SENSE → TARGET → INVEST
+Telemetry is the **sensor**, not the product. The loop has three deliberately separated stages:
+
+| Stage | Who/what | What it does | Trust |
+|---|---|---|---|
+| **SENSE** | telemetry (auto) | Auto-observes each dev's practices + outcomes (LRs, metrics, decision fields, git). **No judgment** — just signal. | mechanical |
+| **TARGET** | `map_patterns.py` (auto) | Points at where a shared pattern would *pay off*: within-dev inconsistency, team divergence, recurring failure clusters. **Prioritizes; does not decide.** | mechanical |
+| **INVEST** | the team (deliberate) | Humans/agents capture the pattern, **validate it against telemetry**, and adopt it. The expensive, judgment-heavy step is reserved for targets the sensor flagged as worth it. | deliberate |
+
+**Why the split matters:** it keeps the cheap mechanical stages (SENSE, TARGET) honest and
+fully automated, while the costly human attention (INVEST) is spent only where the sensor
+says there's signal. This is the same sensor that `telemetry-validation.md` (LOCKED) certifies
+as a *valid measurement* — Pillar 1 is its first consumer. A target the telemetry can't yet
+sense (e.g. token cost, until that sensor lands) is a known blind spot, not a silent gap.
 
 ### 1.1 The process: discover, don't assume
 The analysis is **bottom-up**: scan each dev's actual projects + telemetry to **discover**
@@ -81,9 +135,22 @@ stack_scope: [python, fastapi]     # discovered stack -> applicability
 instantiation: "class FooError(ModuleError): ..."   # OPTIONAL example — NOT used for matching
 source: observed | declared | observed+declared
 evidence: "LR-001; 12 corrections"
-confidence: 0.9
+confidence: 0.9                    # GATED — see below
 captured_at: '2026-06-05'
 ```
+
+**Confidence-gating (so the map isn't polluted by weak signal):** `confidence` is derived from
+evidence strength (observation count, declared+observed agreement, telemetry corroboration), not
+asserted. Two floors:
+- **`confidence < 0.4` → `low-confidence`**: still captured + visible in a dev's own map, but
+  **excluded from team CONSENSUS/CONFLICT classification** (it can't push the team to adopt or
+  arbitrate). Surfaced as "needs more evidence," never silently dropped.
+- A pattern only contributes to a **CONSENSUS** count when `confidence ≥ 0.4` **and** `source`
+  includes `observed` (a purely-declared claim never alone trips quorum — the declared-vs-observed
+  delta is the tell, §1.2).
+
+The floor is a config knob in `taxonomy/areas.yaml`, tuned as the corpus grows (start
+conservative; a too-low floor manufactures fake consensus — the §7 anti-theater concern).
 
 ### 1.4 The MAP mechanic (the within-dev + team analysis)
 An assembler builds `CELL[area][dev]` and classifies each AREA ROW by grouping on
@@ -115,16 +182,24 @@ Extensible via governance (a new area minted when UNMAPPED patterns recur with a
 concern; an `ALL_CAPS` token in UNMAPPED = "add a key" signal, per #223).
 
 ### 1.6 Adopted-pattern lifecycle (reconciles server-a's PR-gate + agent-b's local-accept)
-1. MAP finds **CONSENSUS** (quorum share `pattern_key` K in area A).
-2. **Distill → adopted pattern** (invariant = the practice; provenance = which devs).
-3. **PUBLISH-to-pool** = a PR to `team-knowledge/patterns/`; the **PR review *is* the
+1. MAP finds **CONSENSUS** (quorum share `pattern_key` K in area A, confidence-gated per §1.3).
+2. **VALIDATE (coherence-vs-correctness gate — explicit, blocking).** Quorum agreement is
+   *coherence*, not *correctness* — 4 devs can share a bad habit. Before distilling, check K
+   against telemetry: do the devs practicing K actually have **better outcomes** in area A
+   (lower failure rate / higher first-pass-correctness) than the divergent ones? If the
+   evidence is absent or **contradicts** the consensus, the row is tagged **`coherent-unproven`**
+   and **does not auto-publish** — it routes to discussion (and, if devs disagree, to the §arbiter)
+   rather than becoming a BKM on popularity alone. Only telemetry-corroborated consensus proceeds.
+3. **Distill → adopted pattern** (invariant = the practice; provenance = which devs; the
+   step-2 validation evidence attached).
+4. **PUBLISH-to-pool** = a PR to `team-knowledge/patterns/`; the **PR review *is* the
    endorsement gate** (same team). *Published ≠ adopted by a dev.*
-4. **PROPOSE** to each dev's agent as **advisory** (inbox; never auto-enforced).
-5. **ENFORCED for a dev** only after **that dev's own telemetry confirms it helps**
+5. **PROPOSE** to each dev's agent as **advisory** (inbox; never auto-enforced).
+6. **ENFORCED for a dev** only after **that dev's own telemetry confirms it helps**
    (advisory-until-locally-confirmed).
-6. **CONFLICT** rows never auto-promote → **arbiter = Jason** (may weigh telemetry).
+7. **CONFLICT** rows never auto-promote → **arbiter = Jason** (may weigh telemetry).
 
-Status: `proposed → published-to-pool → accepted-local → enforced-local → deprecated`.
+Status: `proposed → coherent-unproven → validated → published-to-pool → accepted-local → enforced-local → deprecated`.
 
 ---
 
@@ -144,12 +219,18 @@ split by the publish gate).
 - **Inputs:** config (CLAUDE.md, agents, commands, prompts) **+ behavior/telemetry**.
 - **Benchmarks (all four):** (1) team patterns; (2) your own trend; (3) external
   best-practice (failure guards, routing discipline); (4) **top-performer (anonymized)** —
-  ⚠️ *privacy-gated*: opt-in **anonymized aggregates / published patterns only**, never a
-  named dev or their private data (**agent-b hardens this — the one cross-dev touchpoint**).
+  ⚠️ *privacy-gated* by the §6.1 mechanism (opt-in, aggregate-only, k-anon cohort ≥3,
+  bucketed; never a named dev or their private data — the one cross-dev touchpoint).
 - **Scores — Quality:** guard presence/effectiveness; declared-vs-observed delta; gaps vs
   team patterns; first-pass-correctness by command/workflow; prompt anti-patterns.
 - **Scores — Efficiency:** routing mis-tiers; token/ceremony bloat; rework/bounce rate;
   Codex over/under-trigger; cycle time by task type.
+- **Scores — Tooling cost & utilization** (mirrors `telemetry-validation.md` §1.6 — the
+  public-version cost wedge): **MCP server inventory vs actual use** (servers/tools connected
+  but never invoked = dead config + token-context tax), **per-tool/skill invocation counts**,
+  and **environment-setup overhead** (time/tokens lost to mid-task package installs, cold
+  MCP starts, repeated dependency fetches). Output = "what to prune, pin, or pre-provision."
+  This is the dimension a public agentic-coding engineer most wants honest feedback on.
 - On-demand for MVP (continuous coaching deferred).
 
 ---
@@ -168,13 +249,46 @@ malware/injection surface (agent-b). So:
 
 **Flow (voice-pipeline use case):**
 1. Sharer's agent **packages** the artifact into a shareable repo/template + **sanitizes**
-   it (strips secrets/creds/proprietary glue) — the publish gate.
-2. **Announce on the hub:** "voice-pipeline-v1 — python/pipecat, starting point for realtime
-   voice" + the git ref. Register it in the **component catalog** (`team-knowledge/components/`:
-   what/stack/owner/sanitized?/how-to-get).
-3. Teammate's agent **clones/forks** it as their starting point and **helps adapt** it.
-4. **Reviewed before building on it** — a shared artifact is *untrusted code adopted
-   deliberately*, **never auto-run** (agent-b's boundary).
+   it (strips secrets/creds/proprietary glue).
+2. **VERIFIED-SANITIZATION-BEFORE-ANNOUNCE (blocking gate).** Sanitization is not announced on
+   trust. A **secret-scan + sanitize-check runs and must pass**, and its result is **written to
+   `audit/<dev>.jsonl`** (`{action: publish, component, commit_sha, sanitized: true, scanner,
+   findings: 0}`), **before** any hub announce is permitted. A failed/again scan blocks the
+   announce. *No clean-scan record in the audit shard ⇒ the catalog entry is invalid and importers
+   must refuse it.* (Pairs with the §6 publish boundary.)
+3. **Announce on the hub:** "voice-pipeline-v1 — python/pipecat, starting point for realtime
+   voice" + the git ref **pinned to a commit SHA**. Register it in the **component catalog**
+   (schema below).
+4. **IMPORT via the ComponentReview intake gate (agent-b — the supply-chain boundary).** A shared
+   artifact is **untrusted code adopted deliberately**. The importing agent MUST:
+   - **Quarantine-clone** the **pinned SHA** into an isolated path **outside any agent-trusted
+     directory** (never into `.claude/`, hooks, skills, or a path on the agent's exec/trust path).
+   - Build/inspect a **manifest**: declared entrypoints, dependencies, and any **dangerous files**
+     — install/post-install scripts, network-calling code, `eval`/dynamic-exec, credential/env
+     readers, hook/CI files. Flagged files are surfaced to the human, not run.
+   - **No-auto-run, no-auto-install:** nothing executes and no dependency is installed until the
+     human reviews the manifest and approves. The component enters as an **inbox proposal**, never
+     a live dependency.
+   - Re-verify the importer's copy against the catalog's `commit_sha` (the announce can't point at
+     one tree and ship another).
+5. Teammate's agent then **helps adapt** the reviewed component as their starting point.
+
+**Component catalog schema** (`team-knowledge/components/catalog.yaml`, one entry per component):
+```yaml
+schema_version: 1
+components:
+  - id: voice-pipeline-v1
+    title: "Realtime voice pipeline (pipecat) — starting point"
+    owner_dev: jason                 # attribution (roster.yaml)
+    stack: [python, pipecat, openai-realtime]
+    git_ref: "git@host:team/voice-pipeline.git"
+    commit_sha: "a1b2c3d…"           # PINNED — importers clone THIS, re-verify against it
+    sanitized: true                  # MUST be backed by a clean-scan record in audit/<owner>.jsonl
+    sanitize_audit: "audit/jason.jsonl#<event_id>"   # provenance pointer to the gate-2 record
+    dangerous_files: []              # manifest flags surfaced at publish time (e.g. ["postinstall.sh"])
+    how_to_get: "clone @ commit_sha, then run ComponentReview intake (step 4)"
+    published_at: '2026-06-05'
+```
 
 **Requires:** the team shares a git host → a component = a repo/template the teammate clones
 (same-team makes this trivial). Cross-network fallback = **git bundle** over a transport
@@ -197,21 +311,30 @@ malware/injection surface (agent-b). So:
 
 ```
 team-knowledge/
-  roster.yaml                      # 4-dev allowlist {dev_id, agent_name, machine, team_tag}
+  roster.yaml                      # 4-dev allowlist {dev_id, agent_name, machine, team_tag, benchmark_optin}
   taxonomy/areas.yaml              # controlled area + pattern_key vocab
   patterns/<area>/<dev>.yaml       # each dev's per-area patterns (Pillar 1 input)
   patterns/adopted/BKM-NNN.yaml    # adopted team patterns
   components/catalog.yaml          # index of shareable components (Pillar 3) + git refs
   scripts/map_patterns.py          # assembler -> within-dev + {area x dev} divergence map
-  audit/log.jsonl                  # append-only: publish/import/accept, who/when/sanitization
+  audit/<dev>.jsonl                # PER-DEV append-only shard; union-on-read (NOT one shared file)
 ```
+
+**Audit = per-dev shard (not one `log.jsonl`).** A single shared append-only JSONL in git
+guarantees merge conflicts the moment two devs publish concurrently (same last line, same EOF) —
+the exact failure the telemetry shards already taught us (#220). Each dev appends only to **their
+own** `audit/<dev>.jsonl`; readers take the **union** across shards. Each row carries an
+`event_id` (sha1 over the salient fields, reusing the `aggregate_metrics_to_global` helper) so the
+union dedups deterministically. Records are **data, not instructions** (§2) — an audit row never
+triggers an action on read.
 
 ## 5. Identity = attribution, NOT authentication (server-a)
 
 MVP-minimal: a static `roster.yaml` of 4 allowlisted devs `{dev_id, agent_name, machine,
-team_tag}`. Agents self-declare `dev_id`; hub transport authenticated to membership; unknown
-senders quarantined. **No crypto identity in v1** (4 known teammates) — attribution is
-required (whose pattern/component is whose), authentication is not.
+team_tag, benchmark_optin}`. Agents self-declare `dev_id`; hub transport authenticated to
+membership; unknown senders quarantined. **No crypto identity in v1** (4 known teammates) —
+attribution is required (whose pattern/component is whose), authentication is not.
+(`benchmark_optin` gates the §6.1 anonymized top-performer pool.)
 
 ## 6. Trust & security — smallest safe v1 (agent-b)
 
@@ -223,10 +346,37 @@ shared artifacts are **data, not instructions**.
 
 **v1 controls:** allowlisted roster · object types (**Pattern**, **Component**,
 **Observation**) · **local publish** (sanitized draft + human/policy approval — no
-auto-publish) · **local import inbox** (advisory) · plane-separated hub (signals only) ·
-append-only **audit log** · hygiene (size limits, text-only messages, secret-scanning,
-"team-shared" labels). **The one boundary never crossed:** no shared artifact may directly
-alter local control state — only create a local proposal/inbox item.
+auto-publish) · **verified-sanitization-before-announce** (clean-scan record in `audit/<dev>.jsonl`
+is a precondition for any announce — Pillar 3 gate 2) · **ComponentReview intake** for imports
+(quarantine-clone the pinned SHA, manifest + dangerous-file flagging, no-auto-run/no-auto-install
+— Pillar 3 gate 4) · **local import inbox** (advisory) · plane-separated hub (signals only) ·
+**per-dev append-only audit shards** (`audit/<dev>.jsonl`, union-on-read, `event_id`-deduped) ·
+hygiene (size limits, text-only messages, secret-scanning, "team-shared" labels). **The one
+boundary never crossed:** no shared artifact may directly alter local control state — only create
+a local proposal/inbox item.
+
+### 6.1 Top-performer-anonymized benchmark — privacy mechanism (resolves the v2 open item)
+
+Pillar 2 benchmark (4) lets a dev compare themselves to the team's best **without** exposing any
+individual. The mechanism (opt-in, aggregate-only):
+
+1. **Opt-in.** A dev's metrics enter the benchmark pool only if they opt in (`roster.yaml:
+   benchmark_optin: true`). No opt-in ⇒ neither contributes to nor sees peer comparisons.
+2. **k-anonymity cohort ≥ 3.** A benchmark statistic is computed/returned **only when ≥3 opted-in
+   devs** are in the pool. Below 3, "top performer" would re-identify (with 2, the other dev *is*
+   the benchmark) — so it returns **suppressed**, not a number.
+3. **Aggregate + bucketed only.** What's exposed is a **bucketed distribution** (e.g. the cohort's
+   p75 first-pass-correctness as a coarse band, or "top-quartile token cost is in range X–Y"),
+   **never a raw per-dev value** and **never a name**. The requesting dev sees *where they fall vs
+   the band*, not whose band it is.
+4. **No private data crosses.** Only metrics already eligible for aggregation (the SENSE layer's
+   outcome stats) feed it — never config text, prompts, code, or review findings (those stay
+   §Pillar-2 private). The benchmark reads the **shared aggregate**, not anyone's machine.
+5. **Auditable + revocable.** Opt-in/opt-out is logged; opting out removes a dev from future pools
+   (already-computed bands don't retro-identify because they were k-anon ≥3 bucketed).
+
+This is the **only** cross-dev touchpoint in the otherwise-private Pillar 2, and it is the
+component that makes the **public** deployment (§0.5) tractable — same mechanism, larger cohort.
 
 ## 7. Measurement (REC 0 reuse — laptop-wsl)
 
@@ -254,9 +404,13 @@ full agent-config bootstrap (deferred). A team hub nobody can join is dead on ar
 3. Each agent **auto-observes** + writes `patterns/<area>/<dev>.yaml`. *(all)*
 4. `map_patterns.py` emits the **within-dev + team divergence map** with
    CONSENSUS/DIVERGENCE/CONFLICT/GAP. *(server-a)*
-5. **Pillar 3 minimal:** a `components/catalog.yaml` + the hub announce/clone handshake — so
-   you can share the **voice pipeline** as the first component. *(server-a + agent-b sanitize)*
-6. Private-review command (local audit → top-3) reusing the same captured patterns. *(scratch)*
+5. **Pillar 3 minimal:** `components/catalog.yaml` (schema §Pillar 3) + the hub announce/clone
+   handshake, **with the two gates in the loop from day one** — verified-sanitization-before-
+   announce (gate 2) and the ComponentReview intake (gate 4: quarantine-clone pinned SHA,
+   manifest, no-auto-run). Share the **voice pipeline** as the first component.
+   *(server-a catalog + handshake; agent-b sanitize + intake gate)*
+6. Private-review command (local audit → top-3) reusing the same captured patterns, **including
+   the §Pillar-2 tooling-cost/utilization dimension**. *(scratch)*
 
 **First deliverables:** (a) the pattern-divergence map across the 4 devs, (b) the voice
 pipeline shared + cloned by a teammate. Measure adoption effect via `pattern_applied` (REC 0).
@@ -280,7 +434,26 @@ full agent-config bootstrap · continuous (vs on-demand) private review.
 7. **Installer:** Channel-MCP + hub-connection (minimal connect).
 8. **Three pillars:** Patterns, Private Review, Shareable Components. **Transfer split:**
    hub coordinates, **git transfers** components (voice-pipeline use case).
+9. **Two deployments** (team v1 now, public vNext) sharing one core + the §2 boundary; only
+   the trust profile swaps (§0.5). Public leads with Pillar 2 + token-cost; components stay
+   team-only at public launch.
+10. **Telemetry is the SENSOR** (SENSE→TARGET→INVEST, §1.0), certified by the locked
+    `telemetry-validation.md`. Pillar 1 is its first consumer.
 
-### Open item for the fleet
-- **Top-performer-anonymized benchmark (Pillar 2.4)** — agent-b to define the privacy
-  mechanism (opt-in anonymized aggregates only; never a named dev / private data).
+### Resolved in v3 (was "Open item for the fleet")
+- **Top-performer-anonymized benchmark privacy mechanism** — DEFINED (§6.1): opt-in,
+  aggregate-only, k-anon cohort ≥3, bucketed, never a named dev / private data.
+- **Audit shard conflict** — FIXED: per-dev `audit/<dev>.jsonl`, union-on-read (§4).
+- **Component supply-chain risk** — FIXED: verified-sanitization-before-announce + the
+  ComponentReview intake gate (quarantine-clone pinned SHA, manifest, no-auto-run) (§Pillar 3, §6).
+- **`catalog.yaml` schema** — SPECIFIED (§Pillar 3).
+- **Weak-signal / fake-consensus** — GATED: confidence floor (§1.3) + the explicit
+  coherence-vs-correctness validation step (§1.6).
+
+### Open for fleet lane-verification (v3 review)
+- server-a: does `audit/<dev>.jsonl` union-on-read + `event_id` dedup match the REC 0 aggregate
+  helper it already owns? (reuse, don't rebuild)
+- agent-b: is the ComponentReview intake gate (§Pillar 3 step 4) sufficient as the v1
+  supply-chain boundary, or does it need sandboxed *execution* (not just inspection) before adapt?
+- laptop-wsl: is the §1.3 confidence floor derivation sound, and does the §1.6 validation gate
+  have enough telemetry to ever fire at 4-dev scale (or is it aspirational until the corpus grows)?
