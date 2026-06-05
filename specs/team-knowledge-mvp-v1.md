@@ -28,6 +28,10 @@ laptop-wsl=pattern model). Reframed per Jason: patterns (not scaffold) as the sp
   renamed `not-disconfirmed`; published artifacts carry the unproven label (Codex F8 + laptop-wsl).
 - **§7 anti-gaming** — `pattern_applied` pre-registered before first use, intention-to-treat
   denominators, delayed-defect penalties, companion metrics (Codex F7).
+- **v4 re-review wiring fixes (Codex pass 2):** the `review_token` adapt gate is now required in the
+  §9 build slice from day one (N1); the stale §11 audit-tuple reference replaced with the canonical-
+  hash design (N2); attribution enforcement uses branch-protected CODEOWNER approval + platform-
+  verified merge actor, not the forgeable git author (N3).
 
 **v3 changes (applied fleet-review fixes + Jason reframes):**
 - **Two deployments** named (team v1 / public vNext) with a swappable trust profile (§0.5).
@@ -375,12 +379,19 @@ components:
     published_at: '2026-06-05'
 ```
 
-**Catalog/provenance is owner-PR'd, not self-asserted (Codex F4 + §5/§6).** `owner_dev` and the
+**Catalog/provenance is owner-PR'd, not self-asserted (Codex F4 + N3).** `owner_dev` and the
 `scan_audit` pointer are trust-bearing, but §5 is attribution-not-auth and the repo is shared — so
-the trust comes from **repo enforcement, not the field's say-so**: `audit/<dev>.jsonl` and a dev's
-catalog entries are **CODEOWNERS/path-owned** by that dev; CI validates **commit-author == path-owner
-== `owner_dev`**; an importer **rejects any catalog entry whose `scan_audit` row was not merged
-through the owner's gate**. Signed artifacts are the public-tier hardening (§10).
+the trust comes from **repo enforcement, not the field's say-so.** The git *commit author* is
+user-controlled text and **must not be the trust check** (Codex N3); the non-forgeable enforcement is:
+- `audit/<dev>.jsonl` and a dev's `catalog.yaml` entries are **CODEOWNERS/path-owned** by that dev;
+- the protected branch **requires CODEOWNER approval by the path owner** to merge a change to those
+  paths (branch protection, not an advisory CI lint);
+- CI keys on the **platform-verified PR/merge actor** (the authenticated reviewer/merger identity),
+  **not** the commit `author` field, and confirms it equals `owner_dev`;
+- an importer **rejects any catalog entry whose `scan_audit` row lacks that protected-approval
+  record** (un-gated provenance is not importable).
+
+Signed artifacts (cryptographic, not platform-identity) are the public-tier hardening (§10).
 
 **Requires:** the team shares a git host → a component = a repo/template the teammate clones
 (same-team makes this trivial). Cross-network fallback = **git bundle** over a transport
@@ -451,7 +462,9 @@ team_tag}`. Agents self-declare `dev_id`; hub transport authenticated to members
 senders quarantined. **No crypto identity in v1** (4 known teammates) — attribution is required
 (whose pattern/component is whose), authentication is not. **But attribution alone is forgeable in
 a shared repo**, so trust-bearing writes (`audit/<dev>.jsonl`, a dev's catalog entries) are
-**CODEOWNERS/path-owned** with a CI **commit-author == path-owner == `owner_dev`** check (§6, Codex F4).
+**CODEOWNERS/path-owned** and gated by **branch protection requiring the path owner's CODEOWNER
+approval** + a CI check on the **platform-verified merge actor** (never the forgeable git author) —
+see §6 for the full enforcement (Codex F4/N3).
 
 ## 6. Trust & security — smallest safe v1 (agent-b)
 
@@ -553,10 +566,13 @@ full agent-config bootstrap (deferred). A team hub nobody can join is dead on ar
 4. `map_patterns.py` emits the **within-dev + team divergence map** with
    CONSENSUS/DIVERGENCE/CONFLICT/GAP. *(server-a)*
 5. **Pillar 3 minimal:** `components/catalog.yaml` (schema §Pillar 3) + the hub announce/clone
-   handshake, **with the two gates in the loop from day one** — verified-sanitization-before-
-   announce (gate 2) and the ComponentReview intake (gate 4: quarantine-clone pinned SHA,
-   manifest, no-auto-run). Share the **voice pipeline** as the first component.
-   *(server-a catalog + handshake; agent-b sanitize + intake gate)*
+   handshake, **with all THREE gates in the loop from day one** — (gate 2) verified-sanitization-
+   before-announce, (gate 4) ComponentReview intake (quarantine-clone pinned SHA, manifest +
+   denylist/allowlist), and **(gate 5) the MECHANICAL adapt gate: adapt-plan generation + a local
+   human `review_token` enforced before ANY quarantine-path command/install/test/copy** (read-only
+   until approved). Gate 5 is NOT optional — without it day-one, an implementer rebuilds the exact
+   F2 hole. Share the **voice pipeline** as the first component.
+   *(server-a catalog + handshake; agent-b sanitize + intake + `review_token` gate)*
 6. Private-review command (local audit → top-3) reusing the same captured patterns, **including
    the §Pillar-2 tooling-cost/utilization dimension**. *(scratch)*
 
@@ -605,9 +621,13 @@ execution** (static inspection is the v1 boundary; sandbox = public-tier hardeni
 ### Resolved with Jason (2026-06-05) — fleet to VERIFY, not re-litigate
 The three v3 open questions were decided one-on-one; the fleet's job is lane-verification that the
 resolved position is implementable, not to reopen the choice.
-- **server-a (audit dedup):** RESOLVED — reuse the *mechanism* (parameterized `event_id(fields)`),
-  audit-specific key tuple `dev|ts|action|component|commit_sha` (§4). *Verify the refactor leaves
-  the REC 0 path you own undisturbed and the key tuple has no collision at publish/import/accept.*
+- **server-a (audit dedup):** RESOLVED — reuse the *mechanism* (one shared hashing primitive, two
+  canonicalizers): REC 0 keeps its **field-tuple** hash (golden-hash-test-guarded); audit uses a
+  **full-body canonical hash** (`json.dumps(sort_keys=True…)`) + required-field rejection +
+  microsecond `ts`/per-shard `seq`, window read-filter-only (§4). *Verify the refactor leaves the
+  REC 0 path undisturbed (8/8 golden-hash fixture) and the canonical hash collapses only
+  byte-identical syncs.* (v4 replaced the v3 `dev|ts|action|component|commit_sha` tuple — it dropped
+  the scan result, so a failed→passed scan deduped to one row.)
 - **agent-b (component intake):** RESOLVED — **static inspection is the v1 boundary**; no-auto-run/
   no-auto-install extended through the *adapt* phase; sandboxed execution deferred to the public
   tier (§Pillar 3, §10). *Verify static + no-auto-install actually closes the silent-compromise path
