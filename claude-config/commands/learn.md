@@ -75,20 +75,35 @@ echo "New failures since last learn: $NEW_COUNT (watermark: $LAST_LEARN_AT)"
 #     so the watermark advanced at Step 6.6 precisely covers this snapshot.
 TS=$(date -u +%Y%m%d-%H%M%S)
 UNION_FILE="/tmp/learn-union-${TS}.jsonl"
-# Concatenate all host shard failure files, then DEDUP BY event_id. A failure
-# worked on one machine is committed to that host's shard, which then SYNCS to
-# every other machine's telemetry/ tree — so the same failure appears in
-# multiple host shards. A raw `cat` over-counts those synced records, inflating
-# Step 2's clustering (a record present on 2 boxes looks like "2 occurrences").
-# Dedup by event_id so each distinct failure is counted exactly once. Legacy
-# rows predating event_id fall back to the SAME field set the canonical
-# event_id hashes (issue|date|project|root_cause|details, per
-# aggregate_metrics_to_global._event_id) — including `details`, so two
-# genuinely-different failures sharing the first four fields are NOT over-merged.
+# Concatenate all host shard failure files, then DEDUP by a RECOMPUTED canonical
+# key + apply the 90-day window. A failure worked on one machine syncs to every
+# other machine's telemetry/ tree, so the same failure appears in multiple shards;
+# a raw `cat` over-counts. We dedup by recomputing the canonical content hash
+# (issue|date|project|root_cause|details, matching aggregate_metrics_to_global
+# ._event_id) for EVERY row — we do NOT trust a provided event_id, because (a) a
+# row carrying event_id and the same row lacking it must still collapse, and (b) a
+# forged/stale/corrupt event_id must not merge two genuinely-different failures.
+# Rows older than 90 days are dropped here so the window actually applies downstream.
 python3 - "$UNION_FILE" <<'DEDUP_UNION'
-import glob, json, os, sys
+import datetime, glob, json, os, sys
+# Reuse the AUTHORITATIVE normalization + hashing so legacy compound rows
+# ({"issues":[...],"root_causes":[...]}) are expanded the SAME way the aggregate
+# Stop hook does — otherwise distinct compound rows collide on an empty key and
+# the survivor loses its root_cause. _event_id recomputes from content (we never
+# trust a provided event_id), fixing both double-count (#3) and forged-id-merge (#4).
+sys.path.insert(0, os.path.expanduser("~/agents/claude-config/hooks"))
+from aggregate_metrics_to_global import normalize_record, _event_id
 out = sys.argv[1]
+cutoff = (datetime.datetime.now(datetime.timezone.utc)
+          - datetime.timedelta(days=90)).strftime("%Y-%m-%d")
+
+def canon_key(r):
+    return _event_id(issue=r.get("issue", 0), date=r.get("date", ""),
+                     project=r.get("project", ""), root_cause=r.get("root_cause", ""),
+                     details=r.get("details", ""))
+
 seen, rows = set(), []
+skipped_json = skipped_window = 0
 for f in sorted(glob.glob(os.path.expanduser("~/agents/telemetry/*/failures.jsonl"))):
     try:
         with open(f, encoding="utf-8") as fh:
@@ -99,18 +114,28 @@ for f in sorted(glob.glob(os.path.expanduser("~/agents/telemetry/*/failures.json
                 try:
                     r = json.loads(line)
                 except json.JSONDecodeError:
+                    skipped_json += 1
                     continue
-                key = r.get("event_id") or (
-                    r.get("issue"), r.get("date"), r.get("project"),
-                    r.get("root_cause"), r.get("details", ""))
-                if key in seen:
+                if not isinstance(r, dict):
+                    skipped_json += 1
                     continue
-                seen.add(key)
-                rows.append(line)
+                for rec in normalize_record(r):  # expand legacy compound rows (M5)
+                    ts = (rec.get("recorded_at") or rec.get("date") or "")
+                    if isinstance(ts, str) and ts[:10] and ts[:10] < cutoff:
+                        skipped_window += 1       # outside the 90-day window
+                        continue
+                    key = canon_key(rec)          # recompute; never trust event_id
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    rows.append(json.dumps(rec, separators=(",", ":")))  # write NORMALIZED record
     except OSError:
         pass
 with open(out, "w", encoding="utf-8") as fh:
     fh.write(("\n".join(rows) + "\n") if rows else "")
+if skipped_json or skipped_window:
+    sys.stderr.write("learn: skipped {} malformed + {} out-of-window row(s)\n"
+                     .format(skipped_json, skipped_window))
 DEDUP_UNION
 echo "Union snapshot (event_id-deduped): $UNION_FILE ($(wc -l < "$UNION_FILE") lines)"
 
@@ -159,9 +184,10 @@ No outcome data found. Run some issues through /orchestrate first.
 Read each failure record from `$UNION_FILE` and group by `root_cause`.
 **All jq/parse commands below operate on `$UNION_FILE`** (the snapshot from Step 0),
 never on `.claude/memory/failures.jsonl` or any local path.
-`$UNION_FILE` is **already event_id-deduped** (Step 0d), so occurrence counts
-below reflect distinct failures — a record synced across N host shards counts
-once, not N times.
+`$UNION_FILE` is **already deduped by a recomputed canonical content key and
+filtered to the 90-day window** (Step 0d), so occurrence counts below reflect
+distinct, in-window failures — a record synced across N host shards counts once,
+and a forged/missing `event_id` neither double-counts nor merges distinct failures.
 
 ```bash
 # Cluster by CODED root_cause via the retro-map (READ-SIDE — raw telemetry is
