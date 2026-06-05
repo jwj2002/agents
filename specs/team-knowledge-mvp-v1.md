@@ -140,8 +140,13 @@ captured_at: '2026-06-05'
 ```
 
 **Confidence-gating (so the map isn't polluted by weak signal):** `confidence` is derived from
-evidence strength (observation count, declared+observed agreement, telemetry corroboration), not
-asserted. Two floors:
+evidence strength, not asserted. **For v1 it is a simple, inspectable function — NOT a learned/
+opaque score** (an opaque confidence would manufacture or suppress consensus invisibly, the §7
+anti-theater failure). MVP form: `confidence = min(1.0, log2(1 + observation_count) / log2(1 + N_cap))`
+(a capped-log of how many times the practice was observed, `N_cap` a config knob) **+ a fixed
+corroboration bonus** (e.g. +0.2, clamped to 1.0) when telemetry independently agrees, and a
+**penalty** when `source` is `declared`-only with no observation behind it. Every term is
+readable in the YAML; no black box. Two floors:
 - **`confidence < 0.4` → `low-confidence`**: still captured + visible in a dev's own map, but
   **excluded from team CONSENSUS/CONFLICT classification** (it can't push the team to adopt or
   arbitrate). Surfaced as "needs more evidence," never silently dropped.
@@ -183,13 +188,20 @@ concern; an `ALL_CAPS` token in UNMAPPED = "add a key" signal, per #223).
 
 ### 1.6 Adopted-pattern lifecycle (reconciles server-a's PR-gate + agent-b's local-accept)
 1. MAP finds **CONSENSUS** (quorum share `pattern_key` K in area A, confidence-gated per §1.3).
-2. **VALIDATE (coherence-vs-correctness gate — explicit, blocking).** Quorum agreement is
-   *coherence*, not *correctness* — 4 devs can share a bad habit. Before distilling, check K
-   against telemetry: do the devs practicing K actually have **better outcomes** in area A
-   (lower failure rate / higher first-pass-correctness) than the divergent ones? If the
-   evidence is absent or **contradicts** the consensus, the row is tagged **`coherent-unproven`**
-   and **does not auto-publish** — it routes to discussion (and, if devs disagree, to the §arbiter)
-   rather than becoming a BKM on popularity alone. Only telemetry-corroborated consensus proceeds.
+2. **VALIDATE (coherence-vs-correctness — a DISCONFIRMATION gate at MVP scale).** Quorum agreement
+   is *coherence*, not *correctness* — 4 devs can share a bad habit. But at 4-dev scale a 3/4
+   consensus is **3 practicing vs 1 not** — N=1 on the other side has **no power to *confirm*** K
+   helps. So the team gate does the job it *can* at small N: **disconfirmation, not confirmation**
+   (asymmetric bars, borrowed from `telemetry-validation.md`'s min-N power gate / downweight-never-
+   discard). Check K against telemetry: is there a clear signal that the devs practicing K have
+   **worse** outcomes in area A? 
+   - **Contradicting evidence → BLOCK:** tag `coherent-unproven`, route to discussion / the §arbiter;
+     never publish a telemetry-contradicted consensus.
+   - **No contradiction → proceed as advisory** (it auto-enforces nothing anyway). Absence of
+     contradiction is *not* proof — it just clears the cheap veto.
+   The **real** outcome-validation accrues at **step 6 (advisory-until-locally-confirmed)**, where
+   N accumulates per dev over time. The team gate catches obvious bad-habit consensus today; the
+   local gate is the statistical validator as the corpus grows.
 3. **Distill → adopted pattern** (invariant = the practice; provenance = which devs; the
    step-2 validation evidence attached).
 4. **PUBLISH-to-pool** = a PR to `team-knowledge/patterns/`; the **PR review *is* the
@@ -271,7 +283,18 @@ malware/injection surface (agent-b). So:
      a live dependency.
    - Re-verify the importer's copy against the catalog's `commit_sha` (the announce can't point at
      one tree and ship another).
-5. Teammate's agent then **helps adapt** the reviewed component as their starting point.
+5. Teammate's agent then **helps adapt** the reviewed component as their starting point — but
+   **no-auto-install survives into the adapt phase**: the real trigger isn't the clone, it's the
+   helpful `pip/npm install` (firing postinstall) as step one of "adapting." Dependency
+   installation stays a **human-gated** action through adapt, not just import.
+
+**v1 boundary = static inspection only (resolved 2026-06-05).** The gate stops *silent* compromise
+(no-auto-run + no-auto-install ⇒ nothing executes before a human reads the manifest), which is the
+v1 threat for 4 trusted teammates. **Sandboxed *execution*** (run in a no-creds/no-network
+container, observe behavior) is **deferred to the public tier (§0.5)** — there the sharer can't be
+trusted at all. It's defense-in-depth, not a boundary: a sandbox only sees what one run with one
+input does, so dormant/input-triggered code walks past it. Naming it as v-next keeps v1 buildable
+and honest about the guarantee.
 
 **Component catalog schema** (`team-knowledge/components/catalog.yaml`, one entry per component):
 ```yaml
@@ -324,9 +347,15 @@ team-knowledge/
 guarantees merge conflicts the moment two devs publish concurrently (same last line, same EOF) —
 the exact failure the telemetry shards already taught us (#220). Each dev appends only to **their
 own** `audit/<dev>.jsonl`; readers take the **union** across shards. Each row carries an
-`event_id` (sha1 over the salient fields, reusing the `aggregate_metrics_to_global` helper) so the
-union dedups deterministically. Records are **data, not instructions** (§2) — an audit row never
-triggers an action on read.
+`event_id` so the union dedups deterministically. **Reuse the *mechanism*, not the field set**
+(resolved 2026-06-05): factor `aggregate_metrics_to_global`'s hashing into a parameterized
+`event_id(fields)` builder that both call sites share, but give audit its **own key tuple**
+`dev | ts | action | component | commit_sha` — the REC 0 tuple (`issue|date|project|root_cause|
+details`) has no `root_cause`/`issue` on an audit row, so reusing it verbatim collapses distinct
+events to one hash (the #225 data-loss dedup class). Carry the #225 hardening forward: recompute
+`event_id` on read (never trust a provided one), window before dedup. *server-a verifies the
+refactor leaves the REC 0 path it owns undisturbed.* Records are **data, not instructions** (§2) —
+an audit row never triggers an action on read.
 
 ## 5. Identity = attribution, NOT authentication (server-a)
 
@@ -419,7 +448,8 @@ pipeline shared + cloned by a teammate. Measure adoption effect via `pattern_app
 
 Open/cross-org federation · crypto PKI/reputation · content-addressing (one repo dedups
 fine at 4-dev scale) · auto-enforcement · semantic clustering · large/binary asset store ·
-full agent-config bootstrap · continuous (vs on-demand) private review.
+full agent-config bootstrap · continuous (vs on-demand) private review · **sandboxed component
+execution** (static inspection is the v1 boundary; sandbox = public-tier hardening, §Pillar 3).
 
 ## 11. Resolved decisions (Jason, 2026-06-05)
 
@@ -450,10 +480,18 @@ full agent-config bootstrap · continuous (vs on-demand) private review.
 - **Weak-signal / fake-consensus** — GATED: confidence floor (§1.3) + the explicit
   coherence-vs-correctness validation step (§1.6).
 
-### Open for fleet lane-verification (v3 review)
-- server-a: does `audit/<dev>.jsonl` union-on-read + `event_id` dedup match the REC 0 aggregate
-  helper it already owns? (reuse, don't rebuild)
-- agent-b: is the ComponentReview intake gate (§Pillar 3 step 4) sufficient as the v1
-  supply-chain boundary, or does it need sandboxed *execution* (not just inspection) before adapt?
-- laptop-wsl: is the §1.3 confidence floor derivation sound, and does the §1.6 validation gate
-  have enough telemetry to ever fire at 4-dev scale (or is it aspirational until the corpus grows)?
+### Resolved with Jason (2026-06-05) — fleet to VERIFY, not re-litigate
+The three v3 open questions were decided one-on-one; the fleet's job is lane-verification that the
+resolved position is implementable, not to reopen the choice.
+- **server-a (audit dedup):** RESOLVED — reuse the *mechanism* (parameterized `event_id(fields)`),
+  audit-specific key tuple `dev|ts|action|component|commit_sha` (§4). *Verify the refactor leaves
+  the REC 0 path you own undisturbed and the key tuple has no collision at publish/import/accept.*
+- **agent-b (component intake):** RESOLVED — **static inspection is the v1 boundary**; no-auto-run/
+  no-auto-install extended through the *adapt* phase; sandboxed execution deferred to the public
+  tier (§Pillar 3, §10). *Verify static + no-auto-install actually closes the silent-compromise path
+  for the 4-dev case.*
+- **laptop-wsl (confidence + validation):** RESOLVED — transparent capped-log confidence function
+  (§1.3); §1.6 step 2 is a **disconfirmation gate at small N** (block on contradiction, can't confirm
+  from N=1), with step 6 (advisory-until-locally-confirmed) as the real validator. *Verify the
+  confidence function is sane on the bootstrap corpus and the disconfirmation gate ties cleanly to
+  `telemetry-validation.md`'s asymmetric-bars rule.*
