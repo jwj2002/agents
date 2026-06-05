@@ -41,14 +41,27 @@ migration failure on Supabase.
 For every table / type the spec drops, renames, or consolidates:
 
 ```bash
+# 1a — queries against the target
 grep -rn --include='*.py' --include='*.ts' --include='*.tsx' \
     "FROM <table>\b\|JOIN <table>\b\|UPDATE <table>\b\|INSERT INTO <table>\b\|DELETE FROM <table>\b" \
     src/ > /tmp/sql-audit-<table>.txt
+
+# 1b — application-layer DDL that resurrects the target
+# (added 2026-06-05 after buddy #1766 — migration dropped a column
+# but `_ensure_schema()` in app code recreated it on every pool acquire)
+grep -rn --include='*.py' --include='*.ts' --include='*.go' \
+    -E "CREATE TABLE IF NOT EXISTS <table>|ALTER TABLE <table>.*ADD COLUMN.*<column>|CREATE INDEX IF NOT EXISTS.*ON <table>|DO \$\$.*<table>" \
+    src/ app/ server/ > /tmp/ddl-audit-<table>.txt
 ```
 
 Categorize each hit:
 - **IN-SCOPE** — already covered by some spec phase / PR.
 - **OUT-OF-SCOPE** — needs spec expansion OR a follow-up issue.
+- **DDL RESURRECTION** (from 1b) — **immediately blocking**. The migration's
+  DROP will be silently undone on every server boot. Either delete the
+  in-code DDL block AND coordinate the migration drop, OR keep the
+  application-layer DDL and skip the migration. NEVER both. See companion
+  rule `~/.claude/rules/no-app-layer-ddl.md`.
 
 If OUT-OF-SCOPE > 0, **expand the spec OR file follow-up issues before
 locking**. Don't assume "the audits got it all" — implicit topic
