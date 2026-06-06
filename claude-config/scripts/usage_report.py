@@ -46,21 +46,39 @@ def _safe_json(obj) -> str:
     )
 
 
+def _money(v) -> str:
+    """`$X.XX` for a numeric value, else `n/a` — never crashes on a malformed cost field (Codex #267).
+    Returns PLAIN TEXT (no HTML); `_table` escapes cells, so callers must not pre-escape."""
+    try:
+        return f"${float(v):,.2f}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _pct(v) -> str:
+    """`X.X%` for a numeric fraction, else `n/a` — crash-safe (Codex #267)."""
+    try:
+        return f"{float(v) * 100:.1f}%"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
 def _fmt_cost(grp: dict) -> str:
-    """A billing-aware cost cell. subscription → `$X *` (notional); mixed → broken out; metered → `$X`."""
+    """A billing-aware cost cell (PLAIN TEXT). subscription → `$X *` (notional); mixed → each bucket
+    broken out with the subscription bucket ALSO marked `*`; metered → `$X`. Crash-safe via _money."""
     if not isinstance(grp, dict):
         return "n/a"
     bt = grp.get("billing_type")
     if bt == "mixed":
         parts = ", ".join(
-            f"{html.escape(str(b))}: ${v:,.2f}"
+            f"{b}: {_money(v)}" + (" *" if b == "subscription" else "")
             for b, v in (grp.get("cost_by_billing") or {}).items()
         )
         return f"mixed ({parts})"
     c = grp.get("cost_usd")
-    if c is None:
+    if not isinstance(c, (int, float)):
         return "n/a"
-    return f"${c:,.2f}" + (" *" if bt == "subscription" else "")
+    return _money(c) + (" *" if bt == "subscription" else "")
 
 
 def _period_key(ts, period: str) -> str | None:
@@ -121,11 +139,14 @@ def _right_sizing_callout(agg: dict) -> str:
 
 
 def _table(headers: list, rows: list) -> str:
+    """Render a table. EVERY cell + header is html.escaped here (single, consistent escaping layer,
+    Codex #267) — callers pass RAW values (incl. _fmt_cost plain text); no caller pre-escaping."""
     if not rows:
         return '<p class="nodata">no data</p>'
     th = "".join(f"<th>{html.escape(str(h))}</th>" for h in headers)
     trs = "".join(
-        "<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>" for row in rows
+        "<tr>" + "".join(f"<td>{html.escape(str(c))}</td>" for c in row) + "</tr>"
+        for row in rows
     )
     return f"<table><thead><tr>{th}</tr></thead><tbody>{trs}</tbody></table>"
 
@@ -142,10 +163,8 @@ def render_html(
     totals = agg.get("totals") or {}
     has_subscription = "subscription" in json.dumps(agg)
 
-    # Section 1: cost by project (table) — $/PR trend chart fed by `tr`
-    proj_rows = [
-        [html.escape(str(p)), _fmt_cost(_proj_group(agg, p))] for p in _projects(agg)
-    ]
+    # Section 1: cost by project (table) — $/PR trend chart fed by `tr`. _table escapes cells (raw in).
+    proj_rows = [[p, _fmt_cost(_proj_group(agg, p))] for p in _projects(agg)]
     s1 = (
         f"<h2 id='cost_by_project'>{SECTIONS[0][1]}</h2>"
         + _table(["Project", "Cost"], proj_rows)
@@ -153,7 +172,7 @@ def render_html(
     )
     # Section 2: model mix + right-sizing
     mm_rows = [
-        [html.escape(str(p)), html.escape(str(m)), _fmt_cost(g)]
+        [p, m, _fmt_cost(g)]
         for p, models in (agg.get("model_mix") or {}).items()
         for m, g in models.items()
     ]
@@ -162,15 +181,15 @@ def render_html(
         + _table(["Project", "Model", "Cost"], mm_rows)
         + f"<p class='callout'>{_right_sizing_callout(agg)}</p>"
     )
-    # Section 3: cache efficiency (table + trend chart)
+    # Section 3: cache efficiency (table + trend chart). _pct/_money are crash-safe on malformed data.
     cache_rows = [
         [
-            html.escape(str(p)),
-            f"{(c.get('cache_pct') or 0) * 100:.1f}%",
+            p,
+            _pct(c.get("cache_pct")),
             (
                 "n/a"
                 if c.get("cache_saved_usd") is None
-                else f"${c['cache_saved_usd']:,.2f}"
+                else _money(c.get("cache_saved_usd"))
             ),
         ]
         for p, c in (agg.get("cache_by_project") or {}).items()
@@ -190,11 +209,8 @@ def render_html(
         + "<h3>By work host</h3>"
         + _table(["Host", "Cost"], _dim_rows(records, "work_host"))
     )
-    # Section 5: cost by tier
-    tier_rows = [
-        [html.escape(str(t)), _fmt_cost(g)]
-        for t, g in (agg.get("by_tier") or {}).items()
-    ]
+    # Section 5: cost by tier (raw cells; _table escapes)
+    tier_rows = [[t, _fmt_cost(g)] for t, g in (agg.get("by_tier") or {}).items()]
     s5 = (
         f"<h2 id='by_tier'>{SECTIONS[4][1]}</h2>"
         + _table(["Tier", "Cost"], tier_rows)
@@ -202,11 +218,7 @@ def render_html(
     )
     # Section 6: concurrency
     conc_rows = [
-        [
-            html.escape(str(h)),
-            c.get("peak_concurrent_sessions", 0),
-            (c.get("burn_rate_usd_per_hour")),
-        ]
+        [h, c.get("peak_concurrent_sessions", 0), c.get("burn_rate_usd_per_hour")]
         for h, c in (agg.get("concurrency") or {}).items()
     ]
     s6 = (
@@ -234,9 +246,12 @@ table{{border-collapse:collapse;margin:.5rem 0}}th,td{{border:1px solid #ccc;pad
 .callout{{background:#f5f7ff;padding:.6rem;border-left:3px solid #36c}}canvas{{max-height:320px}}</style>
 </head><body>
 <h1>{html.escape(title)}</h1>
-<p>Total: {_fmt_cost(totals)} &middot; {totals.get("records", 0)} records</p>
+<p>Total: {html.escape(_fmt_cost(totals))} &middot; {html.escape(str(totals.get("records", 0)))} records</p>
 {s1}{s2}{s3}{s4}{s5}{s6}
 {footnote}
+<!-- Chart labels are data-derived strings, but Chart.js renders them on the CANVAS as text (no
+     innerHTML / DOM-injection path; no HTML-tooltip plugin is used), and the embedded blob is
+     breakout-escaped by _safe_json — so a malicious project/host/tier name cannot execute (Codex #267 B2). -->
 <script>const D=JSON.parse({json.dumps(data_blob)});
 function line(id,series){{const el=document.getElementById(id);if(!el)return;
  const labels=[...new Set([].concat(...Object.values(series).map(b=>Object.keys(b))))].sort();
@@ -268,12 +283,14 @@ def _dim_rows(records: list | None, field: str) -> list:
     groups = defaultdict(list)
     for r in records or []:
         groups[r.get(field)].append(r)
+    from importlib import import_module
+
+    agg_mod = import_module("usage_aggregator")
     rows = []
     for key, rs in sorted(groups.items(), key=lambda kv: str(kv[0])):
-        from importlib import import_module
-
-        agg_mod = import_module("usage_aggregator")
-        rows.append([html.escape(str(key)), _fmt_cost(agg_mod._cost_group(rs))])
+        rows.append(
+            [key, _fmt_cost(agg_mod._cost_group(rs))]
+        )  # raw; _table escapes cells
     return rows
 
 

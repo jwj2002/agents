@@ -77,7 +77,33 @@ def test_mixed_billing_labeled():
     ]
     html = R.render_html(A.aggregate(recs))
     assert "mixed (" in html  # broken out, not summed
-    assert "subscription: $3.00" in html and "metered: $2.00" in html
+    # subscription bucket inside mixed is ALSO marked notional (*); metered is plain
+    assert "subscription: $3.00 *" in html and "metered: $2.00" in html
+
+
+# malformed numeric fields render safely, never crash ----------------------------------------------
+def test_malformed_fields_no_crash():
+    # a malicious/malformed cost_usd must not crash AND must not inject HTML
+    agg = {
+        "totals": {
+            "cost_usd": "</script><img onerror=alert(1)>",
+            "billing_type": "metered",
+            "records": 1,
+        },
+        "by_issue": {},
+        "by_tier": {"SIMPLE": {"cost_usd": "n/a", "billing_type": "metered"}},
+        "cost_per_pr": {},
+        "model_mix": {},
+        "cost_by_model_tier": {},
+        "cache_by_project": {
+            "p": {"cache_pct": "bad", "cache_saved_usd": "x", "billing_type": "metered"}
+        },
+        "concurrency": {},
+    }
+    html = R.render_html(agg)  # must not raise
+    assert _parses(html)
+    assert "n/a" in html  # malformed cost rendered as n/a
+    assert "</script><img" not in html  # not injected
 
 
 # zero records → no crash, no-data states ----------------------------------------------------------
