@@ -1,0 +1,35 @@
+# Controlled practice-area + pattern_key vocabulary (§1.5). The comparability layer: patterns only
+# align when keyed to a SHARED taxonomy (#223). Seeded from the team's discovered common stack +
+# the existing knowledge/patterns/ categories (VOCABULARY ONLY — never observation_count/validated,
+# see scripts/patterns.py:bootstrap_vocabulary and the §7 fake-consensus guard).
+#
+# Extend via governance (taxonomy/GOVERNANCE.md): a new area/key is minted only when UNMAPPED
+# patterns recur with a genuinely distinct concern. UNMAPPED is the sentinel for "no key fits" —
+# never force-bucket to the closest match.
+schema_version: 1
+config:
+  n_cap: 50                 # occurrence_confidence saturation point (>=50 keeps 1-obs sub-floor)
+  consensus_floor: 0.4      # occurrence_confidence threshold to be CONSENSUS-eligible
+areas:
+  auth: [JWT_WITH_REFRESH, SESSION_REDIS, OAUTH2_FLOW, AUTH_CONTEXT_DEP, PASSWORD_HASH_BCRYPT]
+  rbac: [ROLE_PERMISSION_DICT, REQUIRE_PERMISSION_DEP, OWNER_SCOPED_DEP]
+  fastapi-layering: [ROUTER_SERVICE_REPO, BASE_MODEL_MIXIN, DEPENDS_INJECTION, ALEMBIC_SETUP]
+  db-orm: [ASYNCPG_POOL, SQLALCHEMY_ASYNC, REPO_PATTERN, NO_RAW_DB_EXECUTE]
+  data-migrations: [ADDITIVE_ONLY, ALEMBIC_AUTOGEN, FK_WITH_INDEX]
+  caching: [REDIS_TTL, CACHE_ASIDE]
+  multi-tenancy: [TENANT_SCOPED_QUERY, ROW_LEVEL_ISOLATION]
+  api-design: [REST_RESOURCE, PYDANTIC_SCHEMA_IO, PAGINATION_CURSOR]
+  typing-schemas: [PYDANTIC_STRICT, OPTIONAL_MATCHES_NULLABLE, SCHEMA_MODEL_PARITY]
+  error-handling: [CUSTOM_EXC_PER_MODULE, NO_BARE_EXCEPT, STRUCTURED_ERROR_RESPONSE]
+  testing: [SQLITE_COMPAT_TESTS, FIXTURE_FACTORIES, ADVERSARIAL_INPUT_TESTS, NO_SECRET_IN_FIXTURES]
+  git-workflow: [BRANCH_FROM_MAIN, CONVENTIONAL_COMMITS, SQUASH_MERGE, REBASE_AUTOSTASH]
+  code-review: [CODEX_ADVERSARIAL_PASS, PER_AC_AUDIT, SCOPE_FREEZE]
+  dependency-mgmt: [PINNED_DEPS, ANNOTATED_DEPS, PRE_PROVISION_BASE_ENV]
+  security: [NO_SECRETS_IN_CODE, SANITIZE_BEFORE_SHARE, QUARANTINE_UNTRUSTED, DOCKER_NONROOT_USER]
+  concurrency: [ASYNC_FIRE_AND_FORGET_GUARD, NO_BLOCKING_IN_ASYNC, CONN_ID_SCOPE]
+  observability-logging: [STRUCTURED_LOGGING, HEARTBEAT_DEADMAN, OTEL_EXPORT]
+  documentation: [DOCSTRING_INVARIANTS, README_BOUNDARY, SPEC_CODE_REALITY_MANIFEST]
+  naming-style: [SNAKE_CASE_PY, CONVENTIONAL_FILE_LAYOUT]
+  ai-agent-workflow: [MAP_PLAN_PATCH_PROVE, RIGHT_SIZE_MODEL_TIER, ESCALATE_ON_RISK, ADVISORY_NOT_ENFORCED]
+  performance: [CACHE_AWARE_COST, AVOID_SEQUENTIAL_IO, MEASURE_BEFORE_OPTIMIZE]
+  refactoring: [EXTRACT_PURE_FUNCTION, DELETE_DEAD_CODE]
