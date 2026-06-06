@@ -91,6 +91,14 @@ def cache_saved_usd(rec: dict) -> float:
     return round(cr * (row["input"] - row["cache_read"]), 10)
 
 
+def _f(v) -> float:
+    """Coerce cost_usd to float; malformed values → 0.0 (never crash aggregation, Codex #266)."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _billing_label(records: list) -> str | None:
     """Single billing_type across records, else `mixed` (never sum disparate billing types into cash)."""
     kinds = {r.get("billing_type") for r in records if r.get("billing_type")}
@@ -100,7 +108,27 @@ def _billing_label(records: list) -> str | None:
 
 
 def _cost(records: list) -> float:
-    return round(sum(float(r.get("cost_usd", 0) or 0) for r in records), 10)
+    return round(sum(_f(r.get("cost_usd", 0)) for r in records), 10)
+
+
+def _cost_by_billing(records: list) -> dict:
+    """Cost split BY billing_type (subscription notional vs metered cash) — the only safe way to total
+    a mixed set. `unknown` bucket for records with no billing_type."""
+    out: dict = defaultdict(float)
+    for r in records:
+        out[r.get("billing_type") or "unknown"] += _f(r.get("cost_usd", 0))
+    return {bt: round(c, 10) for bt, c in out.items()}
+
+
+def _cost_group(records: list) -> dict:
+    """A cost aggregate that NEVER presents a single mixed cash figure (§6): `cost_usd` is the flat
+    total ONLY when billing is single-type, else None; `cost_by_billing` always carries the breakdown."""
+    label = _billing_label(records)
+    return {
+        "cost_usd": _cost(records) if label != "mixed" else None,
+        "billing_type": label,
+        "cost_by_billing": _cost_by_billing(records),
+    }
 
 
 def by_issue(records: list) -> dict:
@@ -109,11 +137,10 @@ def by_issue(records: list) -> dict:
         groups[r.get("task")].append(r)
     return {
         task: {
-            "cost_usd": _cost(rs),
+            **_cost_group(rs),
             "sessions": sorted(
                 {r.get("session_id") for r in rs if r.get("session_id")}
             ),
-            "billing_type": _billing_label(rs),
         }
         for task, rs in groups.items()
     }
@@ -125,10 +152,7 @@ def by_tier(records: list, files_by_task: dict | None = None) -> dict:
     for r in records:
         tier = task_tier(r.get("files_changed", files_by_task.get(r.get("task"))))
         groups[tier].append(r)
-    return {
-        tier: {"cost_usd": _cost(rs), "billing_type": _billing_label(rs)}
-        for tier, rs in groups.items()
-    }
+    return {tier: _cost_group(rs) for tier, rs in groups.items()}
 
 
 def cost_per_pr(records: list, files_by_task: dict) -> dict:
@@ -138,37 +162,48 @@ def cost_per_pr(records: list, files_by_task: dict) -> dict:
     for r in records:
         groups[r.get("task")].append(r)
     for task, rs in groups.items():
-        cost = _cost(rs)
+        grp = _cost_group(rs)
+        cost = grp["cost_usd"]  # None when billing is mixed
         nf = files_by_task.get(task)
+        if cost is None:  # mixed billing → no single cash figure to divide (§6)
+            per_pr = per_file = "mixed"
+        elif nf is None:
+            per_pr = per_file = UNAVAILABLE
+        else:
+            per_pr = cost
+            per_file = round(cost / nf, 10) if nf else UNAVAILABLE
         out[task] = {
-            "cost_usd": cost,
-            "cost_per_pr": cost if nf is not None else UNAVAILABLE,
+            **grp,
+            "cost_per_pr": per_pr,
             "files_changed": nf if nf is not None else UNAVAILABLE,
-            "cost_per_file_changed": round(cost / nf, 10) if nf else UNAVAILABLE,
+            "cost_per_file_changed": per_file,
         }
     return out
 
 
 def model_mix(records: list) -> dict:
-    out: dict = defaultdict(lambda: defaultdict(float))
+    """Per project, cost share by model. Each model leaf carries its own billing_type (a model maps to
+    one provider/account), so no mixed cash sum is hidden (Codex #266)."""
+    groups: dict = defaultdict(lambda: defaultdict(list))
     for r in records:
-        out[r.get("project")][r.get("model")] += float(r.get("cost_usd", 0) or 0)
+        groups[r.get("project")][r.get("model")].append(r)
     return {
-        proj: {m: round(c, 10) for m, c in models.items()}
-        for proj, models in out.items()
+        proj: {m: _cost_group(rs) for m, rs in models.items()}
+        for proj, models in groups.items()
     }
 
 
 def cost_by_model_tier(records: list, files_by_task: dict | None = None) -> dict:
-    """cost-by-(project × tier × model) — the right-sizing breakdown (recommendation is P2 #268)."""
+    """cost-by-(project × tier × model) — the right-sizing breakdown (recommendation is P2 #268).
+    Each leaf is a billing-aware cost group (no silent mixed cash sum)."""
     files_by_task = files_by_task or {}
-    out: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+    groups: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
     for r in records:
         tier = task_tier(r.get("files_changed", files_by_task.get(r.get("task"))))
-        out[r.get("project")][tier][r.get("model")] += float(r.get("cost_usd", 0) or 0)
+        groups[r.get("project")][tier][r.get("model")].append(r)
     return {
-        p: {t: {m: round(c, 10) for m, c in ms.items()} for t, ms in tiers.items()}
-        for p, tiers in out.items()
+        p: {t: {m: _cost_group(rs) for m, rs in ms.items()} for t, ms in tiers.items()}
+        for p, tiers in groups.items()
     }
 
 
@@ -181,7 +216,7 @@ def cache_by_project(records: list) -> dict:
         inp = sum(int(r.get("input", 0) or 0) for r in rs)
         cr = sum(int(r.get("cache_read", 0) or 0) for r in rs)
         res[proj] = {
-            "cost_usd": _cost(rs),
+            **_cost_group(rs),
             "cache_pct": round(cr / (inp + cr), 4) if (inp + cr) else 0.0,
             "cache_saved_usd": round(sum(cache_saved_usd(r) for r in rs), 10),
         }
@@ -217,11 +252,11 @@ def concurrency(records: list) -> dict:
         by_host[r.get("inference_host")][r.get("session_id")].append(r)
     out = {}
     for host, sessions in by_host.items():
-        spans, host_cost = [], 0.0
+        spans = []
         events = []  # (ts, +1/-1) for the sweep
+        host_records = [r for rs in sessions.values() for r in rs]
         for rs in sessions.values():
             ts = [t for t in (_parse_ts(r.get("ts")) for r in rs) if t is not None]
-            host_cost += sum(float(r.get("cost_usd", 0) or 0) for r in rs)
             if ts:
                 s, e = min(ts), max(ts)
                 spans.append((s, e))
@@ -239,17 +274,22 @@ def concurrency(records: list) -> dict:
             peak = max(peak, active)
             prev_t = t
         union_hours = _merge_intervals(spans) / 3600.0
+        grp = _cost_group(host_records)  # cost_usd None when billing is mixed (§6)
+        flat = grp["cost_usd"]
+        if flat is None:
+            burn = "mixed"
+        elif union_hours:
+            burn = round(flat / union_hours, 4)
+        else:
+            burn = UNAVAILABLE
         out[host] = {
             "peak_concurrent_sessions": peak,
-            "cost_usd": round(host_cost, 10),
+            **grp,
             "active_wall_clock_hours": round(union_hours, 4),
-            "burn_rate_usd_per_hour": round(host_cost / union_hours, 4)
-            if union_hours
-            else UNAVAILABLE,
+            "burn_rate_usd_per_hour": burn,
             "host_hours_by_active_count": {
                 str(k): round(v, 4) for k, v in sorted(hours_by_count.items())
             },
-            "billing_type": _billing_label([r for rs in sessions.values() for r in rs]),
         }
     return out
 
@@ -302,11 +342,7 @@ def aggregate(records: list, *, files_by_task: dict | None = None) -> dict:
     files_by_task = files_by_task or {}
     return {
         "schema_version": 1,
-        "totals": {
-            "cost_usd": _cost(records),
-            "records": len(records),
-            "billing_type": _billing_label(records),
-        },
+        "totals": {**_cost_group(records), "records": len(records)},
         "by_issue": by_issue(records),
         "by_tier": by_tier(records, files_by_task),
         "cost_per_pr": cost_per_pr(records, files_by_task),

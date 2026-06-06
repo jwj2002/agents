@@ -100,14 +100,32 @@ def test_peak_concurrent():
     assert A.concurrency(recs)["mac"]["peak_concurrent_sessions"] == 3
 
 
-# mixed billing_type labeled mixed, never summed to one cash figure ---------------------------------
-def test_mixed_billing_label():
+# mixed billing_type labeled mixed, NEVER summed to one cash figure --------------------------------
+def test_mixed_billing_not_summed():
     recs = [
-        _r(billing_type="subscription", session_id="a"),
-        _r(billing_type="metered", session_id="b"),
+        _r(billing_type="subscription", session_id="a", cost_usd=3.0),
+        _r(billing_type="metered", session_id="b", cost_usd=2.0),
     ]
-    assert A.by_issue(recs)["issue:42"]["billing_type"] == "mixed"
-    assert A.aggregate(recs)["totals"]["billing_type"] == "mixed"
+    grp = A.by_issue(recs)["issue:42"]
+    assert grp["billing_type"] == "mixed"
+    assert grp["cost_usd"] is None  # no single mixed cash figure
+    assert grp["cost_by_billing"] == {
+        "subscription": 3.0,
+        "metered": 2.0,
+    }  # broken out instead
+    tot = A.aggregate(recs)["totals"]
+    assert tot["cost_usd"] is None and tot["cost_by_billing"]["metered"] == 2.0
+    # single-billing still gets a flat cost_usd
+    single = A.by_issue([_r(cost_usd=5.0)])["issue:42"]
+    assert single["cost_usd"] == 5.0 and single["billing_type"] == "subscription"
+
+
+# malformed cost_usd does not crash aggregation ----------------------------------------------------
+def test_malformed_cost_no_crash():
+    recs = [_r(cost_usd="n/a", session_id="a"), _r(cost_usd=2.0, session_id="b")]
+    assert (
+        A.by_issue(recs)["issue:42"]["cost_usd"] == 2.0
+    )  # bad value coerced to 0, no crash
 
 
 # git join missing → unavailable, not 0 ------------------------------------------------------------
@@ -128,7 +146,9 @@ def test_model_mix():
         _r(model="gpt-5.5", cost_usd=2.0, provider="codex"),
     ]
     mix = A.model_mix(recs)["agents"]
-    assert mix["claude-opus-4"] == 10.0 and mix["gpt-5.5"] == 2.0
+    assert (
+        mix["claude-opus-4"]["cost_usd"] == 10.0 and mix["gpt-5.5"]["cost_usd"] == 2.0
+    )
 
 
 # full pipeline: two shards → aggregate JSON with all sections --------------------------------------
