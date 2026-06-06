@@ -73,12 +73,16 @@ def _ssh_host(tokens: list) -> str | None:
     i = 0
     while i < len(tokens):
         t = tokens[i]
+        if t.startswith("--"):
+            i += 1  # ssh has no GNU long opts; treat as a lone flag
+            continue
         if t.startswith("-"):
-            if (
-                len(t) == 2 and t[1] in _SSH_ARG_FLAGS
-            ):  # `-p 22` form → skip flag + its arg
+            cluster = t[1:]
+            # In a short-option cluster only the LAST option can take an argument, and only if it has
+            # no INLINE value (so `-p 22` and `-vp 22` skip the next token; `-p22`/`-v` do not). Codex #262.
+            if cluster and cluster[-1] in _SSH_ARG_FLAGS:
                 i += 2
-            else:  # `-v`, `-pVALUE`, `--opt` → skip just the flag
+            else:
                 i += 1
             continue
         return t.split("@")[-1]

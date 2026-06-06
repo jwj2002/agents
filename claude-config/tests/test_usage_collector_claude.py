@@ -203,6 +203,11 @@ def test_ssh_host_parsing_skips_flag_args():
     assert U.mine_command("ssh -p 22 jns 'cd ~/x'")["work_host"] == "jns"  # not "22"
     assert U.mine_command("ssh -i ~/.ssh/key deploy@server")["work_host"] == "server"
     assert U.mine_command("ssh -v jns")["work_host"] == "jns"
+    # combined short flags where the last takes an arg (Codex #262 re-review)
+    assert U.mine_command("ssh -vp 22 jns")["work_host"] == "jns"  # not "22"
+    assert (
+        U.mine_command("ssh -p22 jns")["work_host"] == "jns"
+    )  # inline value, no next-token skip
 
 
 # Codex #262: gitBranch is ground-truth per message → natural subsequent-message boundary ------------
