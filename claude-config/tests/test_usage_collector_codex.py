@@ -254,6 +254,40 @@ def test_idempotent_collect(tmp_path):
     assert len(shard.read_text().strip().splitlines()) == 2
 
 
+# Codex #263 hardening: malformed payloads don't crash; missing session_id doesn't collide ----------
+def test_malformed_payloads_robust():
+    # non-dict info, non-numeric token values, missing session id → no crash
+    entries = [
+        _meta(sid=None),
+        {
+            "timestamp": "t1",
+            "payload": {"type": "token_count", "info": "bad-not-a-dict"},
+        },
+        {
+            "timestamp": "t2",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "last_token_usage": {
+                        "input_tokens": "oops",
+                        "output_tokens": [1, 2],
+                    }
+                },
+            },
+        },
+        _tc({"input_tokens": 10, "output_tokens": 1}, ts="t3"),
+        _tc({"input_tokens": 20, "output_tokens": 2}, ts="t4"),
+    ]
+    recs = X.extract_records(entries, inference_host=HOST)
+    # the non-dict info is skipped; the non-numeric one coerces to 0; the two valid ones emit
+    assert len(recs) == 3
+    bad = next(r for r in recs if r["ts"] == "t2")
+    assert bad["input"] == 0 and bad["output"] == 0  # coerced, not crashed
+    # missing session_id → distinct dedup_keys (no collision/data-loss)
+    keys = [r["dedup_key"] for r in recs]
+    assert len(set(keys)) == len(keys)
+
+
 # schema fields present ----------------------------------------------------------------------------
 def test_record_schema():
     rec = _extract([_meta(), _tc({"input_tokens": 10, "output_tokens": 1})])[0]

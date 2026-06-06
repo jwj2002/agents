@@ -31,14 +31,21 @@ import usage_collector_claude as UC  # noqa: E402  (shared activity-miner: mine_
 PROVIDER = "codex"
 
 
+def _int(v) -> int:
+    """Coerce a token field to int; non-numeric/malformed values → 0 (never crash collection)."""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _norm_tokens(last: dict) -> dict:
     """Map a Codex `last_token_usage` to the normalized schema. input_tokens INCLUDES cached, so fresh
-    input = input − cached; reasoning tokens bill as output; OpenAI has no separate cache-write."""
-    inp = int(last.get("input_tokens", 0) or 0)
-    cached = int(last.get("cached_input_tokens", 0) or 0)
-    out = int(last.get("output_tokens", 0) or 0) + int(
-        last.get("reasoning_output_tokens", 0) or 0
-    )
+    input = input − cached; reasoning tokens bill as output; OpenAI has no separate cache-write.
+    Malformed/non-numeric token values are coerced to 0 (Codex #263)."""
+    inp = _int(last.get("input_tokens"))
+    cached = _int(last.get("cached_input_tokens"))
+    out = _int(last.get("output_tokens")) + _int(last.get("reasoning_output_tokens"))
     return {
         "input": max(0, inp - cached),
         "output": out,
@@ -153,15 +160,25 @@ def extract_records(
     acct = account_info or {"account": None, "email": None, "billing_type": None}
     records = []
     idx = 0
+    sid = ctx["session_id"]
     for entry in entries:
         p = _payload(entry)
         if p.get("type") != "token_count":
             continue
-        last = (p.get("info") or {}).get("last_token_usage") or {}
-        if not last:
-            continue
+        info = p.get("info")
+        last = info.get("last_token_usage") if isinstance(info, dict) else None
+        if not isinstance(last, dict) or not last:
+            continue  # malformed/empty token_count → skip, never crash (Codex #263)
         tok = _norm_tokens(last)
         cost_rec = {**tok, "model": ctx["model"]}
+        ts = entry.get("timestamp")
+        # dedup_key must be unique even when session_id is missing (else codex:None:idx collides
+        # across files → data loss, Codex #263) — fall back to ts + content.
+        dedup = (
+            f"codex:{sid}:{idx}"
+            if sid
+            else f"codex:nosess:{ts}:{idx}:{tok['input']}:{tok['output']}"
+        )
         records.append(
             {
                 "provider": PROVIDER,
@@ -174,10 +191,10 @@ def extract_records(
                 "task": ctx["task"],
                 **tok,
                 "cost_usd": C.session_cost(cost_rec, strict=strict),
-                "ts": entry.get("timestamp"),
-                "session_id": ctx["session_id"],
+                "ts": ts,
+                "session_id": sid,
                 "email": acct.get("email"),
-                "dedup_key": f"codex:{ctx['session_id']}:{idx}",
+                "dedup_key": dedup,
             }
         )
         idx += 1
