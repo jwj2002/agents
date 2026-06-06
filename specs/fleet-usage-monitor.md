@@ -81,6 +81,13 @@ project + work_host with NO manual tagging and NO new hook:
 - **Codex:** mine the same way from `~/.codex/sessions` payloads (`cwd`, function_call git/ssh commands),
   or tag at the `codex exec` wrapper (we control it).
 - `task_tier` (TRIVIAL/SIMPLE/COMPLEX) derived from `files_changed` bands (§5) or the issue label.
+### 4.4 Parallel sessions on one host (the common case — verified 2026-06-06)
+The user runs 3-4 concurrent Claude sessions per host (measured: 12/12 recent sessions overlapped,
+`buddy`+`scratch` at once). This is handled with NO special capture because **the session is the atomic
+unit**: each concurrent session is a separate transcript + `sessionId`, so (a) tokens sum without
+double-counting, and (b) activity-mining (§4.3) is per-transcript → zero cross-session attribution
+bleed. `account`/`inference_host` roll the parallel sessions up; `task`/`project`/`session` separate
+them. The ONLY consequence is for TIME/RATE metrics (§5): parallel ≠ serial in wall-clock.
 
 ## §5 Normalization — the actual point (raw tokens-by-project is misleading)
 A bigger project legitimately costs more, so efficiency is **cost per unit of work**:
@@ -90,6 +97,11 @@ A bigger project legitimately costs more, so efficiency is **cost per unit of wo
 - **model mix per project** + the **right-sizing opportunity**: $ that would be saved if mis-tiered
   tasks moved to a cheaper model. The right-sizing recommendation needs cost-by-(model×tier) AND a
   quality proxy (rework rate — Codex rounds / follow-up fixes); cheapest-always is wrong without it.
+- **Concurrency / utilization** (because 3-4 parallel sessions are normal, §4.4): peak concurrent
+  sessions per host, host-hours bucketed by active-session-count, and **combined host burn-rate**
+  ($/wall-clock-hour). NOTE: cost-by-task/project is concurrency-SAFE, but any **time/rate** metric
+  must compute over the union of overlapping session spans — never sum wall-clock across parallel
+  sessions (4 parallel ≠ 4× serial).
 
 ## §6 Pricing
 Extend `claude-config/scripts/otel_sink.py:PRICES` (Claude-only today) with OpenAI/Codex model rates
@@ -103,8 +115,9 @@ server) with:
 - cost by project, **normalized $/PR trend** over time;
 - model mix per project + right-sizing opportunities;
 - **cache efficiency** trend;
-- **by-account** and **by-computer** breakdowns;
-- cost by **task-tier** (small vs large patches).
+- **by-account** and **by-computer** (inference + work host) breakdowns;
+- cost by **task-tier** (small vs large patches);
+- **concurrency/utilization** (§5): peak parallel sessions + host burn-rate over time.
 
 The **data layer (shards) is identical** for later view tiers, so the view is swappable:
 - **Tier B (later):** local read-only **FastAPI** dashboard with live filters (fits the Vite/FastAPI
