@@ -124,17 +124,21 @@ def classify_unit(
             "label": LABEL_CORRECTION,
             "correction_by": tracer_result.get("by"),
         }
-    # 2-6. no correction → require complete exposure AND adequate tracer coverage
+    # 2-6. A positive requires an EXPLICIT confirmed no-defect tracer result — "not observed_defect"
+    # is NOT enough (Codex): a missing/unknown/`indeterminate_coverage` label means the tracer could
+    # not confirm, which is `unverified`, never good (§0.6). Then full exposure AND adequate coverage.
+    no_correction_confirmed = (tracer_result or {}).get("label") == DT.LABEL_NO_DEFECT
     miss = missing_exposure(exposure)
     coverage_ok = coverage is not None and coverage >= recall_threshold
     exposure_ok = not miss
-    if exposure_ok and coverage_ok:
+    if no_correction_confirmed and exposure_ok and coverage_ok:
         label = LABEL_GOOD
     else:
         label = LABEL_UNVERIFIED
     return {
         **base,
         "label": label,
+        "no_correction_confirmed": no_correction_confirmed,
         "exposure_evidence": {
             k: bool((exposure or {}).get(k)) for k in REQUIRED_EXPOSURE
         },
@@ -146,8 +150,16 @@ def classify_unit(
 def auto_observe_event(classification: dict) -> dict | None:
     """The team-knowledge auto-observe hookpoint (tk-mvp-v1 §1.2). Emits a positive-example event ONLY
     for a CONFIRMED `no_observed_defect` — `unverified` / `pending` / `correction_detected` are NOT
-    auto-observable (the cross-spec gate). Returns None for anything but the confirmed positive."""
+    auto-observable (the cross-spec gate). Defense-in-depth (Codex): the label alone is not trusted —
+    the classification must ALSO show a confirmed no-correction tracer result, complete exposure, and
+    adequate coverage, so an externally-constructed/forged label cannot enter the pipeline."""
     if classification.get("label") != LABEL_GOOD:
+        return None
+    if (
+        classification.get("no_correction_confirmed") is not True
+        or classification.get("coverage_ok") is not True
+        or classification.get("missing_exposure")
+    ):
         return None
     return {
         "event": "positive_example",

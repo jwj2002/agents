@@ -249,3 +249,36 @@ def test_auto_observe_event_only_for_confirmed_positive():
         )
         is None
     )
+
+
+# Strictness (Codex review): a positive requires an EXPLICIT confirmed no-defect tracer label ---------
+def test_positive_requires_explicit_no_defect_tracer_label():
+    # missing tracer label + externally supplied high coverage + full exposure → NOT good
+    res = _classify(tracer_result={}, tracer_coverage_pct=0.9)
+    assert res["label"] == S.LABEL_UNVERIFIED
+    assert res["no_correction_confirmed"] is False
+    # an indeterminate-coverage tracer label is also not a confirmation
+    indet = {"label": DT.LABEL_INDETERMINATE, "coverage": 0.9}
+    assert (
+        _classify(tracer_result=indet, tracer_coverage_pct=0.9)["label"]
+        == S.LABEL_UNVERIFIED
+    )
+    # an unknown label likewise
+    assert _classify(tracer_result={"label": "weird"}, tracer_coverage_pct=0.9)[
+        "label"
+    ] == (S.LABEL_UNVERIFIED)
+
+
+# Defense-in-depth (Codex review): auto-observe rejects a forged label lacking confirmation evidence --
+def test_auto_observe_rejects_forged_label():
+    forged = {
+        "unit_id": "x",
+        "label": S.LABEL_GOOD,  # claims good...
+        "coverage_ok": False,  # ...but evidence absent
+        "no_correction_confirmed": False,
+        "missing_exposure": ["deployed"],
+        "window_days": 30,
+    }
+    assert S.auto_observe_event(forged) is None
+    # a label claiming good but with no confirmation fields at all is also rejected
+    assert S.auto_observe_event({"label": S.LABEL_GOOD}) is None
