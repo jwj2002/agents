@@ -14,6 +14,7 @@ Always exits 0 (fail-open). Stdlib-only.
 
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -90,6 +91,10 @@ _SPEC_KEYWORDS = {
     "brainstorm", "strategy", "evaluate", "assessment",
 }
 
+# Issue-reference pattern (#NNN). Refs are extracted at parse time so the raw
+# prompt/url text is never retained (secret-safety).
+_ISSUE_REF_RE = re.compile(r"#(\d+)")
+
 
 # ---------------------------------------------------------------------------
 # Transcript parsing
@@ -102,24 +107,26 @@ def _parse_transcript(transcript_path: str) -> dict:
     Returns a dict with keys:
       files_touched: list of file paths written/edited
       pr_links: list of PR URL strings
-      issue_refs: list of issue numbers (int)
-      bash_patterns: list of Bash command strings seen
+      issue_refs: list of issue numbers (int) — derived from prompt/urls at parse time
       has_code_edits: bool — Write/Edit to a source-code file
       has_pr_link: bool
       has_test_run: bool
       has_commit: bool
-      first_user_text: str — text of first user turn (empty if none)
+      has_spec_keywords: bool — deliberative-keyword signal from the first prompt
+
+    Raw Bash commands and raw prompt text are NEVER retained (they can carry
+    inline secrets); only the derived booleans/refs above are kept.
     """
     evidence: dict = {
         "files_touched": [],
         "pr_links": [],
         "issue_refs": [],
-        "bash_patterns": [],
         "has_code_edits": False,
         "has_pr_link": False,
         "has_test_run": False,
         "has_commit": False,
-        "first_user_text": "",
+        "has_spec_keywords": False,
+        "_first_user_seen": False,
     }
 
     try:
@@ -146,16 +153,26 @@ def _parse_transcript(transcript_path: str) -> dict:
                         evidence["has_pr_link"] = True
                     continue
 
-                # First user message text (for deliberative signal)
-                if entry_type == "user" and not evidence["first_user_text"]:
+                # First user message: derive the deliberative signals (issue refs,
+                # spec keywords) INLINE and discard the raw text — the prompt may
+                # contain secrets and must never be retained or persisted.
+                if entry_type == "user" and not evidence["_first_user_seen"]:
                     content = entry.get("message", {}).get("content", "")
+                    text = ""
                     if isinstance(content, str):
-                        evidence["first_user_text"] = content[:500]
+                        text = content
                     elif isinstance(content, list):
                         for block in content:
                             if isinstance(block, dict) and block.get("type") == "text":
-                                evidence["first_user_text"] = block.get("text", "")[:500]
+                                text = block.get("text", "")
                                 break
+                    if text:
+                        evidence["_first_user_seen"] = True
+                        for m in _ISSUE_REF_RE.finditer(text):
+                            evidence["issue_refs"].append(int(m.group(1)))
+                        if _has_spec_keywords(text):
+                            evidence["has_spec_keywords"] = True
+                        del text  # do not retain raw prompt text
 
                 # Assistant messages — tool_use items
                 if entry_type == "assistant":
@@ -179,9 +196,10 @@ def _parse_transcript(transcript_path: str) -> dict:
                                     evidence["has_code_edits"] = True
 
                         elif tool_name == "Bash":
+                            # Derive booleans only — NEVER retain the raw command
+                            # (it can carry inline secrets, e.g. export API_KEY=...).
                             cmd = tool_input.get("command", "")
                             if cmd:
-                                evidence["bash_patterns"].append(cmd[:300])
                                 if "git commit" in cmd or "git push" in cmd:
                                     evidence["has_commit"] = True
                                 if "pytest" in cmd or " test" in cmd.lower():
@@ -194,26 +212,20 @@ def _parse_transcript(transcript_path: str) -> dict:
         log(f"_parse_transcript: unexpected error: {exc}")
         evidence["_parse_error"] = str(exc)
 
-    # Extract issue refs from pr_links and first_user_text
+    # Finalize issue refs (pr_links + the refs collected inline from the prompt)
     _extract_issue_refs(evidence)
 
     return evidence
 
 
 def _extract_issue_refs(evidence: dict) -> None:
-    """Populate evidence['issue_refs'] from pr_links and first_user_text."""
-    import re
-    refs: set = set()
-    pattern = re.compile(r"#(\d+)")
-
+    """Finalize evidence['issue_refs'] = sorted unique refs from pr_links plus
+    any refs already collected inline from the user prompt. Raw prompt text is
+    never retained (secret-safety), so refs are derived at parse time."""
+    refs: set = set(evidence.get("issue_refs", []))
     for url in evidence.get("pr_links", []):
-        for m in pattern.finditer(url):
+        for m in _ISSUE_REF_RE.finditer(url):
             refs.add(int(m.group(1)))
-
-    text = evidence.get("first_user_text", "")
-    for m in pattern.finditer(text):
-        refs.add(int(m.group(1)))
-
     evidence["issue_refs"] = sorted(refs)
 
 
@@ -241,11 +253,11 @@ def _classify_work_type(evidence: dict) -> tuple[str, list]:
     has_test_run = evidence.get("has_test_run", False)
     has_commit = evidence.get("has_commit", False)
     issue_refs = evidence.get("issue_refs", [])
-    first_user_text = evidence.get("first_user_text", "")
+    has_spec_keywords = evidence.get("has_spec_keywords", False)
 
     if has_code_edits or has_pr_link or has_commit or has_test_run:
         work_type = "implementation"
-    elif issue_refs or _has_spec_keywords(first_user_text):
+    elif issue_refs or has_spec_keywords:
         work_type = "deliberative"
     else:
         work_type = "ops"
@@ -454,12 +466,12 @@ def main() -> int:
                 "files_touched": [],
                 "pr_links": [],
                 "issue_refs": [],
-                "bash_patterns": [],
                 "has_code_edits": False,
                 "has_pr_link": False,
                 "has_test_run": False,
                 "has_commit": False,
-                "first_user_text": "",
+                "has_spec_keywords": False,
+                "_first_user_seen": False,
             }
             flags_extra.append("transcript_unavailable")
 
@@ -502,10 +514,10 @@ def main() -> int:
                 "files_touched": evidence.get("files_touched", []),
                 "pr_links": evidence.get("pr_links", []),
                 "issue_refs": evidence.get("issue_refs", []),
-                "bash_patterns": evidence.get("bash_patterns", []),
                 "has_code_edits": evidence.get("has_code_edits", False),
                 "has_pr_link": evidence.get("has_pr_link", False),
                 "has_test_run": evidence.get("has_test_run", False),
+                "has_commit": evidence.get("has_commit", False),
             },
             "boundary": boundary,
         }

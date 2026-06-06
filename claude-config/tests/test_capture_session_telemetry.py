@@ -27,6 +27,7 @@ import pytest
 
 from capture_session_telemetry import (  # type: ignore[import-not-found]
     _classify_work_type,
+    _has_spec_keywords,
     _load_prior_session,
     _parse_transcript,
     _write_heartbeat,
@@ -116,17 +117,20 @@ def _evidence(
     first_user_text: str = "",
     files_touched: list | None = None,
 ) -> dict:
-    """Build a minimal artifact evidence dict for classification tests."""
+    """Build a minimal artifact evidence dict for classification tests.
+
+    `first_user_text` is a test-convenience input: the deliberative signals
+    (spec keywords) are DERIVED from it exactly as the real parser does, and the
+    raw text is NOT stored on the evidence dict (the hook never retains it)."""
     return {
         "has_code_edits": has_code_edits,
         "has_pr_link": has_pr_link,
         "has_commit": has_commit,
         "has_test_run": has_test_run,
         "issue_refs": issue_refs or [],
-        "first_user_text": first_user_text,
+        "has_spec_keywords": _has_spec_keywords(first_user_text),
         "files_touched": files_touched or [],
         "pr_links": [],
-        "bash_patterns": [],
     }
 
 
@@ -299,10 +303,10 @@ def test_boundary_not_overwritten_by_reclassification(tmp_path: Path) -> None:
             "files_touched": ["foo.py"],
             "pr_links": [],
             "issue_refs": [],
-            "bash_patterns": [],
             "has_code_edits": True,
             "has_pr_link": False,
             "has_test_run": False,
+            "has_commit": False,
         },
         "boundary": {
             "frozen_at": "first_impl_artifact",
@@ -480,3 +484,60 @@ def test_zero_artifact_session_produces_ops_and_heartbeat(tmp_path: Path) -> Non
     hb = json.loads(heartbeat_path.read_text(encoding="utf-8"))
     assert hb["recorded_at"], "recorded_at is null/empty in heartbeat"
     assert hb["session_id"] == session_id
+
+
+# ---------------------------------------------------------------------------
+# T8 (security): raw commands + user-prompt text never reach the record
+# ---------------------------------------------------------------------------
+
+
+def test_no_raw_command_or_prompt_secret_in_record(tmp_path: Path) -> None:
+    """SECURITY: raw Bash commands and user-prompt text can carry inline secrets
+    (export API_KEY=..., bearer tokens). The persisted record must contain only
+    DERIVED booleans/refs — never the raw command or prompt string."""
+    secret_cmd = "export API_KEY=sk-SECRET123 && git commit -m wip"
+    secret_prompt = "deploy with token sk-PROMPTSECRET456 please, see issue #229"
+    transcript = _make_transcript(
+        tmp_path,
+        [
+            _user_entry(secret_prompt),
+            _write_entry("Bash", cmd=secret_cmd),
+        ],
+    )
+
+    session_id = "secret-session-001"
+    hook_payload = json.dumps({
+        "session_id": session_id,
+        "transcript_path": str(transcript),
+    })
+    host = "test-host-secret"
+    agents_root = tmp_path / "agents"
+    sessions_path = agents_root / "telemetry" / host / "sessions.jsonl"
+
+    fake_stdin = io.StringIO(hook_payload)
+    with (
+        mock.patch("sys.stdin", fake_stdin),
+        mock.patch("capture_session_telemetry.Path.home", return_value=tmp_path),
+        mock.patch("capture_session_telemetry._get_host_name", return_value=host),
+        mock.patch("capture_session_telemetry._get_task_attribution", return_value={
+            "issue": 229, "branch": None, "phase": None, "source": "git_branch",
+        }),
+    ):
+        exit_code = main()
+
+    assert exit_code == 0
+    assert sessions_path.exists()
+    raw = sessions_path.read_text(encoding="utf-8")
+
+    # No secret, no raw command text, no raw prompt text anywhere in the record.
+    assert "sk-SECRET123" not in raw, "raw command secret leaked into the record"
+    assert "sk-PROMPTSECRET456" not in raw, "user-prompt secret leaked into the record"
+    assert "export API_KEY" not in raw, "raw Bash command text leaked into the record"
+    assert "deploy with token" not in raw, "raw user-prompt text leaked into the record"
+
+    # But the DERIVED, non-sensitive signals ARE preserved.
+    record = _read_jsonl(sessions_path)[-1]
+    ae = record["artifact_evidence"]
+    assert ae["has_commit"] is True, "commit signal lost"
+    assert "bash_patterns" not in ae, "bash_patterns field must be gone (raw-command leak)"
+    assert 229 in ae["issue_refs"], "issue ref should be derived from the prompt"
