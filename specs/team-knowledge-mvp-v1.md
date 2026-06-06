@@ -19,8 +19,9 @@ laptop-wsl=pattern model). Reframed per Jason: patterns (not scaffold) as the sp
   required-field rejection, microsecond ts + per-shard seq, **window is read-filter-only** (not a
   dedup-drop — completeness is an audit trail's point), golden-hash regression test guards the
   REC 0 refactor (Codex F3 + server-a).
-- **Forgeable-attribution fix** (§5, §6) — CODEOWNERS/path-ownership + CI author==owner check;
-  `sanitized` renamed `secrets_scan_clean` ("scan passed" ≠ "safe to run") (Codex F4 + agent-b).
+- **Forgeable-attribution fix** (§5, §6) — branch-protected CODEOWNER approval + CI on the
+  platform-verified merge actor (NOT the forgeable git author); `sanitized` renamed
+  `secrets_scan_clean` ("scan passed" ≠ "safe to run") (Codex F4 + agent-b).
 - **Confidence fix** (§1.3) — separate occurrence vs efficacy; low-confidence *contradictory*
   signals stay visible in CONFLICT/GAP; bootstrap seeds the taxonomy only; `N_cap≥50` (Codex F6 +
   laptop-wsl).
@@ -586,7 +587,8 @@ fine at 4-dev scale) · auto-enforcement · semantic clustering · large/binary 
 full agent-config bootstrap · continuous (vs on-demand) private review · **sandboxed component
 execution** (static inspection is the v1 boundary; sandbox = public-tier hardening, §Pillar 3) ·
 **top-performer-anonymized benchmark** (needs k≥5; un-private at 4 devs — public-tier only, §6.2) ·
-**signed artifacts** (v1 uses CODEOWNERS/path-ownership + CI author checks; signatures = public-tier, §6).
+**signed artifacts** (v1 uses CODEOWNERS/path-ownership + branch-protected CODEOWNER approval +
+platform-verified merge actor; cryptographic signatures = public-tier, §6).
 
 ## 11. Resolved decisions (Jason, 2026-06-05)
 
@@ -648,7 +650,8 @@ lanes corroborated, and two caught slips in our *own* v3 resolutions. All folded
 - **F5 (blocking) k-anon un-private at 4 devs** → benchmark **deferred to public tier** (§6.2, §10) [Jason].
 - **F3 audit collision** → full-body canonical hash + required-field rejection + microsecond ts/seq;
   **window = read-filter-only** (server-a caught our "window-before-dedup" slip); golden-hash test.
-- **F4 forgeable attribution** → CODEOWNERS/path-ownership + CI author==owner; `sanitized`→`secrets_scan_clean`.
+- **F4 forgeable attribution** → branch-protected CODEOWNER approval + CI on platform-verified merge
+  actor (not git author) + importer rejects un-gated provenance; `sanitized`→`secrets_scan_clean`.
 - **F6 confidence promotes frequent-not-correct** → split occurrence vs efficacy; low-conf
   *contradictory* stays visible in CONFLICT/GAP; bootstrap=taxonomy-only (laptop-wsl field-evidence catch).
 - **F7 transfer-with-effect gameable** → §7 pre-registration + intention-to-treat + delayed-defect
