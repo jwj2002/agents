@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# earshot — transcribe + diarize any recording on the jns GPU server.
+#   earshot <file> [opts]          sync: upload, run, write <name>.transcript.md/.json to cwd
+#   earshot --async <file> [opts]  submit a background job, print its id, return immediately
+#   earshot --collect <id> [dir]   fetch a finished async job's results (default: cwd)
+# Extra opts pass through to the engine, e.g.:  --num-speakers 2  --model large-v3-turbo
+set -euo pipefail
+
+REMOTE_PROJ='~/projects/earshot'
+
+usage(){ sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'; }
+
+pick_host(){
+  local h
+  for h in jns jns-server; do
+    ssh -o BatchMode=yes -o ConnectTimeout=5 "$h" true 2>/dev/null && { printf '%s' "$h"; return 0; }
+  done
+  return 1
+}
+
+MODE=sync
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+  --async)   MODE=async;   shift ;;
+  --collect) MODE=collect; shift ;;
+esac
+[ $# -ge 1 ] || { usage; exit 1; }
+
+HOST="$(pick_host)" || { echo "earshot: cannot reach jns or jns-server over ssh" >&2; exit 1; }
+
+# ---- collect a finished async job ----
+if [ "$MODE" = collect ]; then
+  ID="$1"; DEST="${2:-$PWD}"
+  st="$(ssh "$HOST" "cat ~/earshot-jobs/$ID/status 2>/dev/null || echo missing")"
+  case "$st" in
+    done)
+      ssh "$HOST" "cd ~/earshot-jobs/$ID && tar cf - *.transcript.* 2>/dev/null" | tar xf - -C "$DEST"
+      echo "earshot: collected job $ID -> $DEST" >&2
+      ls "$DEST"/*.transcript.md 2>/dev/null | tail -1
+      ;;
+    running) echo "earshot: job $ID still running" >&2; exit 2 ;;
+    failed)  echo "earshot: job $ID FAILED — log tail:" >&2; ssh "$HOST" "tail -20 ~/earshot-jobs/$ID/log" >&2; exit 1 ;;
+    *)       echo "earshot: no such job '$ID'" >&2; exit 1 ;;
+  esac
+  exit 0
+fi
+
+# ---- sync or async: need a local input file ----
+SRC="$1"; shift
+[ -f "$SRC" ] || { echo "earshot: no such file: $SRC" >&2; exit 1; }
+base="$(basename "$SRC")"; stem="${base%.*}"; ext="${base##*.}"
+safe="$(printf '%s' "$stem" | tr ' /:' '___')"
+remote_in="/tmp/earshot-in/$safe.$ext"
+
+extra=""; for a in "$@"; do extra+=" $(printf '%q' "$a")"; done
+
+ssh "$HOST" "mkdir -p /tmp/earshot-in"
+echo "earshot: uploading $base to $HOST..." >&2
+scp -q "$SRC" "$HOST:$remote_in"
+
+if [ "$MODE" = async ]; then
+  ID="$safe-$(date +%Y%m%d-%H%M%S)"
+  ssh "$HOST" "cd $REMOTE_PROJ && nohup ./run-job.sh $(printf %q "$ID") $(printf %q "$remote_in")$extra >/dev/null 2>&1 & echo ok" >/dev/null
+  echo "earshot: submitted async job $ID on $HOST" >&2
+  echo "  collect when done:  earshot --collect $ID" >&2
+  echo "$ID"
+  exit 0
+fi
+
+# sync
+src_dir="$(cd "$(dirname "$SRC")" && pwd)"
+echo "earshot: transcribing on $HOST (GPU STT + diarization)..." >&2
+ssh "$HOST" "cd $REMOTE_PROJ && .venv/bin/python transcribe.py $(printf %q "$remote_in") --out /tmp/earshot-out$extra" >/dev/null
+scp -q "$HOST:/tmp/earshot-out/$safe.transcript.md"   "$src_dir/$stem.transcript.md"
+scp -q "$HOST:/tmp/earshot-out/$safe.transcript.json" "$src_dir/$stem.transcript.json"
+ssh "$HOST" "rm -f $(printf %q "$remote_in") /tmp/earshot-out/$safe.transcript.*" || true
+echo "earshot: done ✓" >&2
+echo "$src_dir/$stem.transcript.md"
