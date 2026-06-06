@@ -120,6 +120,32 @@ def test_mixed_billing_not_summed():
     assert single["cost_usd"] == 5.0 and single["billing_type"] == "subscription"
 
 
+# missing billing_type counts as a distinct kind → mixed (not folded into a real type) -------------
+def test_missing_billing_is_mixed():
+    recs = [
+        _r(billing_type="metered", session_id="a", cost_usd=2.0),
+        _r(billing_type=None, session_id="b", cost_usd=3.0),
+    ]
+    grp = A.by_issue(recs)["issue:42"]
+    assert grp["billing_type"] == "mixed"  # metered + unknown → mixed, NOT "metered"
+    assert grp["cost_usd"] is None
+    assert grp["cost_by_billing"] == {"metered": 2.0, "unknown": 3.0}
+
+
+# cache_saved_usd is mixed-guarded too -------------------------------------------------------------
+def test_cache_saved_mixed_guard():
+    recs = [
+        _r(billing_type="subscription", session_id="a", cache_read=100_000),
+        _r(billing_type="metered", session_id="b", cache_read=100_000),
+    ]
+    proj = A.cache_by_project(recs)["agents"]
+    assert proj["cache_saved_usd"] is None  # mixed → no single savings figure
+    assert set(proj["cache_saved_by_billing"]) == {"subscription", "metered"}
+    # single-billing project → flat savings present
+    single = A.cache_by_project([_r(cache_read=100_000)])["agents"]
+    assert single["cache_saved_usd"] is not None
+
+
 # malformed cost_usd does not crash aggregation ----------------------------------------------------
 def test_malformed_cost_no_crash():
     recs = [_r(cost_usd="n/a", session_id="a"), _r(cost_usd=2.0, session_id="b")]

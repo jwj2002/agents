@@ -100,10 +100,12 @@ def _f(v) -> float:
 
 
 def _billing_label(records: list) -> str | None:
-    """Single billing_type across records, else `mixed` (never sum disparate billing types into cash)."""
-    kinds = {r.get("billing_type") for r in records if r.get("billing_type")}
-    if not kinds:
+    """Single billing_type across records, else `mixed`. A MISSING billing_type counts as its own
+    `unknown` kind (Codex #266 re-review) — so {metered + unknown} is `mixed`, never folded into a flat
+    `metered` cash figure. Empty input → None."""
+    if not records:
         return None
+    kinds = {r.get("billing_type") or "unknown" for r in records}
     return next(iter(kinds)) if len(kinds) == 1 else "mixed"
 
 
@@ -215,10 +217,20 @@ def cache_by_project(records: list) -> dict:
     for proj, rs in out.items():
         inp = sum(int(r.get("input", 0) or 0) for r in rs)
         cr = sum(int(r.get("cache_read", 0) or 0) for r in rs)
+        # cache savings is a $ figure too → split by billing; flat only when single-type (Codex #266)
+        saved_by_billing: dict = defaultdict(float)
+        for r in rs:
+            saved_by_billing[r.get("billing_type") or "unknown"] += cache_saved_usd(r)
+        label = _billing_label(rs)
         res[proj] = {
             **_cost_group(rs),
             "cache_pct": round(cr / (inp + cr), 4) if (inp + cr) else 0.0,
-            "cache_saved_usd": round(sum(cache_saved_usd(r) for r in rs), 10),
+            "cache_saved_usd": (
+                round(sum(saved_by_billing.values()), 10) if label != "mixed" else None
+            ),
+            "cache_saved_by_billing": {
+                bt: round(v, 10) for bt, v in saved_by_billing.items()
+            },
         }
     return res
 
