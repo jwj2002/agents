@@ -102,6 +102,10 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/aggregate_metrics_to_global.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/capture_session_telemetry.py"
           }
         ]
       }
