@@ -251,9 +251,17 @@ recall is right for *not false-accusing*, but it means many real defects go **un
 
 **Calibration is a defined PREFLIGHT control, reconciling §0.1's "zero manual" (NEW v3 — Codex F9).**
 "Zero-manual" governs **capture**; **calibration** is a deliberate validation control, not a steady-state
-dependency. Specify it: an **owner**, a **sample size**, a **cadence** (preflight before first anchor use +
-periodic re-calibration), and **pass/fail criteria** — and **the tracer may NOT emit anchor labels until
-calibration passes.** (So §0.1 and this exception are consistent, not contradictory.)
+dependency. **Starting defaults (tune as the corpus grows; the point is they are SPECIFIED, not "TBD"):**
+- **Owner:** the designated tracer-calibration reviewer (Jason or a named delegate for v1) — a role, not "someone."
+- **Sample size:** ≥ **30 stratified cases** per calibration round (mix of seeded known-defect, known-clean,
+  and live-sampled), enough to estimate per-rater sensitivity/specificity with a usable CI.
+- **Cadence:** **preflight** before the tracer's first anchor use, then **re-calibrate quarterly OR after any
+  tracer-rule change** (whichever first).
+- **Pass/fail:** the tracer may emit anchor labels only at **precision ≥ 0.9 on the seeded set** (precision≫recall
+  by design); a round below that bar **blocks anchor-label emission** until rules are fixed and it re-passes.
+
+These are v1 starting values to be confirmed in the build's pre-registration (§2.3), not invented precision —
+but they make §0.1 ("zero-manual") and this exception **consistent and actionable**, not contradictory.
 
 ### 2.3 Proxy-validation loop — ship the *statistical mechanism*, not a disclaimer (laptop-wsl)
 The cold-start is the singleton-sparse problem at the validation layer. Mechanize it:
@@ -280,6 +288,20 @@ critically — the **explicit fallback when power is NOT reached by a stated sam
 (the proxy stays a permanent diagnostic; the loop does not silently treat "underpowered" as "validated"
 or block forever). Pooling caveat: cross-dev pooling assumes comparable work; stratify or it manufactures
 significance from heterogeneity.
+
+**Starting pre-registration (v1 defaults — SPECIFIED, refined once real base rates are observed):**
+- **Target effect size:** proxy↔anchor **|r| ≥ 0.3** to be promotion-eligible (below that, not worth a target
+  even if "significant").
+- **Defect base-rate assumption:** seed at **~15%** defect/correction rate per implementation unit (from the
+  current corpus); recompute from observed data each cycle.
+- **Minimum sample size:** **n ≥ 80** anchor-labeled units per proxy before any promotion decision (powers
+  |r|≥0.3 at α=.05 after FDR); below n, proxy is provisional-diagnostic only.
+- **Pooling:** pool **across devs + repos within a work-type + complexity band**, never across work-types;
+  report pooled-vs-per-dev heterogeneity and stratify if high.
+- **Decision rule:** **sequential** with an alpha-spending boundary, decided on the **CI bound** not the point estimate.
+- **Power-never-reached horizon:** a proxy that hasn't reached n≥80 within **180 days** is **frozen as a
+  permanent diagnostic** (kept, never promoted, never discarded) and flagged for design review — the loop
+  neither blocks nor fakes validation.
 
 ### 2.4 Cold-start honesty
 The anchor is **lagging + sparse** → v1 ships **provisional** proxies + the validation
@@ -384,7 +406,12 @@ and team-knowledge auto-observe). Elevate it as a foundational build item.
 2. **Token collector** — read OTEL, per-session cost first, cache-aware.
 3. **Dead-man's-switch watchdog** — heartbeat + #221 poller + hub coverage escalation + the §2.5 exclusion watchdogs.
 4. **Precision-tiered defect tracer** — reverts-first, PR-granularity, multi-window, human-calibrated. ⭐ **long pole / critical path** (contaminating it breaks everything; interacts with squash-merge + the §7 git-inconsistency).
-5. **Diverse adjudication panel** — agent-b + outside-path Claude + static analyzers; stratified sampling; dissent preserved.
+5. **Diverse adjudication panel — instantiated PER PRODUCER FAMILY, §2.1-compliant** (Codex N1): the
+   **non-LLM backbone** (behavioral defect tracer + static analyzers/tests/scanners) is **always** in the
+   panel; the **LLM reviewer is chosen so it never shares the producer's model family** (for Claude-produced
+   work the LLM rater is a non-Claude model e.g. GPT-5/agent-b; for agent-b/GPT-produced work it is a
+   non-GPT model). A **same-family LLM may only be a non-anchor diagnostic or calibration input**, never an
+   anchor vote. Stratified sampling; LLM raters weighted as correlated; dissent preserved.
 6. **Proxy-validation job** — the §2.3 statistical mechanism. **Months-lagging by nature** (ongoing, not this-week).
 7. **Positive-signal sensor = `no_observed_defect_30d`** — capture what went *right* (gates two
    specs), **honestly named** (Codex F3): the v1 signal (no correction within 30d + passed CI/PROVE +
