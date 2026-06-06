@@ -198,6 +198,46 @@ def test_idempotent_collect(tmp_path):
     assert len(shard.read_text().strip().splitlines()) == 2  # no duplicates
 
 
+# Codex #262 hardening: SSH host parsing skips flags + their args -----------------------------------
+def test_ssh_host_parsing_skips_flag_args():
+    assert U.mine_command("ssh -p 22 jns 'cd ~/x'")["work_host"] == "jns"  # not "22"
+    assert U.mine_command("ssh -i ~/.ssh/key deploy@server")["work_host"] == "server"
+    assert U.mine_command("ssh -v jns")["work_host"] == "jns"
+
+
+# Codex #262: gitBranch is ground-truth per message → natural subsequent-message boundary ------------
+def test_gitbranch_gives_subsequent_boundary():
+    # the checkout message still shows the OLD branch; the next shows the new one
+    recs = _extract(
+        [
+            _asst(
+                1,
+                ts="t1",
+                gitBranch="main",
+                content=[_bash("git checkout -b feat/issue-5-x")],
+            ),
+            _asst(2, ts="t2", gitBranch="feat/issue-5-x"),
+        ]
+    )
+    assert recs[0]["task"] == "unattributed"  # old branch (main) → not the new task
+    assert recs[1]["task"] == "issue:5"  # new branch on the subsequent message
+
+
+# Codex #262: malformed records don't crash + don't collapse on missing uuid ------------------------
+def test_malformed_and_missing_uuid_robust():
+    # non-dict message must not crash
+    entries = [{"type": "assistant", "message": "oops-not-a-dict", "timestamp": "t0"}]
+    assert _extract(entries) == []
+    # two usage records missing uuid → distinct dedup_keys (no collapse/undercount)
+    e1 = _asst(None, ts="t1", usage={"input_tokens": 1, "output_tokens": 0})
+    e2 = _asst(None, ts="t2", usage={"input_tokens": 2, "output_tokens": 0})
+    for e in (e1, e2):
+        e["uuid"] = None
+    recs = _extract([e1, e2])
+    assert len(recs) == 2
+    assert recs[0]["dedup_key"] != recs[1]["dedup_key"]
+
+
 # 11. emitted record carries the §3 schema fields --------------------------------------------------
 def test_record_schema():
     rec = _extract([_asst(1, ts="t1")])[0]

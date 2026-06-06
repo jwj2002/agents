@@ -18,6 +18,7 @@ from __future__ import annotations
 import glob
 import json
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -52,9 +53,36 @@ _SKIP_MODELS = {"<synthetic>", "<compact>"}
 _ISSUE_RE = re.compile(r"issue-(\d+)", re.IGNORECASE)
 _CLOSES_RE = re.compile(r"\b(?:closes|fixes|resolves)\s+#(\d+)", re.IGNORECASE)
 _CHECKOUT_RE = re.compile(r"git\s+checkout\s+-b\s+(\S+)")
-_SSH_RE = re.compile(r"\bssh\s+(?:-\S+\s+|-o\s+\S+\s+)*([A-Za-z0-9_.-]+)")
 _CD_RE = re.compile(r"\bcd\s+([~\w./-]+)")
 _NONTASK_BRANCHES = {"head", "main", "master", "", None}
+# OpenSSH short flags that consume the NEXT token as their argument — so the host parser skips both
+# (else `ssh -p 22 host` mis-reads "22" as the host; Codex #262).
+_SSH_ARG_FLAGS = set("bcDEeFIiJLlmOopQRSWw")
+
+
+def _msg(entry: dict) -> dict:
+    """The entry's message as a dict — never crashes on transcript shape drift (a non-dict message
+    or usage becomes {}). Codex #262: real transcripts can carry unexpected shapes."""
+    m = entry.get("message") if isinstance(entry, dict) else None
+    return m if isinstance(m, dict) else {}
+
+
+def _ssh_host(tokens: list) -> str | None:
+    """First real host token after `ssh`, correctly skipping flags AND their arguments (`-p 22`,
+    `-i key`, `-pVALUE`). Returns the host (user@ stripped), or None."""
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        if t.startswith("-"):
+            if (
+                len(t) == 2 and t[1] in _SSH_ARG_FLAGS
+            ):  # `-p 22` form → skip flag + its arg
+                i += 2
+            else:  # `-v`, `-pVALUE`, `--opt` → skip just the flag
+                i += 1
+            continue
+        return t.split("@")[-1]
+    return None
 
 
 def _task_from_branch(branch) -> str | None:
@@ -77,8 +105,7 @@ def _project_from_path(path) -> str | None:
 
 def _iter_commands(entry: dict):
     """Yield Bash command strings from the assistant message's tool_use blocks."""
-    msg = entry.get("message") or {}
-    content = msg.get("content")
+    content = _msg(entry).get("content")
     if not isinstance(content, list):
         return
     for block in content:
@@ -94,9 +121,14 @@ def mine_command(cmd: str) -> dict:
     free attribution (§4.3): a `git checkout -b feat/issue-N` names the task even cross-repo, and an
     `ssh host 'cd repo'` names the work_host + project under SSH-develop."""
     out: dict = {}
-    ssh = _SSH_RE.search(cmd)
-    if ssh and ssh.group(1) not in {"-", ""}:
-        out["work_host"] = ssh.group(1)
+    try:
+        toks = shlex.split(cmd)
+    except ValueError:
+        toks = cmd.split()
+    if "ssh" in toks:
+        host = _ssh_host(toks[toks.index("ssh") + 1 :])
+        if host:
+            out["work_host"] = host
     co = _CHECKOUT_RE.search(cmd)
     if co:
         t = _task_from_branch(co.group(1))
@@ -106,7 +138,11 @@ def mine_command(cmd: str) -> dict:
     if closes and "task" not in out:
         out["task"] = f"issue:{closes.group(1)}"
     cd = _CD_RE.search(cmd)
-    if cd:
+    if cd and cd.group(1) not in (
+        "-",
+        "~",
+        "..",
+    ):  # skip cd -, cd ~, cd .. (bogus project names)
         proj = _project_from_path(cd.group(1))
         if proj:
             out["project"] = proj
@@ -117,12 +153,8 @@ def _is_compaction(entry: dict) -> bool:
     """A compaction/continuation boundary (re-seeds the prompt cache → a cache_creation spike, §4.5)."""
     if entry.get("isCompactSummary") or entry.get("subtype") == "compact":
         return True
-    msg = entry.get("message") or {}
-    text = (
-        json.dumps(msg.get("content", ""))
-        if not isinstance(msg.get("content"), str)
-        else msg["content"]
-    )
+    content = _msg(entry).get("content", "")
+    text = content if isinstance(content, str) else json.dumps(content)
     return (
         "being continued from a previous conversation" in text
         or "ran out of context" in text
@@ -130,8 +162,8 @@ def _is_compaction(entry: dict) -> bool:
 
 
 def _is_assistant_usage(entry: dict) -> bool:
-    msg = entry.get("message") or {}
-    return bool(msg.get("usage")) and (
+    msg = _msg(entry)
+    return isinstance(msg.get("usage"), dict) and (
         msg.get("role") == "assistant" or entry.get("type") == "assistant"
     )
 
@@ -144,14 +176,14 @@ def extract_records(entries: list, *, inference_host: str, strict: bool = True) 
     active = {"task": "unattributed", "project": None, "work_host": inference_host}
     pending_compaction = False
     records = []
-    for entry in entries:
+    for idx, entry in enumerate(entries):
         if _is_compaction(entry):
             pending_compaction = True
-        if _is_assistant_usage(entry) and (
-            entry["message"].get("model") not in _SKIP_MODELS
-        ):
-            msg = entry["message"]
-            # gitBranch is the current-message fast-path; mined state is the fallback/cross-repo source
+        msg = _msg(entry)
+        if _is_assistant_usage(entry) and msg.get("model") not in _SKIP_MODELS:
+            # gitBranch is GROUND TRUTH for THIS message (Claude Code captures it at message start, so a
+            # `git checkout -b` message still shows the OLD branch → it naturally gives the "subsequent
+            # message" boundary). Mined `active` is the fallback when gitBranch is unusable (cross-repo).
             cur_task = _task_from_branch(entry.get("gitBranch")) or active["task"]
             cur_project = active["project"] or _project_from_path(entry.get("cwd"))
             usage = msg.get("usage") or {}
@@ -159,6 +191,14 @@ def extract_records(entries: list, *, inference_host: str, strict: bool = True) 
                 norm: int(usage.get(raw, 0) or 0) for raw, norm in _USAGE_MAP.items()
             }
             cost_rec = {**tok, "model": msg.get("model")}
+            sid, uuid = entry.get("sessionId"), entry.get("uuid")
+            # dedup_key must be UNIQUE even when sessionId/uuid are missing (else malformed records
+            # collapse to "None:None" and undercount, Codex #262) — fall back to a position+content key.
+            dedup_key = (
+                f"{sid}:{uuid}"
+                if uuid
+                else f"{sid}:{entry.get('timestamp')}:{idx}:{tok['input']}:{tok['output']}"
+            )
             rec = {
                 "provider": PROVIDER,
                 "account": None,
@@ -171,9 +211,9 @@ def extract_records(entries: list, *, inference_host: str, strict: bool = True) 
                 **tok,
                 "cost_usd": C.session_cost(cost_rec, strict=strict),
                 "ts": entry.get("timestamp"),
-                "session_id": entry.get("sessionId"),
+                "session_id": sid,
                 "compaction": pending_compaction,
-                "dedup_key": f"{entry.get('sessionId')}:{entry.get('uuid')}",
+                "dedup_key": dedup_key,
             }
             records.append(rec)
             pending_compaction = False
