@@ -241,6 +241,23 @@ def test_extract_skips_malformed_records():
     ]
 
 
+def test_non_string_area_does_not_crash(tmp_path):
+    # a record with a non-hashable/non-str area must be skipped, not crash auto_observe (Codex re-review)
+    records = [
+        {
+            "dev": "jason",
+            "area": ["testing"],
+            "guards_fired": "MISSING_TEST",
+        },  # bad area
+        {"dev": "jason", "area": "testing", "guards_fired": "MISSING_TEST"},  # good
+    ]
+    out = A.auto_observe("jason", records, taxonomy=TAXONOMY, patterns_dir=tmp_path)
+    by_key = {e["pattern_key"]: e for e in out["entries"]}
+    assert (
+        by_key["MISSING_TEST"]["observation_count"] == 1
+    )  # only the valid record counted
+
+
 # Invariant (Codex): a stale/authored computed field in an UNTOUCHED existing entry is normalized ----
 def test_existing_entry_computed_fields_normalized(tmp_path):
     # seed a tampered existing file: authored confidence + non-null efficacy on an entry we won't touch

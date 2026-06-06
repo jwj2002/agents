@@ -64,8 +64,8 @@ def extract_observations(records: list, *, dev: str | None = None) -> list:
         if dev is not None and rdev != dev:
             continue
         area = r.get("area")
-        if not area:
-            continue
+        if not area or not isinstance(area, str):
+            continue  # area must be a string taxonomy key — a non-str would crash dict lookups
         candidates = []
         gf = r.get("guards_fired")
         if isinstance(gf, str):
