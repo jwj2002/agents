@@ -26,14 +26,21 @@ DIM_QUALITY = "quality"
 DIM_EFFICIENCY = "efficiency"
 DIM_TOOLING = "tooling"
 
+# The report contract is exactly the top-3 (§Pillar 2). Fixed, not caller-tunable, so the contract
+# can't be widened by a caller passing a larger N (Codex).
+TOP_N = 3
+
 # Team-pattern states that constitute an advisory worth adopting (assembler #244 emits these).
 _ADVISORY_STATES = {"not-disconfirmed", "published-advisory", "accepted-local"}
 # Routing tiers considered "heavy" — using them for a light task is an over-route (mis-tier).
 _HEAVY_ROUTES = {"orchestrate", "complex"}
 _LIGHT_COMPLEXITY = {"TRIVIAL", "SIMPLE"}
 
-# Benchmark 4 deferral — phrased WITHOUT percentile/cohort language (§6.2).
-BENCHMARK_4_DEFERRED = "top-performer comparison DEFERRED to public tier — k-anonymity is un-private at 4 devs (§6.2)"
+# Benchmark 4 deferral note (the AC requires an explicit deferred TODO). Phrased as a pure deferral
+# marker — no comparison/percentile/cohort/cross-dev language is produced (§6.2).
+BENCHMARK_4_DEFERRED = (
+    "DEFERRED to public tier — k-anonymity is un-private at 4 devs (§6.2)"
+)
 
 
 def _finding(
@@ -241,11 +248,10 @@ def private_review(
     telemetry=None,
     team_patterns=None,
     dev_patterns=None,
-    top_n: int = 3,
 ) -> dict:
     """The private review. PURE: returns a report dict, writes nothing (the privacy invariant). Scores
-    all three dimensions + own trend, then ranks the top-N improvements. Benchmark 4 is recorded as a
-    DEFERRED note, never computed (no cross-dev/percentile/cohort comparison)."""
+    all three dimensions + own trend, then ranks the FIXED top-3 improvements (TOP_N, not caller-
+    tunable). Benchmark 4 is recorded as a DEFERRED note, never computed (no cross-dev comparison)."""
     config = config or {}
     findings = []
     findings += score_quality(
@@ -275,7 +281,7 @@ def private_review(
             "dimension": f["dimension"],
             "kind": f["kind"],
         }
-        for f in ranked[:top_n]
+        for f in ranked[:TOP_N]
     ]
     return {
         "private": True,

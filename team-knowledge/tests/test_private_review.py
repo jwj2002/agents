@@ -95,9 +95,10 @@ def test_benchmark_4_not_implemented():
         telemetry={"mcp_invocations": {}},
     )
     blob = json.dumps(report) + R.render_report(report)
-    assert "percentile" not in blob.lower()
-    assert "cohort" not in blob.lower()
-    # the deferral is explicitly recorded
+    # no cross-dev comparison language at all (Codex): percentile/cohort/top-performer/cross-dev
+    for forbidden in ("percentile", "cohort", "top-performer", "cross-dev"):
+        assert forbidden not in blob.lower()
+    # the deferral is still explicitly recorded (AC: an explicit deferred note)
     assert "DEFERRED" in report["deferred"]["benchmark_4"]
     assert R.BENCHMARK_OWN_TREND in report["benchmarks_used"]
 
