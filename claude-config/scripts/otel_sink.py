@@ -9,6 +9,7 @@ Scope note: the live collector wiring (Claude Code OTLP -> file exporter) is a p
 documented in OTEL_SINK_SETUP.md and deferred to jns-server. This module + its tests run against
 simulated pushes (the AC's "simulated OTEL push") and are host-agnostic.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,17 +17,52 @@ from pathlib import Path
 
 TOKEN_FIELDS = ("input", "output", "cache_creation", "cache_read")
 
-# Per-token USD prices. Ratios are the load-bearing part (§1.2): cache_read = 0.10x fresh input,
-# output dearest, cache_creation ~1.25x input. Absolute numbers track Anthropic's published rates
-# (per-MTok / 1e6) and are config — refine as pricing changes.
+# Per-token USD prices, MULTI-PROVIDER (fleet-usage-monitor §6). Ratios are the load-bearing part
+# (§1.2): cache_read ≈ 0.10x fresh input, output dearest, cache_creation ~1.25x input. Absolute
+# numbers track each vendor's published per-MTok rates (/1e6) and are config — refine as pricing
+# changes. `_price_for` matches by family prefix, so adding a row is the whole extension mechanism.
+#
+# Claude rates cross-check (fleet-usage-monitor §2.1, verified 2026-06-06): the real measured session
+# mix {input 657_029, output 4_070_961, cache_read 924_428_695, cache_creation 24_381_544} at
+# claude-opus-4 rates = $2,158.97 ≈ the $2,159 reference. (NOTE: the reference is the full token MIX,
+# not 954M pure input — 954M is the token TOTAL across all types.) test_multiprovider_pricing enforces
+# this within 5%.
 PRICES = {
-    "claude-opus-4":   {"input": 15e-6, "output": 75e-6, "cache_creation": 18.75e-6, "cache_read": 1.5e-6},
-    "claude-sonnet-4": {"input": 3e-6,  "output": 15e-6, "cache_creation": 3.75e-6,  "cache_read": 0.30e-6},
-    "claude-haiku-4":  {"input": 0.80e-6, "output": 4e-6, "cache_creation": 1.0e-6,  "cache_read": 0.08e-6},
+    "claude-opus-4": {
+        "input": 15e-6,
+        "output": 75e-6,
+        "cache_creation": 18.75e-6,
+        "cache_read": 1.5e-6,
+    },
+    "claude-sonnet-4": {
+        "input": 3e-6,
+        "output": 15e-6,
+        "cache_creation": 3.75e-6,
+        "cache_read": 0.30e-6,
+    },
+    "claude-haiku-4": {
+        "input": 0.80e-6,
+        "output": 4e-6,
+        "cache_creation": 1.0e-6,
+        "cache_read": 0.08e-6,
+    },
+    # OpenAI / Codex. gpt-5.5 verified in use (Codex CLI, §2.2). OpenAI bills cached input at a discount
+    # and charges no separate cache-WRITE, so cache_creation = 0. Rates are representative (per-MTok/1e6)
+    # — VERIFY against OpenAI's published pricing when finalizing billing.
+    "gpt-5.5": {
+        "input": 1.25e-6,
+        "output": 10e-6,
+        "cache_creation": 0.0,
+        "cache_read": 0.125e-6,
+    },
 }
-DEFAULT_PRICE = PRICES["claude-sonnet-4"]  # conservative fallback for unrecognized models
+DEFAULT_PRICE = PRICES[
+    "claude-sonnet-4"
+]  # conservative fallback for unrecognized models (compute_cost only)
 
-EXPORTER_FRESHNESS_SLA_DEFAULT = 24 * 3600  # 24h: sink must be written within SLA or alarm (§0.1)
+EXPORTER_FRESHNESS_SLA_DEFAULT = (
+    24 * 3600
+)  # 24h: sink must be written within SLA or alarm (§0.1)
 
 
 def _price_for(model: str) -> dict:
@@ -35,7 +71,9 @@ def _price_for(model: str) -> dict:
         return DEFAULT_PRICE
     m = str(model).lower()
     for family, row in PRICES.items():
-        if m.startswith(family) or family.split("-")[1] in m:  # 'opus'/'sonnet'/'haiku' substring
+        if (
+            m.startswith(family) or family.split("-")[1] in m
+        ):  # 'opus'/'sonnet'/'haiku' substring
             return row
     return DEFAULT_PRICE
 
@@ -59,10 +97,15 @@ def normalize_from_datapoints(datapoints: list) -> dict:
     out = {f: 0 for f in TOKEN_FIELDS}
     model = ""
     alias = {
-        "input": "input", "output": "output",
-        "cache_creation": "cache_creation", "cachecreation": "cache_creation",
-        "cache_creation_input_tokens": "cache_creation", "ephemeral_5m_input_tokens": "cache_creation",
-        "cache_read": "cache_read", "cacheread": "cache_read", "cache_read_input_tokens": "cache_read",
+        "input": "input",
+        "output": "output",
+        "cache_creation": "cache_creation",
+        "cachecreation": "cache_creation",
+        "cache_creation_input_tokens": "cache_creation",
+        "ephemeral_5m_input_tokens": "cache_creation",
+        "cache_read": "cache_read",
+        "cacheread": "cache_read",
+        "cache_read_input_tokens": "cache_read",
     }
     for dp in datapoints or []:
         attrs = dp.get("attributes", {}) or {}
@@ -117,14 +160,18 @@ def sink_last_write_ts(path):
     return p.stat().st_mtime if p.exists() else None
 
 
-def is_stale(last_write_ts, now_ts: float, sla_seconds: float = EXPORTER_FRESHNESS_SLA_DEFAULT) -> bool:
+def is_stale(
+    last_write_ts, now_ts: float, sla_seconds: float = EXPORTER_FRESHNESS_SLA_DEFAULT
+) -> bool:
     """Pure freshness predicate: stale if never written or last write older than the SLA."""
     if last_write_ts is None:
         return True
     return (now_ts - last_write_ts) > sla_seconds
 
 
-def check_exporter_freshness(path, now_ts: float, sla_seconds: float = EXPORTER_FRESHNESS_SLA_DEFAULT) -> dict:
+def check_exporter_freshness(
+    path, now_ts: float, sla_seconds: float = EXPORTER_FRESHNESS_SLA_DEFAULT
+) -> dict:
     """Exporter-freshness alarm (§0.1 stale-exporter state). Returns
     `{"alarm": bool, "reason": str, "age_seconds": float|None}` — feeds the #231/#232 watchdog."""
     last = sink_last_write_ts(path)
