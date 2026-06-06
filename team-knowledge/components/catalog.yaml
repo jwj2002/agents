@@ -1,0 +1,5 @@
+# Shareable-component catalog (§Pillar 3). Each entry is owner_dev-gated; `secrets_scan_clean`
+# means "outbound secret scan passed" — NOT "safe to run". Importers MUST run the ComponentReview
+# intake gate (quarantine-clone pinned SHA, manifest, review_token) before adapting — issue #242.
+schema_version: 1
+components: []   # populated when the first component is published (e.g. the voice pipeline)
