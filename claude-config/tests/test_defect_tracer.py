@@ -540,3 +540,37 @@ def test_trace_prs_uses_calibration_log(tmp_path):
     assert {lbl["number"]: lbl["label"] for lbl in out_ok["labels"]}[
         42
     ] == T.LABEL_OBSERVED_DEFECT
+
+
+# Gate integrity (Codex round 4): freshness is FAIL-CLOSED, not fail-open ----------------------------
+def test_freshness_fails_closed(tmp_path):
+    log = tmp_path / "calib.jsonl"
+    # a passing round WITHOUT a timestamp cannot be confirmed fresh → not authorized
+    rnd = T.run_calibration(_seeded(tp=27, fp=2, tn=5))  # round_ts defaults to None
+    T.log_calibration(rnd, log)
+    res = T.authorized_from_log(log, now_ts=T._parse_ts("2026-06-10T00:00:00Z"))
+    assert res["authorized"] is False
+    assert res["reason"] == "calibration_no_timestamp"
+
+
+def test_freshness_omitted_now_does_not_fail_open(tmp_path):
+    # an ancient round must be rejected even when now_ts is omitted (defaults to wall clock, not skip)
+    log = tmp_path / "calib.jsonl"
+    T.log_calibration(
+        T.run_calibration(_seeded(tp=27, fp=2, tn=5), round_ts="2000-01-01T00:00:00Z"),
+        log,
+    )
+    res = T.authorized_from_log(log)  # no now_ts → uses wall clock → ancient → stale
+    assert res["authorized"] is False
+    assert res["reason"] == "calibration_stale"
+
+
+def test_future_timestamp_rejected(tmp_path):
+    log = tmp_path / "calib.jsonl"
+    T.log_calibration(
+        T.run_calibration(_seeded(tp=27, fp=2, tn=5), round_ts="2099-01-01T00:00:00Z"),
+        log,
+    )
+    res = T.authorized_from_log(log, now_ts=T._parse_ts("2026-06-10T00:00:00Z"))
+    assert res["authorized"] is False
+    assert res["reason"] == "calibration_future_timestamp"

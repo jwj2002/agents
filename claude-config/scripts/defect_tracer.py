@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 from datetime import datetime
 
 # --- precision tiers -----------------------------------------------------------------------------
@@ -68,6 +69,9 @@ CALIB_PRECISION_GATE = (
 )
 CALIB_MAX_AGE_DAYS = (
     90  # recalibrate quarterly (§2.2 cadence); a stale round can't authorize
+)
+CALIB_CLOCK_SKEW_SECONDS = (
+    300  # tolerate ≤5min clock skew; beyond that a future round_ts is rejected
 )
 
 # --- recall-estimation signals (low-precision; coverage ONLY, NEVER an individual defect label) ---
@@ -146,6 +150,11 @@ def _extract_refs(regex: re.Pattern, text: str, *, repo: str | None) -> list:
 
 def _tier_rank(tier: str) -> int:
     return _TIER_RANK.get(tier, 0)
+
+
+def _now_ts() -> float:
+    """Current wall-clock epoch — the freshness default so omitting `now_ts` fails CLOSED, not open."""
+    return time.time()
 
 
 def _parse_ts(value) -> float | None:
@@ -520,11 +529,23 @@ def authorized_from_log(
     if rec is None:
         return {"authorized": False, "reason": "no_calibration_logged"}
     if not calibration_authorizes_emission(rec):
-        return {"authorized": False, "reason": "latest_round_failed"}
-    if now_ts is not None and rec.get("round_ts"):
-        ts = _parse_ts(rec["round_ts"])
-        if ts is not None and (now_ts - ts) > max_age_days * 86400:
-            return {"authorized": False, "reason": "calibration_stale", "round": rec}
+        return {"authorized": False, "reason": "latest_round_failed", "round": rec}
+    # Freshness is MANDATORY and FAIL-CLOSED (Codex round 4): a missing/unparsable/future timestamp,
+    # or no usable clock, means we CANNOT confirm the round is within cadence → do NOT authorize.
+    ts = _parse_ts(rec.get("round_ts"))
+    if ts is None:
+        return {"authorized": False, "reason": "calibration_no_timestamp", "round": rec}
+    if now_ts is None:
+        now_ts = _now_ts()  # default to wall clock so omitting it does not fail OPEN
+    age = now_ts - ts
+    if age < -CALIB_CLOCK_SKEW_SECONDS:
+        return {
+            "authorized": False,
+            "reason": "calibration_future_timestamp",
+            "round": rec,
+        }
+    if age > max_age_days * 86400:
+        return {"authorized": False, "reason": "calibration_stale", "round": rec}
     return {"authorized": True, "reason": "ok", "round": rec}
 
 
