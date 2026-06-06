@@ -63,6 +63,19 @@ def _pct(v) -> str:
         return "n/a"
 
 
+def _fnum(v) -> float:
+    """Numeric value or 0.0 — crash-safe coercion for chart/trend math (Codex #267)."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+# Cost charts plot API-EQUIVALENT value; subscription is notional (not cash) — labeled in the chart
+# title since a per-bar `*` isn't possible on a canvas (Codex #267, §6).
+_COST_AXIS_TITLE = "API-equivalent $ (subscription = notional, not cash)"
+
+
 def _fmt_cost(grp: dict) -> str:
     """A billing-aware cost cell (PLAIN TEXT). subscription → `$X *` (notional); mixed → each bucket
     broken out with the subscription bucket ALSO marked `*`; metered → `$X`. Crash-safe via _money."""
@@ -104,12 +117,9 @@ def trends(records: list, *, period: str = "week") -> dict:
         cell = out.setdefault(proj, {}).setdefault(
             bucket, {"cost": 0.0, "input": 0, "cache_read": 0}
         )
-        try:
-            cell["cost"] += float(r.get("cost_usd", 0) or 0)
-        except (TypeError, ValueError):
-            pass
-        cell["input"] += int(r.get("input", 0) or 0)
-        cell["cache_read"] += int(r.get("cache_read", 0) or 0)
+        cell["cost"] += _fnum(r.get("cost_usd"))
+        cell["input"] += int(_fnum(r.get("input")))
+        cell["cache_read"] += int(_fnum(r.get("cache_read")))
     for proj, buckets in out.items():
         for b, c in buckets.items():
             denom = c["input"] + c["cache_read"]
@@ -125,7 +135,9 @@ def _right_sizing_callout(agg: dict) -> str:
     for proj, tiers in (agg.get("cost_by_model_tier") or {}).items():
         complex_models = tiers.get("COMPLEX") or {}
         if len(complex_models) >= 2:
-            costs = {m: (g.get("cost_usd") or 0) for m, g in complex_models.items()}
+            costs = {
+                m: _fnum((g or {}).get("cost_usd")) for m, g in complex_models.items()
+            }
             top = max(costs, key=costs.get)
             lines.append(
                 f"{html.escape(str(proj))}: COMPLEX work spans {len(costs)} models "
@@ -253,17 +265,19 @@ table{{border-collapse:collapse;margin:.5rem 0}}th,td{{border:1px solid #ccc;pad
      innerHTML / DOM-injection path; no HTML-tooltip plugin is used), and the embedded blob is
      breakout-escaped by _safe_json — so a malicious project/host/tier name cannot execute (Codex #267 B2). -->
 <script>const D=JSON.parse({json.dumps(data_blob)});
-function line(id,series){{const el=document.getElementById(id);if(!el)return;
+const COST_T={json.dumps(_COST_AXIS_TITLE)};
+function titleOpt(t){{return {{plugins:{{title:{{display:true,text:t}}}}}};}}
+function line(id,series,title){{const el=document.getElementById(id);if(!el)return;
  const labels=[...new Set([].concat(...Object.values(series).map(b=>Object.keys(b))))].sort();
  const ds=Object.entries(series).map(([k,b])=>({{label:k,data:labels.map(l=>(b[l]||{{}}).cost||0)}}));
- if(ds.length)new Chart(el,{{type:'line',data:{{labels,datasets:ds}}}});}}
-try{{line('c_pr_trend',D.trends);
+ if(ds.length)new Chart(el,{{type:'line',data:{{labels,datasets:ds}},options:titleOpt(title)}});}}
+try{{line('c_pr_trend',D.trends,COST_T);
  const ct={{}};for(const[p,b]of Object.entries(D.trends)){{ct[p]={{}};for(const[k,v]of Object.entries(b))ct[p][k]={{cost:v.cache_pct}};}}
- line('c_cache_trend',ct);
+ line('c_cache_trend',ct,'cache read %');
  const te=document.getElementById('c_tier');if(te){{const t=D.by_tier;new Chart(te,{{type:'bar',
-  data:{{labels:Object.keys(t),datasets:[{{label:'cost',data:Object.values(t).map(g=>g.cost_usd||0)}}]}}}});}}
+  data:{{labels:Object.keys(t),datasets:[{{label:'cost',data:Object.values(t).map(g=>g.cost_usd||0)}}]}},options:titleOpt(COST_T)}});}}
  const ce=document.getElementById('c_conc');if(ce){{const c=D.concurrency;new Chart(ce,{{type:'bar',
-  data:{{labels:Object.keys(c),datasets:[{{label:'peak concurrent',data:Object.values(c).map(h=>h.peak_concurrent_sessions||0)}}]}}}});}}
+  data:{{labels:Object.keys(c),datasets:[{{label:'peak concurrent',data:Object.values(c).map(h=>h.peak_concurrent_sessions||0)}}]}},options:titleOpt('peak concurrent sessions')}});}}
 }}catch(e){{console.error(e);}}</script>
 </body></html>"""
 

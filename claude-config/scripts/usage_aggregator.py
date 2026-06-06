@@ -78,8 +78,8 @@ def task_tier(files_changed) -> str:
 
 
 def cache_pct(rec: dict) -> float:
-    inp = int(rec.get("input", 0) or 0)
-    cr = int(rec.get("cache_read", 0) or 0)
+    inp = _i(rec.get("input"))
+    cr = _i(rec.get("cache_read"))
     denom = inp + cr
     return round(cr / denom, 4) if denom else 0.0
 
@@ -87,7 +87,7 @@ def cache_pct(rec: dict) -> float:
 def cache_saved_usd(rec: dict) -> float:
     """$ saved by reading from cache vs paying full input price: cache_read_tokens × (input − cache_read price)."""
     row = O._price_for(rec.get("model", ""))
-    cr = int(rec.get("cache_read", 0) or 0)
+    cr = _i(rec.get("cache_read"))
     return round(cr * (row["input"] - row["cache_read"]), 10)
 
 
@@ -97,6 +97,14 @@ def _f(v) -> float:
         return float(v)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _i(v) -> int:
+    """Coerce a token count to int; malformed values → 0 (never crash, Codex #267 follow-on)."""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _billing_label(records: list) -> str | None:
@@ -215,8 +223,8 @@ def cache_by_project(records: list) -> dict:
         out[r.get("project")].append(r)
     res = {}
     for proj, rs in out.items():
-        inp = sum(int(r.get("input", 0) or 0) for r in rs)
-        cr = sum(int(r.get("cache_read", 0) or 0) for r in rs)
+        inp = sum(_i(r.get("input")) for r in rs)
+        cr = sum(_i(r.get("cache_read")) for r in rs)
         # cache savings is a $ figure too → split by billing; flat only when single-type (Codex #266)
         saved_by_billing: dict = defaultdict(float)
         for r in rs:

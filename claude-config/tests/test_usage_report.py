@@ -65,8 +65,9 @@ def test_metered_not_starred():
     html = R.render_html(A.aggregate([_rec(billing_type="metered", cost_usd=2.0)]))
     assert (
         "$2.00" in html and "$2.00 *" not in html
-    )  # metered cash is not marked notional
-    assert "notional" not in html  # no subscription anywhere → no footnote
+    )  # metered cash is not starred
+    assert R._NOTIONAL_FOOTNOTE not in html  # no subscription → no notional footnote
+    # (the cost-chart axis title carries a general notional caveat — that's expected, not the footnote)
 
 
 # mixed billing → both labeled, never a single unlabeled figure ------------------------------------
