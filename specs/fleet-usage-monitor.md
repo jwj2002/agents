@@ -37,10 +37,12 @@ Measured (server-a, 95 sessions): ≈ 2.40B tokens ≈ **$5,275**.
 
 ## §3 Normalized record (both collectors emit the same shape)
 ```
-{provider, account, computer, project, model, task,
+{provider, account, inference_host, work_host, project, model, task,
  input, output, cache_read, cache_creation, cost_usd,
  ts, session_id, files_changed?, task_tier?}
 ```
+`inference_host` = where Claude/Codex ran (where the tokens were billed). `work_host` = where the code
+was actually edited (may differ under SSH-develop — see §4.2). When work is local they are equal.
 Written per host to `telemetry/<host>/usage.jsonl` (append-only shard — the SAME per-host shard
 pattern the failures telemetry already uses). Cross-fleet aggregation = concatenate shards. No secrets
 ever enter a shard (auth.json is read for identity only, never the key — reuses the §229 raw-capture ban).
@@ -52,15 +54,32 @@ ever enter a shard (auth.json is read for identity only, never the key — reuse
   collector joins `sessionId → account`. Sessions predating the hook are `account: "unknown"` (honest,
   never guessed).
 - **Codex:** read `auth.json` (current identity) and `session_meta` (per-session if present).
-### 4.2 Computer (host) — free
-The collector runs per-host and stamps its own hostname via `lib/project_resolver.get_host_name()`
-(the shard path `telemetry/<host>/` already encodes it). No new capture.
-### 4.3 Task attribution
-- **Claude:** `gitBranch` when the session's `cwd` IS the target repo → free per-task split. **Caveat
-  (observed):** cross-repo work via absolute paths (session `cwd` not the edited repo) collapses
-  everything under one branch. Fallbacks: an explicit task tag at task start, else `task: unattributed`.
-- **Codex:** `cwd` + timestamp correlation to a Claude task, OR tag at the `codex exec` wrapper (we
-  control it). 
+### 4.2 Computer — TWO hosts (inference vs work), both captured
+- **`inference_host`** = where Claude/Codex ran = where tokens are billed. FREE: the collector runs
+  per-host and stamps its own hostname via `lib/project_resolver.get_host_name()` (the shard path
+  `telemetry/<host>/` already encodes it). This is the authoritative cost/account host.
+- **`work_host`** = where files were edited. Under **SSH-develop** (a session on computer A that
+  `ssh`'es to computer B to develop) the tokens are spent on A but the work is on B. `cwd`/`gitBranch`
+  in the transcript reflect A's LOCAL context, so they MISATTRIBUTE the project/task. `work_host` is
+  recovered by activity-mining (§4.3): the `ssh <host> '…'` commands in the transcript name B. Defaults
+  to `inference_host` when work is local. (Live example 2026-06-06: session cwd=`scratch` on the mac,
+  `ssh jns` + abs-path edits to `~/agents` — tokens correctly on the mac, work on the server.)
+### 4.3 Task & project attribution — by ACTIVITY-MINING (automated, no human tags)
+The session's OWN tool calls are already in the transcript; the collector mines them to derive task +
+project + work_host with NO manual tagging and NO new hook:
+- `git checkout -b feat/issue-N-…` / branch refs → **task** (issue N), even cross-repo (the command
+  names it regardless of `cwd`).
+- `gh pr create`, commit messages (`Closes #N`), the `cd <repo>` / `ssh host 'cd <repo>'` path →
+  **project** + **work_host**.
+- `gitBranch` remains the easy fast-path when the session IS in-repo (no mining needed).
+- **Session segmentation:** a session can span several tasks/repos (this one did). Walk the transcript
+  chronologically tracking the *active* branch/repo/host, and attribute each message's tokens to the
+  task active at that timestamp — not the whole session to one task.
+- Fallbacks (rare): explicit task tag, else `task: unattributed` (honest, never guessed).
+- *(optional)* a real-time `PreToolUse` hook on git/`gh` commands stamps the same data live instead of
+  mining after — same source, earlier.
+- **Codex:** mine the same way from `~/.codex/sessions` payloads (`cwd`, function_call git/ssh commands),
+  or tag at the `codex exec` wrapper (we control it).
 - `task_tier` (TRIVIAL/SIMPLE/COMPLEX) derived from `files_changed` bands (§5) or the issue label.
 
 ## §5 Normalization — the actual point (raw tokens-by-project is misleading)
@@ -92,17 +111,21 @@ The **data layer (shards) is identical** for later view tiers, so the view is sw
   stack) — only if interactive slicing is wanted.
 
 ## §8 Build order
-1. **Claude collector** — transcript → normalized shard (productionize the 2026-06-06 prototype).
-2. **Codex collector** — `~/.codex/sessions/**` → normalized shard.
+1. **Claude collector** — transcript → normalized shard (productionize the 2026-06-06 prototype),
+   incl. the **activity-miner** (§4.3) that walks the transcript chronologically extracting
+   task/project/work_host from git/`gh`/`ssh` tool calls + segments multi-task sessions.
+2. **Codex collector** — `~/.codex/sessions/**` → normalized shard (same activity-mining).
 3. **Pricing** — both providers in `PRICES`.
-4. **Account capture** — SessionStart hook + sidecar; collector join.
+4. **Account capture** — SessionStart hook + sidecar; collector join (`inference_host` is free).
 5. **Aggregator + normalization** — join git `files_changed`; compute $/PR, $/file, $/tier, cache-%.
-6. **Static HTML trend report** (Tier A).
+6. **Static HTML trend report** (Tier A): by project/account/inference_host/work_host/model/task-tier.
 7. *(later)* right-sizing analysis (cost×rework by model×tier); FastAPI dashboard (Tier B).
 
-## §9 Open decisions (confirm before/while building)
-- Reporting starts at **Tier A static HTML** (confirmed).
-- **Account split required** in v1 (confirmed) — drives §4.1.
-- **Computer/host required** in v1 (confirmed) — §4.2 (free).
-- Cross-repo task attribution: accept `unattributed` for cross-repo abs-path sessions in v1, or add the
-  task tag now? (Recommend: accept `unattributed` in v1, add tag if it proves common.)
+## §9 Open decisions
+- Reporting starts at **Tier A static HTML** — confirmed.
+- **Account split** required in v1 — confirmed (§4.1).
+- **Computer/host** required in v1 — confirmed; captured as **inference_host + work_host** (§4.2).
+- Cross-repo / SSH-develop task attribution — **resolved by activity-mining (§4.3)**, no manual tag
+  needed; `unattributed` only when no git/ssh activity exists to mine.
+- Remaining knob: per-message segmentation granularity vs. per-task-block (start coarse — segment on
+  branch/repo/host *changes* — refine only if attribution looks lumpy).
