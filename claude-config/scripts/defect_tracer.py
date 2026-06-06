@@ -109,23 +109,31 @@ _NEGATION_RE = re.compile(
 )
 
 
-def _negated_before(text: str, start: int, window: int = 24) -> bool:
-    """True if an aversion word appears in the `window` chars immediately before `start` — meaning the
-    revert/regression mention is negated ("do not revert", "prevents regression") and must be dropped."""
-    return _NEGATION_RE.search(text[max(0, start - window) : start]) is not None
+_CLAUSE_BOUNDARY_RE = re.compile(r"[.;!?\n]")
+
+
+def _negated_before(text: str, start: int) -> bool:
+    """True if an aversion word appears anywhere in the CLAUSE preceding `start` (back to the nearest
+    sentence/clause boundary) — meaning the revert/regression mention is negated and must be dropped.
+    Clause-scoped (not a fixed char window) so distant negations like "do not under any circumstances
+    revert #42" are caught, while a negation in a PRIOR sentence does not bleed in (Codex re-review)."""
+    boundaries = list(_CLAUSE_BOUNDARY_RE.finditer(text, 0, start))
+    clause_start = boundaries[-1].end() if boundaries else 0
+    return _NEGATION_RE.search(text[clause_start:start]) is not None
 
 
 def _extract_refs(regex: re.Pattern, text: str, *, repo: str | None) -> list:
     """Extract local PR references from `text` for a detection regex, applying the negation and
-    cross-repo guards. A repo-qualified ref is kept only when it matches `repo` (or `repo` is unknown,
-    since GitHub auto-reverts qualify with the SAME repo)."""
+    cross-repo guards. Precision≫recall: a repo-qualified "owner/repo#N" ref is kept ONLY when the
+    local repo is KNOWN and matches — when `repo` is None we cannot confirm it is local, so we DROP it
+    (Codex re-review F2). Bare "#N" (same-repo shorthand) is always eligible."""
     refs = []
     for m in regex.finditer(text):
         if _negated_before(text, m.start()):
             continue
         ref_repo = m.group("repo")
-        if ref_repo and repo and ref_repo.lower() != repo.lower():
-            continue  # different repo's #N — not a local target
+        if ref_repo and (repo is None or ref_repo.lower() != repo.lower()):
+            continue  # unconfirmed-local or different repo's #N — not a local target
         refs.append(int(m.group("num")))
     return sorted(set(refs))
 
@@ -280,6 +288,10 @@ def label_target(
     windows = tuple(sorted(windows))
     # A PR can never label ITSELF defective; corrections must land strictly after the target (Codex F4).
     events = [e for e in correction_events if e.get("number") != num]
+    # Admissibility is global (coverage vs threshold) — apply it to EACH per-window non-observed entry
+    # too, so a window-level consumer can't read below-coverage absence as "clean" (Codex re-review F5).
+    admissible = coverage is not None and coverage >= recall_threshold
+    absent_label = LABEL_NO_DEFECT if admissible else LABEL_INDETERMINATE
     per_window: dict = {}
     observed = False
     max_tier = TIER_NOISE
@@ -306,7 +318,7 @@ def label_target(
         else:
             per_window[w] = {
                 "observed": False,
-                "label": LABEL_NO_DEFECT,
+                "label": absent_label,
                 "coverage": coverage,
             }
     if observed:
@@ -321,15 +333,14 @@ def label_target(
     # No correction observed. The label is admissible as a *quality* signal only if coverage clears the
     # recall threshold; below it (or coverage unknown) emit a DISTINCT label so "absence" can never be
     # silently consumed as "clean" (Codex F5, §0.6).
-    metric_admissible = coverage is not None and coverage >= recall_threshold
     return {
         "number": num,
-        "label": LABEL_NO_DEFECT if metric_admissible else LABEL_INDETERMINATE,
+        "label": LABEL_NO_DEFECT if admissible else LABEL_INDETERMINATE,
         "coverage": coverage,
-        "metric_admissible": metric_admissible,
+        "metric_admissible": admissible,
         "per_window": per_window,
         "note": None
-        if metric_admissible
+        if admissible
         else "coverage_below_recall_threshold__withheld_from_targets",
     }
 
@@ -428,21 +439,24 @@ def run_calibration(
 
 
 def calibration_authorizes_emission(calibration: dict | None) -> bool:
-    """Independently RE-VERIFY a calibration result before trusting it to open the anchor gate — never
-    take a bare `passed` flag on faith (Codex F1: a forged `{"passed": True}` must not emit anchors).
-    Requires an `allowed` verdict backed by a real ≥CALIB_MIN_SAMPLE round at precision ≥ CALIB_PRECISION_GATE."""
+    """Authorize the anchor gate from the calibration round's EVIDENCE, not its summary fields. The
+    decision is RE-DERIVED from the confusion-matrix counts (tp/fp) rather than trusting the reported
+    `precision`/`passed` flags — so a forged `{"passed": True, "precision": 0.9}` with no real round
+    does NOT open the gate (Codex F1 + re-review). A determined caller can still author internally
+    consistent counts; true tamper-resistance needs the signed audit log (`log_calibration`), a v2 item.
+
+    Requires: an `allowed` verdict, integer tp/fp/sample_size, sample ≥ CALIB_MIN_SAMPLE, at least one
+    positive prediction (tp+fp > 0), counts not exceeding the sample, and RECOMPUTED precision ≥ gate."""
     if not isinstance(calibration, dict):
         return False
-    sample = calibration.get("sample_size")
-    precision = calibration.get("precision")
-    return (
-        calibration.get("passed") is True
-        and calibration.get("anchor_emission") == "allowed"
-        and isinstance(sample, int)
-        and sample >= CALIB_MIN_SAMPLE
-        and isinstance(precision, (int, float))
-        and precision >= CALIB_PRECISION_GATE
-    )
+    if calibration.get("anchor_emission") != "allowed":
+        return False
+    tp, fp, sample = (calibration.get(k) for k in ("tp", "fp", "sample_size"))
+    if not all(isinstance(x, int) for x in (tp, fp, sample)):
+        return False
+    if tp + fp <= 0 or sample < CALIB_MIN_SAMPLE or sample < tp + fp:
+        return False
+    return (tp / (tp + fp)) >= CALIB_PRECISION_GATE
 
 
 def log_calibration(result: dict, sink_path) -> dict:
@@ -494,15 +508,18 @@ def trace_prs(
     )
     coverage = cov["coverage"]
     if not calibration_authorizes_emission(calibration):
+        # Gate CLOSED: withhold ALL anchor-bearing data — not just `labels`, but `correction_events`
+        # too (they carry correction_or_defect classifications + target references). Returning them
+        # would let a consumer read anchor signals despite the closed gate (Codex re-review F2). Only
+        # non-label counts survive, for diagnostics.
         return {
             "anchor_emission": "blocked",
             "reason": calibration.get("reason", "calibration_unauthorized")
             if isinstance(calibration, dict)
             else "calibration_unauthorized",
-            "calibration": calibration,
             "coverage": cov,
-            "correction_events": events,
-            "recall_candidates": candidates,
+            "correction_event_count": len(events),
+            "recall_candidate_count": len(candidates),
             "labels": [],
         }
     labels = [

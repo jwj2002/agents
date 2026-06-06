@@ -84,8 +84,8 @@ def test_clause_spanning_mentions_do_not_false_classify():
         )
         is None
     )
-    # but the canonical GitHub forms still classify
-    assert T.classify_pr(_pr(83, body="Reverts owner/agents#42"))["tier"] == T.TIER_HIGH
+    # but the canonical GitHub forms still classify (bare #N is same-repo shorthand)
+    assert T.classify_pr(_pr(83, body="Reverts #42"))["tier"] == T.TIER_HIGH
     assert (
         T.classify_pr(_pr(84, body="regression introduced in #42"))["tier"]
         == T.TIER_MEDIUM
@@ -104,14 +104,36 @@ def test_adjacent_negation_does_not_classify():
     assert T.classify_pr(_pr(88, title='Revert "Fix login #42"', body="")) is None
 
 
-# Precision hardening (Codex F2): a cross-repo owner/repo#N is NOT a local target --------------------
-def test_cross_repo_reference_dropped_when_repo_known():
+# Precision hardening (Codex re-review F2): repo-qualified #N only honored when local repo confirmed --
+def test_cross_repo_reference_dropped():
     pr = _pr(90, body="Reverts otherorg/otherrepo#42")
     # repo known and mismatched → reference dropped (no local target marked)
     assert T.classify_pr(pr, repo="jwj2002/agents") is None
+    # repo UNKNOWN (None) → repo-qualified ref cannot be confirmed local → also dropped
+    assert T.classify_pr(pr) is None
+    assert T.classify_pr(_pr(92, body="Reverts owner/agents#42")) is None
     # same repo → kept
     same = _pr(91, body="Reverts jwj2002/agents#42")
     assert 42 in T.classify_pr(same, repo="jwj2002/agents")["references"]
+
+
+# Precision hardening (Codex re-review F3): negation anywhere in the clause is caught, not just nearby -
+def test_long_distance_clause_negation():
+    assert (
+        T.classify_pr(_pr(93, body="Do not under any circumstances revert #42."))
+        is None
+    )
+    assert (
+        T.classify_pr(
+            _pr(94, body="This does not appear to be caused by a regression from #42.")
+        )
+        is None
+    )
+    # a negation in a PRIOR sentence must NOT bleed into a clean revert clause
+    assert (
+        T.classify_pr(_pr(95, body="We will not merge yet. This reverts #42."))["tier"]
+        == T.TIER_HIGH
+    )
 
 
 # AC5 / required-test: no revert/regression signal → no_observed_defect WITH coverage annotation ----
@@ -375,3 +397,60 @@ def test_calibration_classifies_seeded_prs():
         1.0
     )  # every predicted-defect is a true defect
     assert res["anchor_emission"] == "allowed"
+    # and that real round authorizes emission via the evidence-based gate
+    assert T.calibration_authorizes_emission(res) is True
+
+
+# Gate integrity (Codex re-review F2): the BLOCKED output carries NO anchor-bearing data --------------
+def test_blocked_output_withholds_correction_events():
+    prs = T.from_gh_json(
+        [
+            {
+                "number": 42,
+                "title": "feat",
+                "body": "",
+                "mergedAt": "2026-06-01T00:00:00Z",
+            },
+            {
+                "number": 43,
+                "title": 'Revert "feat"',
+                "body": "This reverts #42.",
+                "mergedAt": "2026-06-03T00:00:00Z",
+            },
+        ]
+    )
+    out = T.trace_prs(prs, calibration={"passed": True})  # forged → blocked
+    assert out["anchor_emission"] == "blocked"
+    assert out["labels"] == []
+    # the anchor-bearing lists must be ABSENT — only non-label counts survive
+    assert "correction_events" not in out
+    assert "recall_candidates" not in out
+    assert out["correction_event_count"] == 1
+
+
+# Gate integrity (Codex re-review F1): forged evidence cannot fake the confusion matrix ---------------
+def test_evidence_based_gate_rejects_inconsistent_counts():
+    # claims precision 1.0 but supplies counts that recompute below the gate
+    sneaky = {
+        "anchor_emission": "allowed",
+        "passed": True,
+        "precision": 1.0,
+        "sample_size": 30,
+        "tp": 17,
+        "fp": 5,
+    }  # 17/22 = 0.77 < 0.9
+    assert T.calibration_authorizes_emission(sneaky) is False
+    # counts exceeding the sample are rejected
+    impossible = {"anchor_emission": "allowed", "tp": 40, "fp": 0, "sample_size": 30}
+    assert T.calibration_authorizes_emission(impossible) is False
+
+
+# Consistency (Codex re-review F5): below-threshold per-window entries are NOT labeled clean -----------
+def test_below_threshold_per_window_not_clean():
+    lab = T.label_target(
+        _pr(42), correction_events=[], coverage=0.2, recall_threshold=0.5
+    )
+    assert lab["label"] == T.LABEL_INDETERMINATE
+    for w in T.WINDOWS_DAYS:
+        assert lab["per_window"][w]["label"] == T.LABEL_INDETERMINATE
+        assert lab["per_window"][w]["label"] != T.LABEL_NO_DEFECT
