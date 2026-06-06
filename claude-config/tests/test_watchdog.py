@@ -122,15 +122,30 @@ def test_implementation_like_but_excluded():
     )
 
 
-# Required: PROVE-coverage alarm — code edits but no PROVE/CI reference → alarm ----------------------
+# Required: PROVE-coverage alarm — code edits but no INDEPENDENT verification → alarm ----------------
 def test_prove_coverage_alarm():
     session = {"session_id": "s2", "files_edited": ["a.py"], "commits": ["abc"]}
-    assert W.prove_coverage_alarm(session)["alert"] == W.ALERT_PROVE_COVERAGE
-    # with test/CI evidence → no alarm
-    assert W.prove_coverage_alarm({**session, "tests_ran": True}) is None
-    assert W.prove_coverage_alarm({**session, "ci": "https://ci/run/1"}) is None
+    # not in the independently-verified set → alarm
+    assert (
+        W.prove_coverage_alarm(session, verified_ids=set())["alert"]
+        == W.ALERT_PROVE_COVERAGE
+    )
+    # INDEPENDENTLY verified (CI/test record from an external source) → no alarm
+    assert W.prove_coverage_alarm(session, verified_ids={"s2"}) is None
+    # SELF-REPORTED success must NOT suppress the alarm (Codex F7 independence)
+    assert (
+        W.prove_coverage_alarm(
+            {**session, "tests_ran": True, "ci": "x"}, verified_ids=set()
+        )["alert"]
+        == W.ALERT_PROVE_COVERAGE
+    )
     # no code change → nothing to verify
-    assert W.prove_coverage_alarm({"session_id": "s3"}) is None
+    assert W.prove_coverage_alarm({"session_id": "s3"}, verified_ids=set()) is None
+    # a PR-only or tests-only artifact still counts as a code change (B5)
+    assert W.prove_coverage_alarm({"session_id": "s4", "prs": [12]}, verified_ids=set())
+    assert W.prove_coverage_alarm(
+        {"session_id": "s5", "tests_changed": ["t.py"]}, verified_ids=set()
+    )
 
 
 # Required: reconciliation gap — filesystem change not in session report → flagged ------------------
@@ -255,8 +270,36 @@ def test_run_exclusion_watchdog():
         },  # no prove
     ]
     recon = {"reported_files": ["a.py"], "filesystem_changed_files": ["a.py", "c.py"]}
-    alerts = W.run_exclusion_watchdog(sessions, reconciliation=recon, threshold=0.9)
+    alerts = W.run_exclusion_watchdog(
+        sessions, reconciliation=recon, threshold=0.9, verified_ids=set()
+    )
     names = _names(alerts)
     assert W.ALERT_IMPL_EXCLUDED in names
     assert W.ALERT_PROVE_COVERAGE in names
     assert W.ALERT_RECONCILIATION_GAP in names
+
+
+# Fail-closed (Codex review): missing/unknown evidence must ALARM, never read as healthy ------------
+def test_fail_closed_paths():
+    # missing hub_reachable field → hub-unreachable (not silently healthy)
+    assert _names(W.classify_liveness({"host": "h"}, now_ts=NOW)) == {
+        W.ALERT_HUB_UNREACHABLE
+    }
+    # unknown 'now' makes any heartbeat stale → poller-down fires (fail-closed staleness)
+    obs = {
+        "host": "h",
+        "hub_reachable": True,
+        "poller_last_beat": FRESH,
+        "capture_last_beat": FRESH,
+        "payload": {"x": 1},
+        "payload_valid": True,
+    }
+    assert W.ALERT_POLLER_DOWN in _names(W.classify_liveness(obs, now_ts=None))
+    # a shard whose records lack usable seq numbers is NOT silently contiguous
+    g = W.sequence_gaps("s", [{"ts": 1}, {"ts": 2}])
+    assert (
+        g is not None and g["alert"] == W.ALERT_SEQUENCE_GAP and g["unsequenced"] == 2
+    )
+    # bool seq values are not mistaken for ints
+    g2 = W.sequence_gaps("s", [{"seq": True}, {"seq": 2}])
+    assert g2 is not None and g2["unsequenced"] == 1

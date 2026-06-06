@@ -73,13 +73,12 @@ def _parse_ts(value) -> float | None:
 
 
 def _stale(last, now_ts, sla_seconds: int) -> bool:
-    """True if `last` is absent or older than the SLA. An ABSENT beat is stale (fail-safe: a missing
-    heartbeat is the alarm, never silently 'ok')."""
+    """True if `last` is absent/unparseable, the eval time is unknown, or `last` is older than the SLA.
+    FAIL-CLOSED: a missing heartbeat OR an unknown 'now' both count as stale — a watchdog that can't
+    confirm freshness must alarm, never read silence as 'ok' (Codex)."""
     lt, n = _parse_ts(last), _parse_ts(now_ts)
-    if lt is None:
+    if lt is None or n is None:
         return True
-    if n is None:
-        return False
     return (n - lt) > sla_seconds
 
 
@@ -91,8 +90,10 @@ def classify_liveness(
     poller_last_beat, capture_last_beat, payload(dict|None), payload_valid(bool), shard}. Each failure
     mode is its OWN alert (§0.1) — never collapsed into one generic 'silent'."""
     host = obs.get("host")
-    if obs.get("hub_reachable") is False:
-        # the hub is the source of truth; if it's unreachable, downstream beats are unknowable
+    if obs.get("hub_reachable") is not True:
+        # FAIL-CLOSED: only an explicit True is "reachable"; a missing/None hub signal is unknowable,
+        # so we alarm rather than let other fresh-looking fields pass as healthy (Codex). If the hub is
+        # unreachable, downstream beats are unknowable anyway.
         return [{"alert": ALERT_HUB_UNREACHABLE, "host": host}]
     alerts = []
     # poller-down: the poller's OWN heartbeat is absent/stale (distinct from the capture heartbeat —
@@ -155,21 +156,38 @@ def check_roster(
 # --- content-completeness ------------------------------------------------------------------------
 def sequence_gaps(shard, records: list) -> dict | None:
     """Per-shard monotonic sequence check: `records` carry int `seq`; a missing or duplicated seq means
-    dropped/replayed data. Returns one alert naming the shard + the missing/duplicate seqs, or None."""
-    seqs = [r.get("seq") for r in records if isinstance(r.get("seq"), int)]
+    dropped/replayed data. FAIL-CLOSED: records with a missing/non-int seq are NOT silently dropped —
+    they are counted as `unsequenced` and themselves raise the alert (malformed sequence evidence is a
+    completeness failure, Codex). Returns one alert naming the shard, or None when fully intact."""
+    seqs = [
+        r.get("seq")
+        for r in records
+        if isinstance(r.get("seq"), int) and not isinstance(r.get("seq"), bool)
+    ]
+    unsequenced = len(records) - len(seqs)
     if not seqs:
+        # no usable sequence numbers at all — alarm iff there were records to sequence
+        if records:
+            return {
+                "alert": ALERT_SEQUENCE_GAP,
+                "shard": shard,
+                "missing": [],
+                "duplicates": [],
+                "unsequenced": unsequenced,
+            }
         return None
     full = set(range(min(seqs), max(seqs) + 1))
     missing = sorted(full - set(seqs))
     seen, dups = set(), set()
     for s in seqs:
         (dups if s in seen else seen).add(s)
-    if missing or dups:
+    if missing or dups or unsequenced:
         return {
             "alert": ALERT_SEQUENCE_GAP,
             "shard": shard,
             "missing": missing,
             "duplicates": sorted(dups),
+            "unsequenced": unsequenced,
         }
     return None
 
@@ -207,14 +225,15 @@ def implementation_like_but_excluded(session: dict) -> dict | None:
     return None
 
 
-def prove_coverage_alarm(session: dict) -> dict | None:
-    """Code change present but NO PROVE/CI/test evidence — the change was never verified (§2.5). Uses
-    independent artifact evidence, not the session's self-reported success."""
-    has_code = bool(session.get("files_edited") or session.get("commits"))
-    has_prove = bool(
-        session.get("prove") or session.get("ci") or session.get("tests_ran")
-    )
-    if has_code and not has_prove:
+def prove_coverage_alarm(session: dict, *, verified_ids=frozenset()) -> dict | None:
+    """Code change present but NOT independently verified — the change may never have been PROVEd (§2.5).
+    Independence (Codex F7): verification comes from `verified_ids` — the set of session ids an
+    INDEPENDENT source (CI API / test runner / PROVE record) confirmed — NOT from the session's own
+    self-reported `prove`/`ci`/`tests_ran` fields. Code-change detection uses the FULL artifact set
+    (files/commits/PRs/tests), so a PR-only or tests-only change can't dodge the alarm (Codex)."""
+    has_code = bool(_impl_artifacts(session))
+    verified = session.get("session_id") in (verified_ids or frozenset())
+    if has_code and not verified:
         return {"alert": ALERT_PROVE_COVERAGE, "session_id": session.get("session_id")}
     return None
 
@@ -288,16 +307,23 @@ def run_liveness_watchdog(
 
 
 def run_exclusion_watchdog(
-    sessions: list, *, reconciliation: dict | None = None, threshold: float = 0.5
+    sessions: list,
+    *,
+    reconciliation: dict | None = None,
+    threshold: float = 0.5,
+    verified_ids=frozenset(),
 ) -> list:
     """All exclusion-family alerts: rate alarms + per-session impl-excluded / prove-coverage +
-    (optionally) a filesystem reconciliation gap."""
+    (optionally) a filesystem reconciliation gap. `verified_ids` is the INDEPENDENT verification set
+    (CI/PROVE) used by the prove-coverage check — never the sessions' self-reported success."""
     alerts = list(exclusion_rate_alarm(sessions, threshold=threshold))
     for s in sessions:
-        for detector in (implementation_like_but_excluded, prove_coverage_alarm):
-            a = detector(s)
-            if a:
-                alerts.append(a)
+        impl = implementation_like_but_excluded(s)
+        if impl:
+            alerts.append(impl)
+        prove = prove_coverage_alarm(s, verified_ids=verified_ids)
+        if prove:
+            alerts.append(prove)
     if reconciliation:
         g = reconciliation_gap(
             reconciliation.get("reported_files"),
