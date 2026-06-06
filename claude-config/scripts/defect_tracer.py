@@ -66,6 +66,9 @@ CALIB_MIN_SAMPLE = 30  # ≥30 stratified cases per round
 CALIB_PRECISION_GATE = (
     0.9  # anchor-label emission requires precision ≥ 0.9 on the seeded set
 )
+CALIB_MAX_AGE_DAYS = (
+    90  # recalibrate quarterly (§2.2 cadence); a stale round can't authorize
+)
 
 # --- recall-estimation signals (low-precision; coverage ONLY, NEVER an individual defect label) ---
 RECALL_SIGNALS = (
@@ -86,9 +89,12 @@ RECALL_SIGNALS = (
 #       flips the meaning; `_negated_before` drops those matches (Codex F2/F3).
 #   (c) CROSS-REPO — an "owner/repo#N" qualifier that doesn't match the tracer's own repo is a
 #       reference to a DIFFERENT repo's #N, not a local target (Codex F2); `_extract_refs` drops it.
-# Requires a #N, so a commit-SHA-only revert (squash-collapsed lineage) does NOT map (§2.2).
+# Requires a #N, so a commit-SHA-only revert (squash-collapsed lineage) does NOT map (§2.2). The verb
+# must be ACCOMPLISHED tense ("reverts"/"reverted") — bare imperative "revert #42" is prospective/
+# discussed ("a tool to revert #42 if needed", "option considered: revert #42") and must NOT count as
+# a correction event (Codex re-review 3).
 _REVERT_PR_RE = re.compile(
-    r"\brevert(?:s|ed)?\b\s*(?:of\s+|pull request\s+)?(?P<repo>[-\w.]+/[-\w.]+)?#(?P<num>\d+)",
+    r"\brevert(?:s|ed)\b\s*(?:of\s+|pull request\s+)?(?P<repo>[-\w.]+/[-\w.]+)?#(?P<num>\d+)",
     re.IGNORECASE,
 )
 # "This reverts commit deadbeef" — detected but UNMAPPED (PR-level only; no usable target).
@@ -438,21 +444,31 @@ def run_calibration(
     }
 
 
+def _is_count(x) -> bool:
+    """A real non-negative integer count — excludes bool (an int subclass) and negatives."""
+    return isinstance(x, int) and not isinstance(x, bool) and x >= 0
+
+
 def calibration_authorizes_emission(calibration: dict | None) -> bool:
     """Authorize the anchor gate from the calibration round's EVIDENCE, not its summary fields. The
     decision is RE-DERIVED from the confusion-matrix counts (tp/fp) rather than trusting the reported
     `precision`/`passed` flags — so a forged `{"passed": True, "precision": 0.9}` with no real round
-    does NOT open the gate (Codex F1 + re-review). A determined caller can still author internally
-    consistent counts; true tamper-resistance needs the signed audit log (`log_calibration`), a v2 item.
+    does NOT open the gate (Codex F1 + re-review). NOTE: an in-process dict is NEVER fully tamper-proof
+    (a caller can author internally consistent counts); the PRODUCTION gate is `authorized_from_log`,
+    which ties authorization to the persisted, freshness-checked audit log. This dict check is the
+    in-process/testing path and a defense against ACCIDENTAL bypass.
 
-    Requires: an `allowed` verdict, integer tp/fp/sample_size, sample ≥ CALIB_MIN_SAMPLE, at least one
-    positive prediction (tp+fp > 0), counts not exceeding the sample, and RECOMPUTED precision ≥ gate."""
+    Requires: an `allowed` verdict, non-negative-int tp/fp/sample_size (no bools), sample ≥
+    CALIB_MIN_SAMPLE, at least one positive prediction (tp+fp > 0), counts not exceeding the sample,
+    and RECOMPUTED precision ≥ gate."""
     if not isinstance(calibration, dict):
         return False
     if calibration.get("anchor_emission") != "allowed":
         return False
     tp, fp, sample = (calibration.get(k) for k in ("tp", "fp", "sample_size"))
-    if not all(isinstance(x, int) for x in (tp, fp, sample)):
+    # Reject bools (bool IS an int subclass) and negatives — else nonsense like fp=-29 recomputes a
+    # passing precision and bypasses the matrix check (Codex re-review 3).
+    if not all(_is_count(x) for x in (tp, fp, sample)):
         return False
     if tp + fp <= 0 or sample < CALIB_MIN_SAMPLE or sample < tp + fp:
         return False
@@ -469,6 +485,47 @@ def log_calibration(result: dict, sink_path) -> dict:
     with p.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(rec, sort_keys=True) + "\n")
     return rec
+
+
+def latest_calibration(log_path) -> dict | None:
+    """The most recent `calibration_round` record in the audit log, or None if none/unreadable."""
+    from pathlib import Path
+
+    p = Path(log_path)
+    if not p.exists():
+        return None
+    last = None
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if rec.get("event") == "calibration_round":
+            last = rec
+    return last
+
+
+def authorized_from_log(
+    log_path, *, now_ts: float | None = None, max_age_days: int = CALIB_MAX_AGE_DAYS
+) -> dict:
+    """PRODUCTION anchor gate: authorize from the PERSISTED audit log, not a caller-passed dict. The
+    authorization is tied to a logged round (written by `run_calibration` → `log_calibration`) AND must
+    be within the recalibration cadence (§2.2 quarterly). This raises the bar from "forge an argument"
+    to "forge a dated, passing entry in the on-disk audit log within the freshness window". (Full
+    tamper-resistance — signing the log — is a documented v2 item.)"""
+    rec = latest_calibration(log_path)
+    if rec is None:
+        return {"authorized": False, "reason": "no_calibration_logged"}
+    if not calibration_authorizes_emission(rec):
+        return {"authorized": False, "reason": "latest_round_failed"}
+    if now_ts is not None and rec.get("round_ts"):
+        ts = _parse_ts(rec["round_ts"])
+        if ts is not None and (now_ts - ts) > max_age_days * 86400:
+            return {"authorized": False, "reason": "calibration_stale", "round": rec}
+    return {"authorized": True, "reason": "ok", "round": rec}
 
 
 # --- session association (#229 dependency) -------------------------------------------------------
@@ -490,33 +547,44 @@ def associate_sessions(labeled_prs: list, session_meta: dict) -> list:
 def trace_prs(
     prs: list,
     *,
-    calibration: dict,
+    calibration: dict | None = None,
+    calibration_log_path=None,
+    now_ts: float | None = None,
     recall_threshold: float = 0.5,
     windows: tuple = WINDOWS_DAYS,
     session_meta: dict | None = None,
     repo: str | None = None,
 ) -> dict:
-    """Full tracer pass over normalized PR records. HONORS THE CALIBRATION GATE: anchor labels are
-    emitted ONLY when `calibration_authorizes_emission` independently re-verifies the round (a real
-    ≥30-case preflight at precision ≥ 0.9) — a bare `passed` flag is NOT trusted. Otherwise every PR
-    is labeled across the three windows, annotated with estimated coverage, with positive labels
-    withheld from targets below the recall threshold."""
+    """Full tracer pass over normalized PR records. HONORS THE CALIBRATION GATE. PRODUCTION callers
+    pass `calibration_log_path` (+ `now_ts`): authorization comes from the persisted, freshness-checked
+    audit log via `authorized_from_log`. The in-process/testing path passes a `calibration` dict, which
+    is re-verified from its confusion-matrix evidence. Either way a forged/absent/stale round emits NO
+    anchor labels. When authorized, every PR is labeled across the three windows, annotated with
+    estimated coverage, with positive labels withheld from targets below the recall threshold."""
     events = build_correction_index(prs, repo=repo)
     candidates = recall_candidates(prs)
     cov = estimate_coverage(
         high_precision_count=len(events), recall_candidate_count=len(candidates)
     )
     coverage = cov["coverage"]
-    if not calibration_authorizes_emission(calibration):
+    if calibration_log_path is not None:
+        auth = authorized_from_log(calibration_log_path, now_ts=now_ts)
+        authorized, reason = auth["authorized"], auth["reason"]
+    else:
+        authorized = calibration_authorizes_emission(calibration)
+        reason = (
+            calibration.get("reason", "calibration_unauthorized")
+            if isinstance(calibration, dict)
+            else "calibration_unauthorized"
+        )
+    if not authorized:
         # Gate CLOSED: withhold ALL anchor-bearing data — not just `labels`, but `correction_events`
         # too (they carry correction_or_defect classifications + target references). Returning them
         # would let a consumer read anchor signals despite the closed gate (Codex re-review F2). Only
         # non-label counts survive, for diagnostics.
         return {
             "anchor_emission": "blocked",
-            "reason": calibration.get("reason", "calibration_unauthorized")
-            if isinstance(calibration, dict)
-            else "calibration_unauthorized",
+            "reason": reason,
             "coverage": cov,
             "correction_event_count": len(events),
             "recall_candidate_count": len(candidates),

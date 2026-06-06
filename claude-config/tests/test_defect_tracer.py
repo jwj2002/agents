@@ -454,3 +454,89 @@ def test_below_threshold_per_window_not_clean():
     for w in T.WINDOWS_DAYS:
         assert lab["per_window"][w]["label"] == T.LABEL_INDETERMINATE
         assert lab["per_window"][w]["label"] != T.LABEL_NO_DEFECT
+
+
+# Gate integrity (Codex round 3): bool/negative counts cannot forge a passing matrix -----------------
+def test_gate_rejects_bool_and_negative_counts():
+    # bool is an int subclass — must be rejected
+    assert (
+        T.calibration_authorizes_emission(
+            {"anchor_emission": "allowed", "tp": True, "fp": False, "sample_size": 30}
+        )
+        is False
+    )
+    # negative fp recomputes a passing precision — must be rejected
+    assert (
+        T.calibration_authorizes_emission(
+            {"anchor_emission": "allowed", "tp": 30, "fp": -29, "sample_size": 30}
+        )
+        is False
+    )
+
+
+# Precision (Codex round 3): prospective/discussed reverts are NOT correction events -----------------
+def test_prospective_revert_not_classified():
+    assert T.classify_pr(_pr(96, body="Adds a tool to revert #42 if needed.")) is None
+    assert T.classify_pr(_pr(97, body="Option considered: revert #42.")) is None
+    assert T.classify_pr(_pr(98, body="Please revert #42 when ready.")) is None
+    # accomplished tense still classifies
+    assert T.classify_pr(_pr(99, body="This reverts #42."))["tier"] == T.TIER_HIGH
+    assert T.classify_pr(_pr(100, body="Reverted #42."))["tier"] == T.TIER_HIGH
+
+
+# Production gate (Codex round 3): authorization comes from the persisted, fresh audit log -----------
+def test_authorized_from_log(tmp_path):
+    log = tmp_path / "calib.jsonl"
+    # no log yet → not authorized
+    assert T.authorized_from_log(log)["authorized"] is False
+    assert T.authorized_from_log(log)["reason"] == "no_calibration_logged"
+    # log a real passing round
+    T.log_calibration(
+        T.run_calibration(_seeded(tp=27, fp=2, tn=5), round_ts="2026-06-01T00:00:00Z"),
+        log,
+    )
+    fresh = T.authorized_from_log(log, now_ts=T._parse_ts("2026-06-15T00:00:00Z"))
+    assert fresh["authorized"] is True
+    # the same round 200 days later is STALE (quarterly cadence) → not authorized
+    stale = T.authorized_from_log(log, now_ts=T._parse_ts("2026-12-20T00:00:00Z"))
+    assert stale["authorized"] is False
+    assert stale["reason"] == "calibration_stale"
+
+
+def test_trace_prs_uses_calibration_log(tmp_path):
+    log = tmp_path / "calib.jsonl"
+    prs = T.from_gh_json(
+        [
+            {
+                "number": 42,
+                "title": "feat",
+                "body": "",
+                "mergedAt": "2026-06-01T00:00:00Z",
+            },
+            {
+                "number": 43,
+                "title": 'Revert "feat"',
+                "body": "This reverts #42.",
+                "mergedAt": "2026-06-03T00:00:00Z",
+            },
+        ]
+    )
+    # no logged calibration → blocked even though no dict was forged
+    out_blocked = T.trace_prs(prs, calibration_log_path=log)
+    assert out_blocked["anchor_emission"] == "blocked"
+    assert out_blocked["reason"] == "no_calibration_logged"
+    # after a real logged round → allowed
+    T.log_calibration(
+        T.run_calibration(_seeded(tp=27, fp=2, tn=5), round_ts="2026-06-01T00:00:00Z"),
+        log,
+    )
+    out_ok = T.trace_prs(
+        prs,
+        calibration_log_path=log,
+        now_ts=T._parse_ts("2026-06-10T00:00:00Z"),
+        recall_threshold=0.0,
+    )
+    assert out_ok["anchor_emission"] == "allowed"
+    assert {lbl["number"]: lbl["label"] for lbl in out_ok["labels"]}[
+        42
+    ] == T.LABEL_OBSERVED_DEFECT
