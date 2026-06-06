@@ -55,7 +55,10 @@ def build_entry(claude_json_path, session_id, *, now_ts: str) -> dict:
         data = json.loads(Path(claude_json_path).read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         data = {}
-    oa = data.get("oauthAccount") or {}
+    if not isinstance(data, dict):  # well-formed JSON but non-object → no-crash
+        data = {}
+    oa = data.get("oauthAccount")
+    oa = oa if isinstance(oa, dict) else {}
     for src, dst in _OAUTH_FIELDS.items():
         entry[dst] = oa.get(src)
     raw = oa.get("billingType")

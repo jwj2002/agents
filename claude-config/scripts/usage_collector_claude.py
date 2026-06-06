@@ -186,17 +186,19 @@ def load_account_map(sidecar_path) -> dict:
             e = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if e.get("session_id"):
+        if isinstance(e, dict) and e.get(
+            "session_id"
+        ):  # ignore non-object lines (no crash)
             out[e["session_id"]] = e  # last write wins
     return out
 
 
 def current_account(claude_json_path) -> dict:
     """The CURRENT logged-in account from ~/.claude.json — the historical fallback for sessions with no
-    sidecar entry (#265 §4.1). `account_uuid: "unknown"` only when the file is absent."""
-    try:
-        data = json.loads(Path(claude_json_path).read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+    sidecar entry (#265 §4.1). `account_uuid: "unknown"` ONLY when the file is ABSENT; a malformed/
+    unreadable file is `account_source: "unreadable"` (a distinct reason, never silently `unknown`)."""
+    p = Path(claude_json_path)
+    if not p.exists():
         return {
             "account_uuid": "unknown",
             "org": None,
@@ -204,7 +206,20 @@ def current_account(claude_json_path) -> dict:
             "billing_type": None,
             "account_source": "unknown",
         }
-    oa = data.get("oauthAccount") or {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {
+            "account_uuid": None,
+            "org": None,
+            "email": None,
+            "billing_type": None,
+            "account_source": "unreadable",
+        }
+    if not isinstance(data, dict):
+        data = {}
+    oa = data.get("oauthAccount")
+    oa = oa if isinstance(oa, dict) else {}
     return {
         "account_uuid": oa.get("accountUuid"),
         "org": oa.get("organizationName"),
