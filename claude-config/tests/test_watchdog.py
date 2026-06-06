@@ -303,3 +303,21 @@ def test_fail_closed_paths():
     # bool seq values are not mistaken for ints
     g2 = W.sequence_gaps("s", [{"seq": True}, {"seq": 2}])
     assert g2 is not None and g2["unsequenced"] == 1
+
+
+# Fail-closed (Codex re-review): a dead CAPTURE heartbeat alarms even when the poller beat is fresh ---
+def test_capture_down_not_masked_by_fresh_poller():
+    dead_capture = {
+        "host": "h",
+        "hub_reachable": True,
+        "poller_last_beat": FRESH,
+        "capture_last_beat": STALE,
+        "payload": {"x": 1},
+        "payload_valid": True,
+    }
+    names = _names(W.classify_liveness(dead_capture, now_ts=NOW))
+    assert W.ALERT_CAPTURE_DOWN in names
+    assert W.ALERT_POLLER_DOWN not in names  # poller is fine; only capture is down
+    # an entirely absent capture beat likewise alarms
+    absent = {"host": "h", "hub_reachable": True, "poller_last_beat": FRESH}
+    assert W.ALERT_CAPTURE_DOWN in _names(W.classify_liveness(absent, now_ts=NOW))

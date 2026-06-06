@@ -38,6 +38,9 @@ DEFAULT_SLA_SECONDS = 24 * 3600  # matches otel_sink's exporter SLA
 # --- liveness alert names (the five distinct failure states + the roster signal) ------------------
 ALERT_HUB_UNREACHABLE = "hub-unreachable"
 ALERT_POLLER_DOWN = "poller-down"
+ALERT_CAPTURE_DOWN = (
+    "capture-down"  # the capture heartbeat itself is absent/stale (hook is silent)
+)
 ALERT_HEARTBEAT_ONLY = "heartbeat-only"
 ALERT_CORRUPT = "corrupt-payload"
 ALERT_STALE_EXPORTER = "stale-exporter"
@@ -100,10 +103,14 @@ def classify_liveness(
     # else the watchdog dies silently and every host looks fine)
     if _stale(obs.get("poller_last_beat"), now_ts, sla_seconds):
         alerts.append({"alert": ALERT_POLLER_DOWN, "host": host})
-    # capture heartbeat present & fresh, but...
-    if not _stale(obs.get("capture_last_beat"), now_ts, sla_seconds):
+    if _stale(obs.get("capture_last_beat"), now_ts, sla_seconds):
+        # FAIL-CLOSED: a stale/absent CAPTURE heartbeat is a dead capture path — it must alarm on its
+        # own, NOT be masked by a fresh poller beat (Codex re-review). Distinct from poller-down.
+        alerts.append({"alert": ALERT_CAPTURE_DOWN, "host": host})
+    else:
+        # capture heartbeat present & fresh, but...
         if not obs.get("payload"):
-            # ...payload empty → heartbeat-only (alive but emitting nothing), NOT poller-down
+            # ...payload empty → heartbeat-only (alive but emitting nothing)
             alerts.append({"alert": ALERT_HEARTBEAT_ONLY, "host": host})
         elif obs.get("payload_valid") is False:
             # ...payload present but malformed → corrupt, naming the offending shard
