@@ -101,6 +101,19 @@ collector attributes per-message, so a 55-day session contributes to 55 days of 
 **Compaction/clear are costable events**: `/compact` re-seeds the prompt cache (a `cache_creation`
 spike) and `/clear` drops it — both visible in the token stream, so the report can surface
 "compaction overhead" (247 compactions is real, recurring cost).
+### 4.6 Codex bridge + shared account (verified 2026-06-06)
+Codex usage is logged in the `~/.codex/sessions` of the host where Codex RUNS. The **agent-b bridge**
+runs on jns-server → its usage is in the SERVER's logs, counted under `inference_host=jns-server`
+(confirmed: 28 server Codex sessions). Local `codex exec` reviews log on the Mac. So `inference_host`
+attributes bridge vs local Codex correctly — no special handling.
+- **One OpenAI account spans BOTH hosts** (`account_id b00e…`), so the `account` dimension does NOT
+  separate Mac-Codex from server-Codex — **`inference_host` does.** (Likely true for Claude too: one
+  Anthropic account across hosts → host is the separator; confirm per host at capture.)
+- On the shared server, the **bridge is NOT distinguishable from server-a's OWN Codex use** by account
+  or host (both jns-server + same account); they ARE separable by `project` (cwd) + `task` + time. A
+  dedicated "bridge" axis needs an explicit tag — OPTIONAL, not v1.
+- **Both collectors run per host**: a host's true cost = Claude transcripts + Codex sessions. (The
+  earlier server figure of ~$5,275 was Claude-only; its 28 Codex sessions are additional.)
 
 ## §5 Normalization — the actual point (raw tokens-by-project is misleading)
 A bigger project legitimately costs more, so efficiency is **cost per unit of work**:
