@@ -37,7 +37,7 @@ Measured (server-a, 95 sessions): ≈ 2.40B tokens ≈ **$5,275**.
 
 ## §3 Normalized record (both collectors emit the same shape)
 ```
-{provider, account, inference_host, work_host, project, model, task,
+{provider, account, billing_type, inference_host, work_host, project, model, task,
  input, output, cache_read, cache_creation, cost_usd,
  ts, session_id, files_changed?, task_tier?}
 ```
@@ -48,12 +48,17 @@ pattern the failures telemetry already uses). Cross-fleet aggregation = concaten
 ever enter a shard (auth.json is read for identity only, never the key — reuses the §229 raw-capture ban).
 
 ## §4 Closing the two capture gaps (everything else is mined from §2)
-### 4.1 Account (the one genuinely-new capture)
-- **Claude:** account/org is NOT in the transcript. Capture via a SessionStart hook that records
-  `{sessionId, account, org, ts}` to a local sidecar (`~/.claude/telemetry/account-map.jsonl`); the
-  collector joins `sessionId → account`. Sessions predating the hook are `account: "unknown"` (honest,
-  never guessed).
-- **Codex:** read `auth.json` (current identity) and `session_meta` (per-session if present).
+### 4.1 Account — the actual BILLING identity (one new capture)
+The billing account IS available, but lives in config/auth (the CURRENT login), not in the transcript —
+so capture it at session start; historical sessions default to "current account" (`unknown` only if
+never captured). Verified fields (2026-06-06):
+- **Claude:** `~/.claude.json` → `oauthAccount`: `emailAddress`, `organizationName`, `organizationUuid`,
+  `accountUuid`, **`billingType`**, `seatTier`, `organizationRateLimitTier`. A SessionStart hook records
+  `{sessionId, account_uuid, org, email, billing_type, ts}` to a sidecar
+  (`~/.claude/telemetry/account-map.jsonl`); the collector joins `sessionId → account`.
+- **Codex:** `~/.codex/auth.json` → `tokens.account_id` + JWT `email`/`sub`; stamp per session (and
+  `session_meta` if present).
+- **`billing_type` is REQUIRED on every record** because it changes what `cost_usd` MEANS — see §6.
 ### 4.2 Computer — TWO hosts (inference vs work), both captured
 - **`inference_host`** = where Claude/Codex ran = where tokens are billed. FREE: the collector runs
   per-host and stamps its own hostname via `lib/project_resolver.get_host_name()` (the shard path
@@ -88,6 +93,14 @@ unit**: each concurrent session is a separate transcript + `sessionId`, so (a) t
 double-counting, and (b) activity-mining (§4.3) is per-transcript → zero cross-session attribution
 bleed. `account`/`inference_host` roll the parallel sessions up; `task`/`project`/`session` separate
 them. The ONLY consequence is for TIME/RATE metrics (§5): parallel ≠ serial in wall-clock.
+### 4.5 Long-lived sessions — days/weeks, /clear, /compact (verified 2026-06-06)
+Sessions stay open for long spans (measured: up to **55 days**; 21 sessions span >1 day; one session
+**compacted 247×**). Handled because every MESSAGE carries its own `timestamp`: a long session's tokens
+are bucketed into daily/weekly trends by **message-time**, never lumped at the session's start. The
+collector attributes per-message, so a 55-day session contributes to 55 days of trend correctly.
+**Compaction/clear are costable events**: `/compact` re-seeds the prompt cache (a `cache_creation`
+spike) and `/clear` drops it — both visible in the token stream, so the report can surface
+"compaction overhead" (247 compactions is real, recurring cost).
 
 ## §5 Normalization — the actual point (raw tokens-by-project is misleading)
 A bigger project legitimately costs more, so efficiency is **cost per unit of work**:
@@ -103,11 +116,19 @@ A bigger project legitimately costs more, so efficiency is **cost per unit of wo
   must compute over the union of overlapping session spans — never sum wall-clock across parallel
   sessions (4 parallel ≠ 4× serial).
 
-## §6 Pricing
+## §6 Pricing — and what `cost_usd` actually MEANS (subscription vs metered)
 Extend `claude-config/scripts/otel_sink.py:PRICES` (Claude-only today) with OpenAI/Codex model rates
 (`gpt-5.5`, …), cache-aware per provider. Reuse `token_collector.session_cost` strict behavior: an
 unknown model is a LOUD error, never a silent zero. Sanity-check Claude rates against real Opus 4.8
 billing so the $ is trustworthy.
+
+**Critical: `cost_usd` is always the API-EQUIVALENT value of the tokens — NOT necessarily cash paid.**
+Drive interpretation off the account's `billing_type` (§4.1):
+- **subscription** (Claude Max / ChatGPT Pro): actual cash = the flat fee; `cost_usd` is *notional
+  API-equivalent value* (still the correct OPTIMIZATION metric — "what this work would meter at" — but
+  must be LABELED so it's not read as cash-out).
+- **api / metered**: `cost_usd` ≈ actual dollars billed.
+Reports (§7) show cost with this label; never present subscription notional value as spend.
 
 ## §7 Reporting — Tier A (static HTML) first
 A roll-up script reads all `usage.jsonl` shards → a **self-contained HTML page** (inline Chart.js, no
