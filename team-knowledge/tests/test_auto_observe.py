@@ -225,3 +225,59 @@ def test_extract_observations():
         ("testing", "MISSING_TEST"),
         ("testing", "SKIP_TEST"),
     ]
+
+
+# Robustness (Codex): malformed (non-dict) records are skipped, never crash extraction --------------
+def test_extract_skips_malformed_records():
+    records = [
+        None,
+        "oops",
+        123,
+        {"dev": "jason", "area": "testing", "guards_fired": "MISSING_TEST"},
+    ]
+    obs = A.extract_observations(records, dev="jason")
+    assert [(o["area"], o["candidate_key"]) for o in obs] == [
+        ("testing", "MISSING_TEST")
+    ]
+
+
+# Invariant (Codex): a stale/authored computed field in an UNTOUCHED existing entry is normalized ----
+def test_existing_entry_computed_fields_normalized(tmp_path):
+    # seed a tampered existing file: authored confidence + non-null efficacy on an entry we won't touch
+    area_dir = Path(tmp_path) / "testing"
+    area_dir.mkdir(parents=True)
+    tampered = {
+        "schema_version": 1,
+        "dev": "jason",
+        "area": "testing",
+        "patterns": [
+            {
+                "id": "jason:testing:SQLITE_COMPAT_TESTS",
+                "dev": "jason",
+                "area": "testing",
+                "pattern_key": "SQLITE_COMPAT_TESTS",
+                "practice": "x",
+                "source": "observed",
+                "observation_count": 4,
+                "occurrence_confidence": 0.999,  # authored/stale
+                "efficacy_confidence": 0.5,  # must be forced to None
+            }
+        ],
+    }
+    (area_dir / "jason.yaml").write_text(yaml.safe_dump(tampered))
+    # run auto-observe on a DIFFERENT key, leaving SQLITE_COMPAT_TESTS untouched by new obs
+    A.auto_observe(
+        "jason",
+        [{"dev": "jason", "area": "testing", "guards_fired": "MISSING_TEST"}],
+        taxonomy=TAXONOMY,
+        patterns_dir=tmp_path,
+    )
+    by_key = {
+        e["pattern_key"]: e for e in _read(tmp_path, "testing", "jason")["patterns"]
+    }
+    untouched = by_key["SQLITE_COMPAT_TESTS"]
+    assert untouched["efficacy_confidence"] is None  # forced null
+    assert untouched["occurrence_confidence"] == P.compute_occurrence_confidence(
+        4, n_cap=50
+    )
+    assert untouched["occurrence_confidence"] != 0.999  # authored literal scrubbed

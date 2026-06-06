@@ -58,6 +58,8 @@ def extract_observations(records: list, *, dev: str | None = None) -> list:
     — an area is required to resolve against the taxonomy."""
     out = []
     for r in records:
+        if not isinstance(r, dict):
+            continue  # skip malformed telemetry items (None/str/…) — never crash on them
         rdev = r.get("dev")
         if dev is not None and rdev != dev:
             continue
@@ -221,6 +223,17 @@ def auto_observe(
                                 "observed": e["pattern_key"],
                             }
                         )
+
+        # Normalize EVERY entry before writing (incl. untouched existing ones): occurrence_confidence
+        # is always recomputed from observation_count+source and efficacy_confidence forced to None, so
+        # an authored/stale computed field in a prior file can never leak through (Codex).
+        for e in entries.values():
+            e["efficacy_confidence"] = None
+            e["occurrence_confidence"] = P.compute_occurrence_confidence(
+                int(e.get("observation_count", 0) or 0),
+                source=e.get("source", "observed"),
+                n_cap=n_cap,
+            )
 
         _write_area_file(path, dev, area, entries)
         written.append(str(path))
