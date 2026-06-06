@@ -282,3 +282,14 @@ def test_auto_observe_rejects_forged_label():
     assert S.auto_observe_event(forged) is None
     # a label claiming good but with no confirmation fields at all is also rejected
     assert S.auto_observe_event({"label": S.LABEL_GOOD}) is None
+    # confirmation flags present but missing_exposure ABSENT (None, not []) must still be rejected
+    assert (
+        S.auto_observe_event(
+            {
+                "label": S.LABEL_GOOD,
+                "no_correction_confirmed": True,
+                "coverage_ok": True,
+            }
+        )
+        is None
+    )

@@ -159,6 +159,7 @@ def auto_observe_event(classification: dict) -> dict | None:
         classification.get("no_correction_confirmed") is not True
         or classification.get("coverage_ok") is not True
         or classification.get("missing_exposure")
+        != []  # explicit empty list, not merely absent
     ):
         return None
     return {
