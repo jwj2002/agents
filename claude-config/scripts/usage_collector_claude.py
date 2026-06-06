@@ -172,10 +172,110 @@ def _is_assistant_usage(entry: dict) -> bool:
     )
 
 
-def extract_records(entries: list, *, inference_host: str, strict: bool = True) -> list:
+def load_account_map(sidecar_path) -> dict:
+    """Read the SessionStart sidecar (account-map.jsonl) → {session_id: account-fields} (#265 §4.1)."""
+    p = Path(sidecar_path)
+    if not p.exists():
+        return {}
+    out = {}
+    for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            e = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(e, dict) and e.get(
+            "session_id"
+        ):  # ignore non-object lines (no crash)
+            out[e["session_id"]] = e  # last write wins
+    return out
+
+
+def current_account(claude_json_path) -> dict:
+    """The CURRENT logged-in account from ~/.claude.json — the historical fallback for sessions with no
+    sidecar entry (#265 §4.1). `account_uuid: "unknown"` ONLY when the file is ABSENT; a malformed/
+    unreadable file is `account_source: "unreadable"` (a distinct reason, never silently `unknown`)."""
+    p = Path(claude_json_path)
+    if not p.exists():
+        return {
+            "account_uuid": "unknown",
+            "org": None,
+            "email": None,
+            "billing_type": None,
+            "account_source": "unknown",
+        }
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {
+            "account_uuid": None,
+            "org": None,
+            "email": None,
+            "billing_type": None,
+            "account_source": "unreadable",
+        }
+    if not isinstance(data, dict):
+        data = {}
+    oa = data.get("oauthAccount")
+    oa = oa if isinstance(oa, dict) else {}
+    return {
+        "account_uuid": oa.get("accountUuid"),
+        "org": oa.get("organizationName"),
+        "email": oa.get("emailAddress"),
+        "billing_type": _classify_billing(oa.get("billingType")),
+        "account_source": "current_fallback",
+    }
+
+
+def _classify_billing(raw) -> str | None:
+    """subscription | metered (raw passthrough if unknown) — mirrors the hook's classifier (§6)."""
+    r = str(raw or "").lower()
+    if not r:
+        return None
+    if "subscription" in r or r in ("max", "pro", "team", "enterprise"):
+        return "subscription"
+    if r in ("console", "api", "metered", "usage_based", "pay_as_you_go"):
+        return "metered"
+    return raw
+
+
+def _apply_account(rec: dict, account_map: dict | None, fallback: dict | None) -> dict:
+    """Join account fields onto a record by session_id: sidecar entry → current-account fallback →
+    None (the #262 default). billing_type carries an account_source reason so it's never silently null."""
+    src = (account_map or {}).get(rec.get("session_id"))
+    if src:
+        rec.update(
+            account=src.get("account_uuid"),
+            org=src.get("org"),
+            email=src.get("email"),
+            billing_type=src.get("billing_type"),
+            account_source="sidecar",
+        )
+    elif fallback:
+        rec.update(
+            account=fallback.get("account_uuid"),
+            org=fallback.get("org"),
+            email=fallback.get("email"),
+            billing_type=fallback.get("billing_type"),
+            account_source=fallback.get("account_source", "current_fallback"),
+        )
+    return rec
+
+
+def extract_records(
+    entries: list,
+    *,
+    inference_host: str,
+    strict: bool = True,
+    account_map: dict | None = None,
+    fallback_account: dict | None = None,
+) -> list:
     """Core walker: chronological pass over ONE transcript's entries → normalized usage records.
     Tracks active task/project/work_host (segmentation); attributes each assistant message to the
-    state active at its timestamp; mines each entry's commands to update state for SUBSEQUENT messages."""
+    state active at its timestamp; mines each entry's commands to update state for SUBSEQUENT messages.
+    `account_map`/`fallback_account` (from #265) fill account/billing_type by session_id."""
     entries = sorted(entries, key=lambda e: e.get("timestamp") or "")
     active = {"task": "unattributed", "project": None, "work_host": inference_host}
     pending_compaction = False
@@ -219,7 +319,7 @@ def extract_records(entries: list, *, inference_host: str, strict: bool = True) 
                 "compaction": pending_compaction,
                 "dedup_key": dedup_key,
             }
-            records.append(rec)
+            records.append(_apply_account(rec, account_map, fallback_account))
             pending_compaction = False
         # mine this entry's commands → update active state for subsequent messages (segmentation)
         for cmd in _iter_commands(entry):
@@ -257,11 +357,22 @@ def _existing_dedup_keys(shard_path: Path) -> set:
 
 
 def collect(
-    projects_dir, shard_path, *, inference_host: str | None = None, strict: bool = True
+    projects_dir,
+    shard_path,
+    *,
+    inference_host: str | None = None,
+    strict: bool = True,
+    sidecar_path=None,
+    claude_json_path=None,
 ) -> dict:
-    """Walk all transcripts under `projects_dir`, emit normalized records, and APPEND new ones to
-    `shard_path` (append-only, idempotent: records whose dedup_key already exists are skipped)."""
+    """Walk all transcripts under `projects_dir`, emit normalized records (with #265 account join), and
+    APPEND new ones to `shard_path` (append-only, idempotent: dedup_key skip)."""
     inference_host = inference_host or get_host_name()
+    home = Path.home()
+    account_map = load_account_map(
+        sidecar_path or home / ".claude" / "telemetry" / "account-map.jsonl"
+    )
+    fallback_account = current_account(claude_json_path or home / ".claude.json")
     shard_path = Path(shard_path)
     seen = _existing_dedup_keys(shard_path)
     written = skipped = 0
@@ -269,7 +380,11 @@ def collect(
     with shard_path.open("a", encoding="utf-8") as fh:
         for tpath in sorted(glob.glob(str(Path(projects_dir) / "*" / "*.jsonl"))):
             for rec in extract_records(
-                read_transcript(tpath), inference_host=inference_host, strict=strict
+                read_transcript(tpath),
+                inference_host=inference_host,
+                strict=strict,
+                account_map=account_map,
+                fallback_account=fallback_account,
             ):
                 if rec["dedup_key"] in seen:
                     skipped += 1
