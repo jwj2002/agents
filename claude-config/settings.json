@@ -79,6 +79,10 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/load_learning_rules.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/usage_account_capture.py"
           }
         ]
       }
