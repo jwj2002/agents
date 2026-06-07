@@ -61,7 +61,7 @@ Required baseline:
   user work, ambiguous scope, GitHub/network/credential failure, or explicit
   user request for draft/local-only work.
 - Use squash merge by default, then sync `main`, prune, and delete the merged
-  branch.
+  branch. Prefer `~/agents/bin/agent-git cleanup` when available.
 - Prefer `~/agents/bin/agent-git ship` for agent-owned issues when available;
   use `--dry-run` to inspect stop gates before mutating GitHub.
 

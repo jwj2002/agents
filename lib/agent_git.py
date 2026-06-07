@@ -170,6 +170,37 @@ class ShipResult:
         }
 
 
+@dataclass
+class CleanupResult:
+    repo: str
+    default_branch: str
+    dry_run: bool
+    branch: str | None
+    deleted_branches: list[str]
+    skipped_branches: list[str]
+    steps: list[str]
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "repo": self.repo,
+            "default_branch": self.default_branch,
+            "dry_run": self.dry_run,
+            "branch": self.branch,
+            "deleted_branches": self.deleted_branches,
+            "skipped_branches": self.skipped_branches,
+            "steps": self.steps,
+            "errors": self.errors,
+            "warnings": self.warnings,
+        }
+
+
 class Runner:
     def __call__(self, args: list[str], cwd: Path) -> CommandResult:
         completed = subprocess.run(
@@ -607,6 +638,122 @@ def latest_commit_subject(runner: Runner, repo: Path) -> str:
     return subject.stdout.strip()
 
 
+def local_branch_exists(runner: Runner, repo: Path, branch: str) -> bool:
+    result = run_git(runner, repo, ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"])
+    return result.returncode == 0
+
+
+def merged_branches(runner: Runner, repo: Path, default_branch: str) -> list[str]:
+    result = run_git(runner, repo, ["branch", "--merged", default_branch, "--format=%(refname:short)"])
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def cleanup(
+    repo: Path,
+    *,
+    branch: str | None = None,
+    dry_run: bool = False,
+    no_pull: bool = False,
+    squash_merged_branch: bool = False,
+    runner: Runner | None = None,
+) -> CleanupResult:
+    runner = runner or Runner()
+    repo = repo.resolve()
+    errors: list[str] = []
+    warnings: list[str] = []
+    steps: list[str] = []
+    deleted: list[str] = []
+    skipped: list[str] = []
+
+    inside = run_git(runner, repo, ["rev-parse", "--is-inside-work-tree"])
+    if inside.returncode != 0:
+        return CleanupResult(
+            repo=str(repo),
+            default_branch="main",
+            dry_run=dry_run,
+            branch=branch,
+            deleted_branches=[],
+            skipped_branches=[],
+            steps=[],
+            errors=[f"Not a git repository: {repo}"],
+        )
+
+    default_branch = detect_default_branch(runner, repo)
+    current = run_git(runner, repo, ["branch", "--show-current"]).stdout.strip() or None
+    status = parse_status(run_git(runner, repo, ["status", "--porcelain=v1"]).stdout)
+    for item in status:
+        if item.kind != "ignored" and not item.generated:
+            errors.append(f"Unsafe dirty file blocks cleanup: {item.path} ({item.status}).")
+        elif item.kind != "ignored" and item.generated:
+            warnings.append(f"Generated or runtime dirty file present: {item.path} ({item.status}).")
+    if errors:
+        return CleanupResult(str(repo), default_branch, dry_run, branch, deleted, skipped, steps, errors, warnings)
+
+    steps.append(f"switch {default_branch}")
+    if not dry_run and current != default_branch:
+        switched = run_git(runner, repo, ["switch", default_branch])
+        if switched.returncode != 0:
+            errors.append(f"Could not switch to {default_branch}: {switched.stderr.strip()}")
+            return CleanupResult(str(repo), default_branch, dry_run, branch, deleted, skipped, steps, errors, warnings)
+
+    if not no_pull:
+        steps.append("pull --ff-only")
+        if not dry_run:
+            pulled = run_git(runner, repo, ["pull", "--ff-only"])
+            if pulled.returncode != 0:
+                errors.append(f"Could not fast-forward {default_branch}: {pulled.stderr.strip() or pulled.stdout.strip()}")
+                return CleanupResult(str(repo), default_branch, dry_run, branch, deleted, skipped, steps, errors, warnings)
+
+    steps.append("fetch --prune origin")
+    if not dry_run:
+        pruned = run_git(runner, repo, ["fetch", "--prune", "origin"])
+        if pruned.returncode != 0:
+            warnings.append("Could not prune origin; continuing with local branch cleanup.")
+
+    candidates: list[str]
+    if branch:
+        candidates = [branch]
+    else:
+        candidates = [
+            item
+            for item in merged_branches(runner, repo, default_branch)
+            if item != default_branch and item != current
+        ]
+
+    merged = set(merged_branches(runner, repo, default_branch))
+    for candidate in candidates:
+        if candidate == default_branch:
+            skipped.append(candidate)
+            warnings.append(f"Refusing to delete default branch: {candidate}.")
+            continue
+        if not local_branch_exists(runner, repo, candidate):
+            skipped.append(candidate)
+            warnings.append(f"Local branch does not exist: {candidate}.")
+            continue
+        if candidate not in merged and not squash_merged_branch:
+            skipped.append(candidate)
+            errors.append(f"Branch is not safely merged: {candidate}.")
+            continue
+        # Use -D only after our own safety check. `git branch -d` can refuse
+        # branches whose configured upstream is not merged even when the branch
+        # is merged into the local default branch we just verified.
+        delete_flag = "-D"
+        steps.append(f"branch {delete_flag} {candidate}")
+        if dry_run:
+            deleted.append(candidate)
+            continue
+        deleted_result = run_git(runner, repo, ["branch", delete_flag, candidate])
+        if deleted_result.returncode == 0:
+            deleted.append(candidate)
+        else:
+            skipped.append(candidate)
+            errors.append(f"Could not delete {candidate}: {deleted_result.stderr.strip() or deleted_result.stdout.strip()}")
+
+    return CleanupResult(str(repo), default_branch, dry_run, branch, deleted, skipped, steps, errors, warnings)
+
+
 def current_pr(runner: Runner, repo: Path) -> tuple[int | None, str | None]:
     result = runner(["gh", "pr", "view", "--json", "number,url"], repo)
     if result.returncode != 0:
@@ -857,11 +1004,25 @@ def ship(
             post_comment(runner, repo, pr_number, stop_comment(result))
         return result
 
-    run_git(runner, repo, ["switch", preflight_result.default_branch])
-    run_git(runner, repo, ["pull", "--ff-only"])
-    run_git(runner, repo, ["fetch", "--prune", "origin"])
-    if branch:
-        run_git(runner, repo, ["branch", "-D", branch])
+    cleanup_result = cleanup(repo, branch=branch, squash_merged_branch=True, runner=runner)
+    warnings.extend(item for item in cleanup_result.warnings if item not in warnings)
+    if not cleanup_result.ok:
+        errors.extend(cleanup_result.errors)
+        return ShipResult(
+            repo=str(repo),
+            branch=branch,
+            issue=resolved_issue,
+            dry_run=False,
+            stopped=True,
+            stop_reason="cleanup failed",
+            steps=steps,
+            preflight=preflight_result.to_dict(),
+            readiness=readiness_result.to_dict(),
+            errors=errors,
+            warnings=warnings,
+            pr_number=pr_number,
+            pr_url=pr_url,
+        )
 
     return ShipResult(
         repo=str(repo),
@@ -895,6 +1056,31 @@ def render_ship_text(result: ShipResult) -> str:
         lines.append(f"pr: #{result.pr_number}")
     if result.pr_url:
         lines.append(f"pr_url: {result.pr_url}")
+    if result.errors:
+        lines.append("")
+        lines.append("errors:")
+        lines.extend(f"- {item}" for item in result.errors)
+    if result.warnings:
+        lines.append("")
+        lines.append("warnings:")
+        lines.extend(f"- {item}" for item in result.warnings)
+    return "\n".join(lines) + "\n"
+
+
+def render_cleanup_text(result: CleanupResult) -> str:
+    lines = [
+        f"cleanup: {'pass' if result.ok else 'fail'}",
+        f"repo: {result.repo}",
+        f"default_branch: {result.default_branch}",
+        f"branch: {result.branch or '(auto)'}",
+        f"dry_run: {str(result.dry_run).lower()}",
+        "steps:",
+        *[f"- {step}" for step in result.steps],
+        f"deleted_branches: {len(result.deleted_branches)}",
+        *[f"- {branch}" for branch in result.deleted_branches],
+        f"skipped_branches: {len(result.skipped_branches)}",
+        *[f"- {branch}" for branch in result.skipped_branches],
+    ]
     if result.errors:
         lines.append("")
         lines.append("errors:")
@@ -943,12 +1129,27 @@ def add_ship_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
     parser.add_argument("--comment-on-stop", action="store_true", help="comment on the linked issue or PR when stopped")
 
 
+def add_cleanup_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser("cleanup", help="sync main, prune remotes, and delete safely merged branches")
+    parser.add_argument("--repo", default=".", help="repository path")
+    parser.add_argument("--json", action="store_true", help="emit JSON")
+    parser.add_argument("--branch", help="specific local branch to delete")
+    parser.add_argument("--dry-run", action="store_true", help="show cleanup actions without changing git state")
+    parser.add_argument("--no-pull", action="store_true", help="skip git pull --ff-only")
+    parser.add_argument(
+        "--squash-merged-branch",
+        action="store_true",
+        help="delete the named branch with -D after its squash-merged PR has been verified",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agent-git")
     subparsers = parser.add_subparsers(dest="command", required=True)
     add_preflight_parser(subparsers)
     add_readiness_parser(subparsers)
     add_ship_parser(subparsers)
+    add_cleanup_parser(subparsers)
 
     args = parser.parse_args(argv)
 
@@ -964,6 +1165,20 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
         else:
             print(render_preflight_text(result), end="")
+        return 0 if result.ok else 1
+
+    if args.command == "cleanup":
+        result = cleanup(
+            Path(args.repo),
+            branch=args.branch,
+            dry_run=args.dry_run,
+            no_pull=args.no_pull,
+            squash_merged_branch=args.squash_merged_branch,
+        )
+        if args.json:
+            print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+        else:
+            print(render_cleanup_text(result), end="")
         return 0 if result.ok else 1
 
     if args.command == "ship":

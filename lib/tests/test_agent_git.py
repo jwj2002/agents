@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from lib.agent_git import parse_status, preflight, readiness, ship
+from lib.agent_git import cleanup, parse_status, preflight, readiness, ship
 
 
 def run(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -364,3 +364,61 @@ def test_ship_cli_dry_run_json(tmp_path: Path) -> None:
     assert payload["ok"] is True
     assert payload["dry_run"] is True
     assert "squash_merge" in payload["steps"]
+
+
+def test_cleanup_deletes_merged_branch(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/tool.py")
+    git(["switch", "main"], work)
+    git(["merge", "--no-ff", "feature/issue-42-add-tooling", "-m", "merge test branch"], work)
+
+    result = cleanup(work, branch="feature/issue-42-add-tooling", no_pull=True)
+
+    assert result.ok
+    assert result.deleted_branches == ["feature/issue-42-add-tooling"]
+    branches = git(["branch", "--format=%(refname:short)"], work).stdout.splitlines()
+    assert "feature/issue-42-add-tooling" not in branches
+
+
+def test_cleanup_preserves_unmerged_branch(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/tool.py")
+    git(["switch", "main"], work)
+
+    result = cleanup(work, branch="feature/issue-42-add-tooling", no_pull=True)
+
+    assert not result.ok
+    assert result.skipped_branches == ["feature/issue-42-add-tooling"]
+    assert any("not safely merged" in error for error in result.errors)
+    branches = git(["branch", "--format=%(refname:short)"], work).stdout.splitlines()
+    assert "feature/issue-42-add-tooling" in branches
+
+
+def test_cleanup_blocks_unsafe_dirty_tree(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/tool.py")
+    git(["switch", "main"], work)
+    (work / "README.md").write_text("dirty\n", encoding="utf-8")
+
+    result = cleanup(work, branch="feature/issue-42-add-tooling", no_pull=True)
+
+    assert not result.ok
+    assert any("Unsafe dirty file blocks cleanup" in error for error in result.errors)
+
+
+def test_cleanup_dry_run_reports_branch_without_deleting(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/tool.py")
+    git(["switch", "main"], work)
+    git(["merge", "--no-ff", "feature/issue-42-add-tooling", "-m", "merge test branch"], work)
+
+    result = cleanup(work, branch="feature/issue-42-add-tooling", dry_run=True, no_pull=True)
+
+    assert result.ok
+    assert result.deleted_branches == ["feature/issue-42-add-tooling"]
+    branches = git(["branch", "--format=%(refname:short)"], work).stdout.splitlines()
+    assert "feature/issue-42-add-tooling" in branches
