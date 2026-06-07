@@ -1,6 +1,9 @@
 # Codex Configuration
 
-Portable Codex configuration that can be installed on any machine. Uses symlinks from `~/.codex` to this repo for shared rules and user skills while preserving local auth/history/sessions and machine-specific approval rules.
+Portable Codex configuration that can be installed on any machine. Uses
+symlinks from `~/.codex` to this repo for shared Codex guidance, shared
+command-policy rules, and user skills while preserving local
+auth/history/sessions and machine-specific approval rules.
 
 ## Installation
 
@@ -15,9 +18,13 @@ git clone https://github.com/jwj2002/agents.git ~/agents
 ## What It Links
 
 ```text
+~/.codex/AGENTS.md               -> ~/agents/codex-config/AGENTS.md
 ~/.codex/rules/shared.rules      -> ~/agents/codex-config/rules/shared.rules
 ~/.codex/skills/user             -> ~/agents/codex-config/skills/
 ```
+
+`AGENTS.md` is the behavioral instruction surface. `.rules` files are Codex
+command-policy files written in Starlark; do not put prose instructions there.
 
 ## What Stays Local
 

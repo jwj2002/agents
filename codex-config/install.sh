@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install Codex configuration: shared rules and user skills symlinks.
+# Install Codex configuration: shared guidance, rules, and user skills symlinks.
 #
 # Usage: ./install.sh
 #
@@ -53,6 +53,7 @@ echo ""
 echo "Phase 1: Symlinks"
 mkdir -p "$CODEX_DIR" "$CODEX_DIR/rules" "$CODEX_DIR/skills"
 
+link_item "$SCRIPT_DIR/AGENTS.md" "$CODEX_DIR/AGENTS.md" "AGENTS.md"
 link_item "$SCRIPT_DIR/rules/shared.rules" "$CODEX_DIR/rules/shared.rules" "rules/shared.rules"
 link_item "$SCRIPT_DIR/skills" "$CODEX_DIR/skills/user" "skills/user"
 
@@ -120,7 +121,7 @@ echo ""
 echo "Phase 3: Verify"
 ERRORS=0
 
-for target in "$CODEX_DIR/rules/shared.rules" "$CODEX_DIR/skills/user"; do
+for target in "$CODEX_DIR/AGENTS.md" "$CODEX_DIR/rules/shared.rules" "$CODEX_DIR/skills/user"; do
     if [ -L "$target" ] && [ -e "$target" ]; then
         :
     else
@@ -139,6 +140,7 @@ echo "  Symlinks:    ✓ $LINKS_TOTAL/$LINKS_TOTAL linked"
 echo "  Claude→Codex: $SKILLS_PORTED skill(s) shared, $SKILLS_SKIPPED skipped (Claude-only)"
 echo "  Notes:       ~/.codex/skills/.system remains local and untouched"
 echo "               ~/.codex/rules/default.rules remains local (machine approvals)"
+echo "               ~/.codex/AGENTS.md is shared Codex guidance"
 
 if [ "$BACKUP_CREATED" = true ]; then
     echo "  Backups:     $BACKUP_DIR"

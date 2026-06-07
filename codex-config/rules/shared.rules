@@ -1,45 +1,9 @@
-# Shared Codex rules tracked in git.
-# Keep machine-specific approvals in ~/.codex/rules/default.rules.
-
-## Operating Role
-
-Use Codex as a pragmatic implementation and adversarial review partner.
-Default to editing code when the user asks for a fix, but preserve user work
-and verify behavior before declaring completion.
-
-## Quality Bar
-
-- Read the actual files before making assumptions about APIs, enums, schemas, or component props.
-- Prefer small, intentional diffs over broad rewrites.
-- Keep one logical change per branch/PR.
-- Run the narrowest useful checks first, then the full relevant gate before handoff.
-- Treat tool failures, skipped tests, and missing dependencies as explicit risks, not success.
-
-## High-Frequency Failure Checks
-
-- `VERIFICATION_GAP`: Do not infer code structure from memory. Inspect source.
-- `ENUM_VALUE`: For fullstack enum/status/role fields, use backend enum values, not Python/TypeScript names.
-- `COMPONENT_API`: Before reusing a UI component or hook, read its source/types/PropTypes.
-- `MODEL_WITHOUT_MIGRATION`: SQLAlchemy/model persistence changes require a migration or an explicit reason.
-- `AUTH_DEPENDENCY_MISSING`: New write endpoints need auth/permission checks.
-- `SECRETS_IN_CODE`: Never read, print, edit, or commit secrets or `.env` files.
-
-## Verification Gates
-
-- Backend: `cd backend && ruff check . && pytest -q`
-- Frontend: `cd frontend && npm run lint && npm run build`
-- Config/tooling: run the repository-specific test or validation script when present.
-- If a gate cannot run, state exactly why and what remains unverified.
-
-## Claude + Codex Workflow
-
-- Claude is the preferred conductor for `/orchestrate`, issue routing, and artifact generation.
-- Codex is preferred for direct implementation, local test/debug loops, and adversarial reviews.
-- For complex work, ask Claude to produce MAP/PLAN, have Codex review the plan for gaps, implement, then have Codex review the diff before Claude runs PROVE.
-- Feed recurring Codex review findings back into Claude learning rules or project `CLAUDE.md`.
-
-## Git Safety
-
-- Never use `git reset --hard`, `git checkout -- <file>`, force-push, or destructive cleanup unless explicitly requested.
-- Do not bypass hooks with `--no-verify` unless explicitly authorized.
-- Before commit or PR work, check branch and status.
+# Shared Codex command-policy rules tracked in git.
+#
+# Codex .rules files are Starlark policy files, not prose instruction files.
+# Behavioral guidance belongs in codex-config/AGENTS.md, installed as
+# ~/.codex/AGENTS.md. Machine-specific approval decisions remain local in
+# ~/.codex/rules/default.rules.
+#
+# Add shared prefix_rule(...) entries here only when a command policy should
+# apply on every machine.
