@@ -9,6 +9,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CODEX_DIR="$HOME/.codex"
+AGENTS_SKILLS_DIR="$HOME/.agents/skills"
 BACKUP_DIR="$CODEX_DIR/config-backup-$(date +%Y%m%d-%H%M%S)"
 BACKUP_CREATED=false
 
@@ -31,14 +32,13 @@ link_item() {
     local label="$3"
     LINKS_TOTAL=$((LINKS_TOTAL + 1))
 
-    if [ -e "$target" ] && [ ! -L "$target" ]; then
-        backup_item "$target"
-        echo "  Backed up $label"
-    fi
-
     if [ -L "$target" ] && [ "$(readlink "$target")" = "$source" ]; then
         echo "  ✓ $label (already linked)"
     else
+        if [ -e "$target" ] || [ -L "$target" ]; then
+            backup_item "$target"
+            echo "  Backed up $label"
+        fi
         ln -sfn "$source" "$target"
         echo "  ✓ $label → linked"
         LINKS_CREATED=$((LINKS_CREATED + 1))
@@ -51,11 +51,20 @@ echo "  Target: $CODEX_DIR"
 echo ""
 
 echo "Phase 1: Symlinks"
-mkdir -p "$CODEX_DIR" "$CODEX_DIR/rules" "$CODEX_DIR/skills"
+mkdir -p "$CODEX_DIR" "$CODEX_DIR/rules" "$CODEX_DIR/skills" "$AGENTS_SKILLS_DIR"
 
 link_item "$SCRIPT_DIR/AGENTS.md" "$CODEX_DIR/AGENTS.md" "AGENTS.md"
 link_item "$SCRIPT_DIR/rules/shared.rules" "$CODEX_DIR/rules/shared.rules" "rules/shared.rules"
 link_item "$SCRIPT_DIR/skills" "$CODEX_DIR/skills/user" "skills/user"
+
+for skill_dir in "$SCRIPT_DIR/skills"/*/; do
+    [ -d "$skill_dir" ] || continue
+    name="$(basename "$skill_dir")"
+    [ -f "$skill_dir/SKILL.md" ] || continue
+
+    link_item "${skill_dir%/}" "$CODEX_DIR/skills/$name" "skills/$name (from codex-config)"
+    link_item "${skill_dir%/}" "$AGENTS_SKILLS_DIR/$name" ".agents/skills/$name (from codex-config)"
+done
 
 echo ""
 
@@ -92,6 +101,7 @@ if [ -d "$CLAUDE_SKILLS" ] && [ -x "$PORTABILITY_LINT" ]; then
 
         if "$PORTABILITY_LINT" "$skill_md" >/dev/null 2>&1; then
             link_item "${skill_dir%/}" "$CODEX_DIR/skills/$name" "skills/$name (from claude-config)"
+            link_item "${skill_dir%/}" "$AGENTS_SKILLS_DIR/$name" ".agents/skills/$name (from claude-config)"
             SKILLS_PORTED=$((SKILLS_PORTED + 1))
         else
             echo "  ⚠ skipping '$name' for Codex — Claude-only constructs:"
@@ -141,6 +151,7 @@ echo "  Claude→Codex: $SKILLS_PORTED skill(s) shared, $SKILLS_SKIPPED skipped 
 echo "  Notes:       ~/.codex/skills/.system remains local and untouched"
 echo "               ~/.codex/rules/default.rules remains local (machine approvals)"
 echo "               ~/.codex/AGENTS.md is shared Codex guidance"
+echo "               ~/.agents/skills contains documented Codex user skill links"
 
 if [ "$BACKUP_CREATED" = true ]; then
     echo "  Backups:     $BACKUP_DIR"
