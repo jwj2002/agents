@@ -26,7 +26,7 @@ helpers whenever possible.
 
 For agent-owned issues, the expected lifecycle is:
 
-1. Run preflight.
+1. Run `~/agents/bin/agent-git preflight`.
 2. Create a branch from latest `origin/main`.
 3. Implement the scoped change.
 4. Prove the change through the project's validation ladder.
@@ -60,11 +60,21 @@ Agents must stop before automatic merge when any of these apply:
 Before creating a branch or editing files, inspect:
 
 ```bash
-git status --short
-git branch --show-current
-git fetch origin --prune
-gh pr list --state open --json number,title,headRefName,files
+~/agents/bin/agent-git preflight
 ```
+
+Use JSON output when another tool or agent will consume the result:
+
+```bash
+~/agents/bin/agent-git preflight --json
+```
+
+Use `--path <path>` one or more times when the intended files are known and
+open PR overlap should be checked for those paths.
+
+Use `--include-ignored` only when ignored generated files matter for the
+investigation; default output intentionally avoids dumping ignored cache
+directories.
 
 Determine:
 

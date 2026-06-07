@@ -44,7 +44,8 @@ project-specific adapter.
 Required baseline:
 
 - Run preflight before edits: inspect branch, dirty tree, remote freshness, open
-  PR overlap, and project validation commands.
+  PR overlap, and project validation commands. Prefer
+  `~/agents/bin/agent-git preflight` when available.
 - Branch from latest `origin/main` using
   `<type>/issue-<number>-<slug>`.
 - Keep one branch, one PR, and one logical change.
