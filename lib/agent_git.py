@@ -201,6 +201,37 @@ class CleanupResult:
         }
 
 
+@dataclass
+class WorktreeResult:
+    repo: str
+    action: str
+    path: str
+    branch: str | None
+    dry_run: bool
+    steps: list[str]
+    preflight: dict[str, Any] | None = None
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "repo": self.repo,
+            "action": self.action,
+            "path": self.path,
+            "branch": self.branch,
+            "dry_run": self.dry_run,
+            "steps": self.steps,
+            "preflight": self.preflight,
+            "errors": self.errors,
+            "warnings": self.warnings,
+        }
+
+
 class Runner:
     def __call__(self, args: list[str], cwd: Path) -> CommandResult:
         completed = subprocess.run(
@@ -754,6 +785,119 @@ def cleanup(
     return CleanupResult(str(repo), default_branch, dry_run, branch, deleted, skipped, steps, errors, warnings)
 
 
+def slugify(value: str) -> str:
+    value = value.lower().strip()
+    value = re.sub(r"[^a-z0-9]+", "-", value)
+    return value.strip("-") or "work"
+
+
+def worktree_add(
+    repo: Path,
+    *,
+    issue: int,
+    slug: str,
+    path: str | None = None,
+    branch: str | None = None,
+    changed_paths: list[str] | None = None,
+    dry_run: bool = False,
+    no_fetch: bool = False,
+    runner: Runner | None = None,
+) -> WorktreeResult:
+    runner = runner or Runner()
+    repo = repo.resolve()
+    safe_slug = slugify(slug)
+    branch = branch or f"feature/issue-{issue}-{safe_slug}"
+    path = path or str(repo / ".worktrees" / f"issue-{issue}-{safe_slug}")
+    steps: list[str] = []
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    preflight_result = preflight(
+        repo,
+        allow_main=True,
+        no_fetch=no_fetch,
+        paths=changed_paths or [],
+        runner=runner,
+    )
+    warnings.extend(preflight_result.warnings)
+    if not preflight_result.ok:
+        errors.extend(preflight_result.errors)
+        return WorktreeResult(
+            repo=str(repo),
+            action="add",
+            path=path,
+            branch=branch,
+            dry_run=dry_run,
+            steps=steps,
+            preflight=preflight_result.to_dict(),
+            errors=errors,
+            warnings=warnings,
+        )
+
+    if local_branch_exists(runner, repo, branch):
+        errors.append(f"Local branch already exists: {branch}.")
+
+    target = Path(path)
+    if target.exists():
+        errors.append(f"Worktree path already exists: {target}.")
+
+    default_ref = f"origin/{preflight_result.default_branch}"
+    steps.append(f"git worktree add -b {branch} {target} {default_ref}")
+    if errors or dry_run:
+        return WorktreeResult(
+            repo=str(repo),
+            action="add",
+            path=str(target),
+            branch=branch,
+            dry_run=dry_run,
+            steps=steps,
+            preflight=preflight_result.to_dict(),
+            errors=errors,
+            warnings=warnings,
+        )
+
+    added = run_git(runner, repo, ["worktree", "add", "-b", branch, str(target), default_ref])
+    if added.returncode != 0:
+        errors.append(f"Could not create worktree: {added.stderr.strip() or added.stdout.strip()}")
+
+    return WorktreeResult(
+        repo=str(repo),
+        action="add",
+        path=str(target),
+        branch=branch,
+        dry_run=dry_run,
+        steps=steps,
+        preflight=preflight_result.to_dict(),
+        errors=errors,
+        warnings=warnings,
+    )
+
+
+def worktree_remove(
+    repo: Path,
+    *,
+    path: str,
+    dry_run: bool = False,
+    runner: Runner | None = None,
+) -> WorktreeResult:
+    runner = runner or Runner()
+    repo = repo.resolve()
+    target = Path(path)
+    steps = [f"git worktree remove {target}"]
+    errors: list[str] = []
+
+    if not target.exists():
+        errors.append(f"Worktree path does not exist: {target}.")
+    if errors or dry_run:
+        return WorktreeResult(str(repo), "remove", str(target), None, dry_run, steps, errors=errors)
+
+    removed = run_git(runner, repo, ["worktree", "remove", str(target)])
+    if removed.returncode != 0:
+        errors.append(f"Could not remove worktree: {removed.stderr.strip() or removed.stdout.strip()}")
+
+    return WorktreeResult(str(repo), "remove", str(target), None, dry_run, steps, errors=errors)
+
+
 def current_pr(runner: Runner, repo: Path) -> tuple[int | None, str | None]:
     result = runner(["gh", "pr", "view", "--json", "number,url"], repo)
     if result.returncode != 0:
@@ -1092,6 +1236,27 @@ def render_cleanup_text(result: CleanupResult) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_worktree_text(result: WorktreeResult) -> str:
+    lines = [
+        f"worktree {result.action}: {'pass' if result.ok else 'fail'}",
+        f"repo: {result.repo}",
+        f"path: {result.path}",
+        f"branch: {result.branch or '(none)'}",
+        f"dry_run: {str(result.dry_run).lower()}",
+        "steps:",
+        *[f"- {step}" for step in result.steps],
+    ]
+    if result.errors:
+        lines.append("")
+        lines.append("errors:")
+        lines.extend(f"- {item}" for item in result.errors)
+    if result.warnings:
+        lines.append("")
+        lines.append("warnings:")
+        lines.extend(f"- {item}" for item in result.warnings)
+    return "\n".join(lines) + "\n"
+
+
 def add_preflight_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = subparsers.add_parser("preflight", help="inspect git state before agent-owned edits")
     parser.add_argument("--repo", default=".", help="repository path")
@@ -1143,6 +1308,28 @@ def add_cleanup_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentP
     )
 
 
+def add_worktree_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser("worktree", help="create or remove isolated agent worktrees")
+    worktree_sub = parser.add_subparsers(dest="worktree_command", required=True)
+
+    add_parser = worktree_sub.add_parser("add", help="create an isolated issue worktree")
+    add_parser.add_argument("--repo", default=".", help="repository path")
+    add_parser.add_argument("--json", action="store_true", help="emit JSON")
+    add_parser.add_argument("--issue", type=int, required=True, help="issue number")
+    add_parser.add_argument("--slug", required=True, help="branch/worktree slug")
+    add_parser.add_argument("--path", help="worktree path; defaults to .worktrees/issue-N-slug")
+    add_parser.add_argument("--branch", help="branch name; defaults to feature/issue-N-slug")
+    add_parser.add_argument("--changed-path", action="append", default=[], help="intended changed path for open PR overlap checks")
+    add_parser.add_argument("--dry-run", action="store_true", help="show worktree command without creating it")
+    add_parser.add_argument("--no-fetch", action="store_true", help="skip git fetch origin --prune during preflight")
+
+    remove_parser = worktree_sub.add_parser("remove", help="remove a completed worktree")
+    remove_parser.add_argument("--repo", default=".", help="repository path")
+    remove_parser.add_argument("--json", action="store_true", help="emit JSON")
+    remove_parser.add_argument("--path", required=True, help="worktree path to remove")
+    remove_parser.add_argument("--dry-run", action="store_true", help="show removal command without removing")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agent-git")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1150,6 +1337,7 @@ def main(argv: list[str] | None = None) -> int:
     add_readiness_parser(subparsers)
     add_ship_parser(subparsers)
     add_cleanup_parser(subparsers)
+    add_worktree_parser(subparsers)
 
     args = parser.parse_args(argv)
 
@@ -1165,6 +1353,30 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
         else:
             print(render_preflight_text(result), end="")
+        return 0 if result.ok else 1
+
+    if args.command == "worktree":
+        if args.worktree_command == "add":
+            result = worktree_add(
+                Path(args.repo),
+                issue=args.issue,
+                slug=args.slug,
+                path=args.path,
+                branch=args.branch,
+                changed_paths=args.changed_path,
+                dry_run=args.dry_run,
+                no_fetch=args.no_fetch,
+            )
+        else:
+            result = worktree_remove(
+                Path(args.repo),
+                path=args.path,
+                dry_run=args.dry_run,
+            )
+        if args.json:
+            print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+        else:
+            print(render_worktree_text(result), end="")
         return 0 if result.ok else 1
 
     if args.command == "cleanup":

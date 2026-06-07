@@ -167,6 +167,27 @@ If another open PR touches the same files:
 
 Parallel agents must use separate worktrees when operating in the same repo.
 
+Create isolated worktrees through the shared helper:
+
+```bash
+~/agents/bin/agent-git worktree add \
+  --issue 123 \
+  --slug add-auth \
+  --changed-path src/auth/
+```
+
+The default path is `.worktrees/issue-123-add-auth`, and the default branch is
+`feature/issue-123-add-auth`. Use `--dry-run` to inspect the planned command
+and open PR overlap before creating the worktree.
+
+Remove completed worktrees with:
+
+```bash
+~/agents/bin/agent-git worktree remove --path .worktrees/issue-123-add-auth
+```
+
+Same-file work must serialize unless the user explicitly approves overlap.
+
 ## Validation Ladder
 
 Each project defines its own commands, but agents must follow the same ladder:

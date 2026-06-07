@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from lib.agent_git import cleanup, parse_status, preflight, readiness, ship
+from lib.agent_git import cleanup, parse_status, preflight, readiness, ship, worktree_add, worktree_remove
 
 
 def run(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -422,3 +422,60 @@ def test_cleanup_dry_run_reports_branch_without_deleting(tmp_path: Path) -> None
     assert result.deleted_branches == ["feature/issue-42-add-tooling"]
     branches = git(["branch", "--format=%(refname:short)"], work).stdout.splitlines()
     assert "feature/issue-42-add-tooling" in branches
+
+
+def test_worktree_add_dry_run_reports_default_path_and_branch(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+
+    result = worktree_add(work, issue=42, slug="Add Tooling", dry_run=True, no_fetch=True)
+
+    assert result.ok
+    assert result.branch == "feature/issue-42-add-tooling"
+    assert result.path.endswith(".worktrees/issue-42-add-tooling")
+    assert result.steps
+
+
+def test_worktree_add_and_remove(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    target = tmp_path / "agent-worktree"
+
+    add_result = worktree_add(work, issue=42, slug="add-tooling", path=str(target), no_fetch=True)
+
+    assert add_result.ok
+    assert target.exists()
+    assert (target / "README.md").exists()
+
+    remove_result = worktree_remove(work, path=str(target))
+
+    assert remove_result.ok
+    assert not target.exists()
+
+
+def test_worktree_add_blocks_existing_branch(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    git(["switch", "main"], work)
+
+    result = worktree_add(work, issue=42, slug="add-tooling", dry_run=True, no_fetch=True)
+
+    assert not result.ok
+    assert any("Local branch already exists" in error for error in result.errors)
+
+
+def test_worktree_add_blocks_dirty_tree(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    (work / "README.md").write_text("dirty\n", encoding="utf-8")
+
+    result = worktree_add(work, issue=42, slug="add-tooling", dry_run=True, no_fetch=True)
+
+    assert not result.ok
+    assert any("Unsafe dirty file" in error for error in result.errors)
+
+
+def test_worktree_remove_missing_path_fails(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+
+    result = worktree_remove(work, path=str(tmp_path / "missing"))
+
+    assert not result.ok
+    assert any("does not exist" in error for error in result.errors)
