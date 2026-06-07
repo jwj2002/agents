@@ -116,6 +116,12 @@ When multiple agents work simultaneously:
 4. **Rebase before PR**: After other agents merge, rebase on the new main
 5. **Wave scheduling**: Group independent issues into parallel waves; dependent issues run sequentially
 
+Preferred helper:
+
+```bash
+~/agents/bin/agent-git worktree add --issue <N> --slug <slug> --changed-path <path>
+```
+
 ## Large Features (500+ lines)
 
 Split into phased PRs, each leaving main in a working state:

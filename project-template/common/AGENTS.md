@@ -64,6 +64,8 @@ Required baseline:
   branch. Prefer `~/agents/bin/agent-git cleanup` when available.
 - Prefer `~/agents/bin/agent-git ship` for agent-owned issues when available;
   use `--dry-run` to inspect stop gates before mutating GitHub.
+- For parallel agents in one repository, use isolated worktrees via
+  `~/agents/bin/agent-git worktree add` and serialize same-file edits.
 
 ## Shared Agent Rules
 

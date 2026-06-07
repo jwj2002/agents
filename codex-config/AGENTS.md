@@ -70,6 +70,8 @@ and verify behavior before declaring completion.
   available; use `--dry-run` first for high-risk changes.
 - Use `~/agents/bin/agent-git cleanup` after manual merges when the ship helper
   was not used.
+- For parallel work in one repo, create isolated worktrees with
+  `~/agents/bin/agent-git worktree add` and serialize same-file edits.
 - Agent-owned issues default to shipped work: commit, PR, validate, squash
   merge, sync `main`, prune stale refs, delete the merged branch, and close or
   update the linked issue unless a documented stop gate applies.
