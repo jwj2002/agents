@@ -30,7 +30,8 @@ command-policy files written in Starlark; do not put prose instructions there.
 
 Codex skill links are written to both `~/.codex/skills` and
 `~/.agents/skills`. The former preserves current local behavior; the latter is
-the documented Codex user skill location. See `docs/SKILL-SURFACES.md`.
+the documented Codex user skill location. See `docs/SKILL-SURFACES.md` and
+`docs/AGENT-CAPABILITIES.md`.
 
 ## What Stays Local
 
