@@ -491,8 +491,15 @@ if [ -n "$CONFIG_CHANGED" ]; then
     # Prefer the orchestrator so BOTH Claude and Codex re-sync (Codex skill
     # symlinks are created by codex-config/install.sh). Fall back to the
     # Claude installer alone if the orchestrator is absent.
+    #
+    # --skip-profile is MANDATORY: a post-merge hook runs non-interactively
+    # during automated `git pull`, and install-all.sh prompts (read -rp) for a
+    # profile on any machine lacking ~/.config/agents-profile. Without the flag
+    # the hook blocks on stdin and hangs the pull. Profile setup is an explicit
+    # user-run install action, never something a hook performs. (CI enforces
+    # this invariant — see .github/workflows/validate.yml.)
     if [ -x "$REPO_DIR/install-all.sh" ]; then
-        "$REPO_DIR/install-all.sh" 2>&1 | sed 's/^/[post-merge] /'
+        "$REPO_DIR/install-all.sh" --skip-profile 2>&1 | sed 's/^/[post-merge] /'
     else
         "$REPO_DIR/claude-config/install.sh" 2>&1 | sed 's/^/[post-merge] /'
     fi

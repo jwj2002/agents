@@ -3,6 +3,10 @@
 This file is the shared global instruction surface for Codex. It is installed
 to `~/.codex/AGENTS.md` by `codex-config/install.sh`.
 
+How Codex and Claude share this repo (AGENTS.md is shared policy; CLI-first
+shared tooling; per-agent capabilities documented): see
+`docs/CLAUDE-CODEX-COLLABORATION.md`.
+
 ## Operating Role
 
 Use Codex as a pragmatic implementation and adversarial review partner.
