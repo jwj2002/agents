@@ -6,9 +6,13 @@ paths: ["**"]
 
 # Git Workflow Rules
 
-**Authority**: ~/agents/docs/CONTRIBUTING_POLICY.md (full reference)
+**Authority**: `~/agents/docs/git-process.md` (canonical full reference)
 
 All agents MUST follow these rules for every git operation. Main stays green at all times.
+
+Agent-owned issue work defaults to shipped work: commit, PR, validate, squash
+merge, sync `main`, prune stale refs, delete the merged branch, and close or
+update the linked issue unless a documented stop gate applies.
 
 ## Branch Rules
 
@@ -42,6 +46,17 @@ git diff --name-only origin/main
 ```
 
 If any check fails, fix it before creating the PR. Never skip checks.
+
+## Completion Gates (MANDATORY)
+
+An issue is not complete merely because files were added. It must be:
+
+- implemented
+- wired through the intended entrypoint
+- exercised by automated or manual validation
+- observed with command output, artifact, check result, or fixture evidence
+- documented when operationally meaningful
+- shipped or explicitly blocked by a documented stop gate
 
 ## PR Creation
 
