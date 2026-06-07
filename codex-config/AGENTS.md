@@ -64,6 +64,8 @@ and verify behavior before declaring completion.
   the standardized git process in `~/agents/docs/git-process.md`.
 - Before agent-owned edits, run `~/agents/bin/agent-git preflight` when it is
   available and treat reported errors as stop gates.
+- Before opening or merging an agent-owned PR, run
+  `~/agents/bin/agent-git readiness` when it is available.
 - Agent-owned issues default to shipped work: commit, PR, validate, squash
   merge, sync `main`, prune stale refs, delete the merged branch, and close or
   update the linked issue unless a documented stop gate applies.

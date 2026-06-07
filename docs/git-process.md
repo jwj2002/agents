@@ -205,6 +205,21 @@ Every PR must include:
 Use draft PRs only when validation is incomplete or user review is required
 before merge.
 
+Use the shared readiness helper before creating or merging an agent-owned PR:
+
+```bash
+~/agents/bin/agent-git readiness \
+  --issue 123 \
+  --summary "implemented the scoped change" \
+  --test-evidence "pytest tests/test_example.py -q" \
+  --allowed-path src/ \
+  --generate-pr-body
+```
+
+Use `--stage merge` before merge to distinguish final readiness from initial PR
+creation. The helper validates local branch evidence; GitHub CI remains the
+source of truth for hosted checks.
+
 ## Merge And Cleanup
 
 Default merge strategy is squash merge. Before merge:
