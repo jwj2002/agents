@@ -21,10 +21,16 @@ git clone https://github.com/jwj2002/agents.git ~/agents
 ~/.codex/AGENTS.md               -> ~/agents/codex-config/AGENTS.md
 ~/.codex/rules/shared.rules      -> ~/agents/codex-config/rules/shared.rules
 ~/.codex/skills/user             -> ~/agents/codex-config/skills/
+~/.codex/skills/<name>           -> shared skill folders
+~/.agents/skills/<name>          -> shared skill folders
 ```
 
 `AGENTS.md` is the behavioral instruction surface. `.rules` files are Codex
 command-policy files written in Starlark; do not put prose instructions there.
+
+Codex skill links are written to both `~/.codex/skills` and
+`~/.agents/skills`. The former preserves current local behavior; the latter is
+the documented Codex user skill location. See `docs/SKILL-SURFACES.md`.
 
 ## What Stays Local
 
