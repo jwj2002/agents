@@ -1,0 +1,8 @@
+# Project-level Codex config.
+#
+# Codex loads project `.codex/` layers only for trusted projects. Keep this
+# file small and use it only for settings that should differ from global
+# `~/.codex/config.toml`.
+#
+# Example:
+# project_doc_max_bytes = 65536

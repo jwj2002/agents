@@ -23,16 +23,23 @@ git clone https://github.com/jwj2002/agents.git ~/agents
 
 Reference: `docs/CONFIG-BOOTSTRAP.md`
 
-### New Project (local `.claude`)
+### New Project (Claude + Codex)
 
 ```bash
-~/agents/claude-config/new-project-claude.sh /path/to/project
+~/agents/new-project-agents.sh /path/to/project
 ```
 
 Then edit:
+- `AGENTS.md`
 - `CLAUDE.md`
 - `.claude/rules/project-rules.md`
 - `.claude/context/project-stack.md`
+
+If the repo needs trusted project-level Codex settings, rerun with:
+
+```bash
+~/agents/new-project-agents.sh --with-codex-config /path/to/project
+```
 
 ### Update Existing Machines
 
@@ -47,6 +54,7 @@ git pull
 - Unified installer: `install-all.sh`
 - Claude only: `claude-config/install.sh`
 - Codex only: `codex-config/install.sh`
+- Project bootstrap: `new-project-agents.sh`
 
 ## Configuration Packages
 

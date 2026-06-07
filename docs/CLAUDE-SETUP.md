@@ -352,5 +352,5 @@ For current multi-machine setup and maintenance workflows, see:
 That guide covers:
 - new computer setup (WSL/macOS/Windows)
 - one-command dual install (`~/agents/install-all.sh`)
-- new project local bootstrap (`~/agents/claude-config/new-project-claude.sh`)
+- new project local bootstrap (`~/agents/new-project-agents.sh`)
 - update workflow for shared config changes
