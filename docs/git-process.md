@@ -237,3 +237,28 @@ Agent workflow labels for repositories using spec-driven issue planning:
 
 Repo-local labels such as `git-process`, `ci`, `cleanup`, and domain labels
 should be installed only when the repository opts in.
+
+To sync universal labels for a managed GitHub project:
+
+```bash
+~/agents/new-project-agents.sh --sync-labels /path/to/project
+```
+
+To sync labels without touching project files:
+
+```bash
+~/agents/new-project-agents.sh --labels-only /path/to/project
+```
+
+For repositories that use spec-driven issue planning, include agent workflow
+labels:
+
+```bash
+~/agents/new-project-agents.sh --sync-labels --with-agent-workflow-labels /path/to/project
+```
+
+Preview changes without writing files or labels:
+
+```bash
+~/agents/new-project-agents.sh --dry-run --labels-only --with-agent-workflow-labels /path/to/project
+```
