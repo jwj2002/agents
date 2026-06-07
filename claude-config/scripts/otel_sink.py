@@ -46,14 +46,71 @@ PRICES = {
         "cache_creation": 1.0e-6,
         "cache_read": 0.08e-6,
     },
-    # OpenAI / Codex. gpt-5.5 verified in use (Codex CLI, §2.2). OpenAI bills cached input at a discount
-    # and charges no separate cache-WRITE, so cache_creation = 0. Rates are representative (per-MTok/1e6)
-    # — VERIFY against OpenAI's published pricing when finalizing billing.
-    "gpt-5.5": {
+    # OpenAI / Codex. OpenAI bills cached input at a discount and charges no separate cache-WRITE,
+    # so cache_creation = 0 for all GPT rows. Rates are representative (per-MTok / 1e6) —
+    # VERIFY against OpenAI published pricing before treating these as authoritative for billing.
+    #
+    # INSERTION ORDER IS LOAD-BEARING: more-specific prefixes MUST precede any prefix they could
+    # shadow (e.g. gpt-5.4-mini before gpt-5.4; gpt-5.2-codex before gpt-5-codex).
+    "gpt-5.2-codex": {  # real data: 2694 events in ~/.codex/sessions — VERIFY rates
+        "input": 0.75e-6,
+        "output": 6e-6,
+        "cache_creation": 0.0,
+        "cache_read": 0.075e-6,
+    },
+    "gpt-5.3-codex": {  # real data: 704 events — VERIFY rates
+        "input": 1.0e-6,
+        "output": 8e-6,
+        "cache_creation": 0.0,
+        "cache_read": 0.10e-6,
+    },
+    "gpt-5-codex": {  # the literal gpt-5-codex model (prefix match only; a future gpt-5.N-codex with no row intentionally raises under strict, per #231) — VERIFY rates
+        "input": 0.75e-6,
+        "output": 6e-6,
+        "cache_creation": 0.0,
+        "cache_read": 0.075e-6,
+    },
+    "gpt-5.4-mini": {  # mini tier, cheaper than flagship — VERIFY rates
+        "input": 0.10e-6,
+        "output": 0.40e-6,
+        "cache_creation": 0.0,
+        "cache_read": 0.025e-6,
+    },
+    "gpt-5.2-mini": {  # mini tier — VERIFY rates
+        "input": 0.10e-6,
+        "output": 0.40e-6,
+        "cache_creation": 0.0,
+        "cache_read": 0.025e-6,
+    },
+    "gpt-5-mini": {  # the literal gpt-5-mini model (prefix match only; a future gpt-5.N-mini with no row intentionally raises under strict, per #231) — VERIFY rates
+        "input": 0.10e-6,
+        "output": 0.40e-6,
+        "cache_creation": 0.0,
+        "cache_read": 0.025e-6,
+    },
+    "gpt-4o-mini": {  # VERIFY rates
+        "input": 0.15e-6,
+        "output": 0.60e-6,
+        "cache_creation": 0.0,
+        "cache_read": 0.075e-6,
+    },
+    "gpt-5.4": {  # real data: 354 events, flagship tier — VERIFY rates
         "input": 1.25e-6,
         "output": 10e-6,
         "cache_creation": 0.0,
         "cache_read": 0.125e-6,
+    },
+    "gpt-5.5": {  # verified in use (Codex CLI, §2.2) — VERIFY rates
+        "input": 1.25e-6,
+        "output": 10e-6,
+        "cache_creation": 0.0,
+        "cache_read": 0.125e-6,
+    },
+    "gpt-4o": {  # VERIFY rates
+        "input": 2.50e-6,
+        "output": 10e-6,
+        "cache_creation": 0.0,
+        "cache_read": 1.25e-6,
     },
 }
 DEFAULT_PRICE = PRICES[
@@ -65,15 +122,26 @@ EXPORTER_FRESHNESS_SLA_DEFAULT = (
 )  # 24h: sink must be written within SLA or alarm (§0.1)
 
 
+def _matches_family(m: str, family: str) -> bool:
+    """True if lowercase model string `m` belongs to `family`.
+
+    Claude families use alphabetic-token substring (opus/sonnet/haiku are alpha → substring fires).
+    GPT families use startswith-only: the numeric guard (token.isalpha()) prevents cross-family
+    matches via numeric tokens — e.g. "5.2" must NOT match gpt-5.2-mini against gpt-5.2-codex.
+    """
+    parts = family.split("-")
+    # hyphenless family key → no alpha-substring branch (avoids IndexError)
+    token = parts[1] if len(parts) > 1 else ""
+    return m.startswith(family) or (token.isalpha() and token in m)
+
+
 def _price_for(model: str) -> dict:
     """Pick a price row by model-family prefix; fall back to DEFAULT_PRICE for unknown models."""
     if not model:
         return DEFAULT_PRICE
     m = str(model).lower()
     for family, row in PRICES.items():
-        if (
-            m.startswith(family) or family.split("-")[1] in m
-        ):  # 'opus'/'sonnet'/'haiku' substring
+        if _matches_family(m, family):
             return row
     return DEFAULT_PRICE
 

@@ -22,11 +22,12 @@ RECONCILE_TOLERANCE_DEFAULT = 0.01  # 1% — per-task sum must reconcile vs glob
 
 
 def is_known_model(model: str) -> bool:
-    """True if the model maps to a real price row (family prefix or opus/sonnet/haiku substring)."""
+    """True if the model maps to a real price row. Uses O._matches_family — the single
+    source of truth for family matching — so this never drifts from _price_for."""
     if not model:
         return False
     m = str(model).lower()
-    return any(m.startswith(fam) or fam.split("-")[1] in m for fam in O.PRICES)
+    return any(O._matches_family(m, fam) for fam in O.PRICES)
 
 
 def session_cost(record: dict, *, strict: bool = True) -> float:
