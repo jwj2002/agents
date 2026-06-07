@@ -81,6 +81,9 @@ Prefer the shared ship workflow when available:
 
 After every PR merge:
 ```bash
+~/agents/bin/agent-git cleanup --branch <merged-branch>
+
+# Equivalent manual fallback:
 # Prune stale remote refs
 git fetch --prune origin
 

@@ -249,14 +249,21 @@ Default merge strategy is squash merge. Before merge:
 After merge:
 
 ```bash
-git switch main
-git pull --ff-only
-git fetch --prune origin
-git branch -d <merged-branch>
+~/agents/bin/agent-git cleanup --branch <merged-branch>
 ```
 
 If a squash-merged local branch cannot be deleted with `-d`, verify the PR merge
-first and then delete only that agent-owned local branch with `-D`.
+first and then use:
+
+```bash
+~/agents/bin/agent-git cleanup --branch <branch> --squash-merged-branch
+```
+
+Preview cleanup without changing git state:
+
+```bash
+~/agents/bin/agent-git cleanup --dry-run
+```
 
 ## Standard Labels
 
