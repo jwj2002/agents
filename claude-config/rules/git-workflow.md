@@ -10,9 +10,35 @@ paths: ["**"]
 
 All agents MUST follow these rules for every git operation. Main stays green at all times.
 
-Agent-owned issue work defaults to shipped work: commit, PR, validate, squash
-merge, sync `main`, prune stale refs, delete the merged branch, and close or
-update the linked issue unless a documented stop gate applies.
+## Ship by default
+
+**Agent-owned issue work is shipped end-to-end, including the merge — without
+pausing to ask for merge approval.** The terminal state of a task is a merged
+PR, not an open one. The full default path:
+
+```text
+commit → push → PR → validate/review → squash-merge → prune branch
+       → sync main → post-merge verify → close/update the issue
+```
+
+**Stop before merge ONLY when:**
+
+- The user gives a specific instruction for that task ("PR only", "I'll merge
+  this one", "hold", "don't merge yet").
+- The issue or spec documents a stop gate (explicit human sign-off, release
+  coordination, an irreversible/destructive production operation).
+
+**These are NOT stop gates — they are "fix, then ship":** CI red, unresolved
+`REQUEST_CHANGES`, merge conflicts, or branch protection requiring outside
+approval. Resolve them and proceed to merge; do not hand merging back to the
+user as a question.
+
+High-risk classes (auth, payments, migrations, data-loss, secrets) still ship,
+but run the Codex review BEFORE merge (see `implementation-routing.md`). Review
+is a gate to clear, not a reason to stop shipping.
+
+Do not ask "want me to merge?" as a matter of course. If there is genuine doubt
+about whether a stop gate applies, that is the only time to ask.
 
 ## Branch Rules
 

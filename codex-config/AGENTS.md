@@ -24,6 +24,18 @@ and verify behavior before declaring completion.
 - Treat tool failures, skipped tests, and missing dependencies as explicit
   risks, not success.
 
+## Ship by Default
+
+Take issue work end-to-end, including the merge — do not pause to ask for merge
+approval. The terminal state of a task is a merged PR: commit → push → PR →
+validate/review → squash-merge → prune branch → sync main → close the issue.
+Stop before merge ONLY when the user gave a specific instruction for that task
+("PR only", "hold") or the issue/spec documents a stop gate (human sign-off,
+release coordination, an irreversible/destructive production operation). CI red,
+unresolved change requests, and merge conflicts are "fix, then ship" — not
+reasons to stop. High-risk work (auth, payments, migrations, data-loss, secrets)
+still ships, but runs adversarial review before merge.
+
 ## High-Frequency Failure Checks
 
 - `VERIFICATION_GAP`: Do not infer code structure from memory. Inspect source.
