@@ -51,6 +51,28 @@ jobs:
           SETTINGS_PATH: ${{ github.workspace }}/claude-config/settings.json
         run: python3 claude-config/scripts/validate-hooks.py
 
+      - name: Generated post-merge hook must be non-interactive
+        run: |
+          # The post-merge hook re-syncs config on `git pull` and runs
+          # non-interactively, so it MUST call install-all.sh with --skip-profile
+          # (otherwise install-all.sh prompts for a profile and hangs the pull).
+          # Guard: every line that *executes* install-all.sh must carry
+          # --skip-profile. We select execution lines as those mentioning
+          # `install-all.sh"` and exclude the `[ -x ... ]` existence test, so the
+          # check catches a future bare invocation even if it drops the `2>&1`
+          # redirect (does not rely on the sed pipe being present).
+          inv="$(grep -nE 'install-all\.sh"' claude-config/install.sh | grep -vE '\[[[:space:]]*-x' || true)"
+          echo "$inv"
+          if [ -z "$inv" ]; then
+            echo "::error::no install-all.sh invocation found in generated post-merge hook"
+            exit 1
+          fi
+          if echo "$inv" | grep -v -- '--skip-profile' | grep -q .; then
+            echo "::error::post-merge hook invokes install-all.sh without --skip-profile"
+            exit 1
+          fi
+          echo "OK: post-merge hook is non-interactive (--skip-profile present)"
+
       - name: Validate Codex command-policy rules
         run: |
           set -e
@@ -60,11 +82,29 @@ jobs:
 
       - name: Validate shared skill portability
         run: |
-          set -e
+          # Exit-code contract of check-skill-portability.sh (matches the
+          # installer's skip-and-continue behavior):
+          #   0 = portable      → symlinked into Codex
+          #   1 = Claude-only   → skipped for Codex (NOTICE, not a failure)
+          #   2 = invalid/usage → real lint error (FAIL the job)
+          # CI must NOT red-X on exit 1 — a legitimate Claude-only skill is the
+          # documented contract (docs/SKILL-SURFACES.md), not a defect.
+          fail=0
           for f in codex-config/skills/*/SKILL.md claude-config/skills/*/SKILL.md; do
             [ -f "$f" ] || continue
-            claude-config/scripts/check-skill-portability.sh "$f"
+            name="$(basename "$(dirname "$f")")"
+            out="$(claude-config/scripts/check-skill-portability.sh "$f")" && rc=0 || rc=$?
+            case "$rc" in
+              0) echo "::notice::portable: $name" ;;
+              1) echo "::notice::claude-only (skipped for Codex): $name"
+                 [ -n "$out" ] && echo "$out" ;;
+              2) echo "::error::invalid skill (lint/usage error): $name"
+                 echo "$out"; fail=1 ;;
+              *) echo "::error::unexpected exit $rc from portability check: $name"
+                 echo "$out"; fail=1 ;;
+            esac
           done
+          [ "$fail" = "0" ] || exit 1
 
       - name: Smoke test Codex install in temp HOME
         run: |

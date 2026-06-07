@@ -60,6 +60,7 @@ git pull
 
 - Claude package: `claude-config/README.md`
 - Codex package: `codex-config/README.md`
+- Claude + Codex collaboration model: `docs/CLAUDE-CODEX-COLLABORATION.md`
 - Agent capability map: `docs/AGENT-CAPABILITIES.md`
 - Skill surfaces: `docs/SKILL-SURFACES.md`
 - Full operations guide: `docs/CONFIG-BOOTSTRAP.md`

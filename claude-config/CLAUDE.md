@@ -15,6 +15,10 @@ in `~/.claude/rules/` and are loaded conditionally — read this first.
 If you ever need to change the deployed config, edit `~/agents/claude-config/`
 and let `install.sh` handle the symlinks. Don't edit `~/.claude/` directly.
 
+This repo is shared with **Codex**. `AGENTS.md` is shared policy; `CLAUDE.md`
+and Codex config are adapters. When changing shared instructions, verify both
+surfaces. See `~/agents/docs/CLAUDE-CODEX-COLLABORATION.md`.
+
 ---
 
 ## Three failure patterns to actively prevent
