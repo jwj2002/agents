@@ -38,18 +38,31 @@ Notes:
 - Machine-specific Codex approvals stay local at `~/.codex/rules/default.rules`.
 - Prefer WSL on Windows desktop for parity with Linux/mac shell workflows.
 
-## New Project Setup (Local .claude)
+## New Project Setup (Claude + Codex)
 
 Inside the new project repo:
 
 ```bash
-~/agents/claude-config/new-project-claude.sh /path/to/project
+~/agents/new-project-agents.sh /path/to/project
 ```
 
 Then edit:
+- `AGENTS.md`
 - `CLAUDE.md`
 - `.claude/rules/project-rules.md`
 - `.claude/context/project-stack.md`
+
+`AGENTS.md` is the shared project instruction file for both Claude and Codex.
+`CLAUDE.md` is a Claude-specific adapter. The bootstrap also creates
+`.agents/skills/` for repo-local shared skills.
+
+Project `.codex/config.toml` is optional because Codex loads project `.codex/`
+layers only for trusted projects. Add it when a repo needs project-specific
+Codex settings:
+
+```bash
+~/agents/new-project-agents.sh --with-codex-config /path/to/project
+```
 
 Commit project-local files to the project repository.
 

@@ -48,7 +48,7 @@ All Claude Code configuration lives in a **single portable git repo** (`github.c
 │   ├── templates/                  # Project & GitHub templates
 │   ├── settings.json               # Hooks, permissions, MCP, statusline
 │   ├── install.sh                  # Symlink installer
-│   └── new-project-claude.sh       # Bootstrap new projects
+│   └── new-project-claude.sh       # Compatibility wrapper
 ├── codex-config/                   # OpenAI Codex configuration
 ├── mcp-server/                     # Custom MCP: vault + metrics queries
 ├── obsidian-agent/                 # Session capture → Obsidian vault
@@ -57,6 +57,7 @@ All Claude Code configuration lives in a **single portable git repo** (`github.c
 ├── pr-changelog/                   # PR merge → changelog
 ├── doc-reader/                     # TTS for documents
 ├── youtube-summarizer/             # Video → transcript → summary
+├── new-project-agents.sh           # Bootstrap new projects for Claude + Codex
 └── install-all.sh                  # One-command setup (Claude + Codex)
 ```
 
@@ -71,10 +72,11 @@ cd ~/agents && git pull && ~/agents/install-all.sh
 ```
 
 ### Per-Project Overrides
-Each project gets local `.claude/` config that overrides global:
+Each project gets shared `AGENTS.md` instructions plus local `.claude/`
+config for Claude-specific overrides:
 ```bash
-~/agents/claude-config/new-project-claude.sh /path/to/project
-# Creates: CLAUDE.md, .claude/rules/project-rules.md, .claude/context/project-stack.md
+~/agents/new-project-agents.sh /path/to/project
+# Creates: AGENTS.md, CLAUDE.md, .claude/*, .agents/skills/
 ```
 
 ---
@@ -406,8 +408,8 @@ git clone https://github.com/jwj2002/agents.git ~/agents
 
 ### New Project Setup
 ```bash
-~/agents/claude-config/new-project-claude.sh /path/to/project
-# Edit: CLAUDE.md, .claude/rules/project-rules.md
+~/agents/new-project-agents.sh /path/to/project
+# Edit: AGENTS.md, CLAUDE.md, .claude/rules/project-rules.md
 ```
 
 ### Daily Workflow
