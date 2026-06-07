@@ -30,11 +30,13 @@ git clone https://github.com/jwj2002/agents.git ~/agents
 
 ```bash
 ls -la ~/.claude
-ls -la ~/.codex/rules ~/.codex/skills
+ls -la ~/.codex ~/.codex/rules ~/.codex/skills ~/.agents/skills
 ```
 
 Notes:
 - Codex system skills stay local at `~/.codex/skills/.system/`.
+- Shared Codex user skills are linked into both `~/.codex/skills/` and
+  `~/.agents/skills/`.
 - Machine-specific Codex approvals stay local at `~/.codex/rules/default.rules`.
 - Prefer WSL on Windows desktop for parity with Linux/mac shell workflows.
 
@@ -96,10 +98,13 @@ The installer registers them automatically via `claude mcp add --scope user`.
 
 | Server | Command | Platform |
 |--------|---------|----------|
-| `knowledge` | `<repo>/knowledge-mcp/node_modules/.bin/tsx <repo>/knowledge-mcp/index.ts` | All |
 | `vault-metrics` | `<repo>/mcp-server/.venv/bin/python <repo>/mcp-server/server.py` | All |
 | `context7` | `npx -y @upstash/context7-mcp@latest` | All |
 | `apple-mcp` | `npx -y apple-mcp@latest` | macOS only |
+
+The old `knowledge` MCP server was retired and archived under
+`_archived/knowledge-mcp/`. Project, decision, and action surfaces now use
+filesystem-backed Python CLIs and Obsidian vault notes.
 
 **Paths are absolute and platform-specific.** On Linux/WSL `<repo>` is `/home/<user>/agents`, on macOS it's `/Users/<user>/agents`. The installer resolves paths at install time — no manual editing needed.
 
@@ -107,7 +112,6 @@ The installer registers them automatically via `claude mcp add --scope user`.
 
 ```bash
 # Linux / WSL
-claude mcp add --scope user knowledge -- ~/agents/knowledge-mcp/node_modules/.bin/tsx ~/agents/knowledge-mcp/index.ts
 claude mcp add --scope user vault-metrics -- ~/agents/mcp-server/.venv/bin/python ~/agents/mcp-server/server.py
 claude mcp add --scope user context7 -- npx -y @upstash/context7-mcp@latest
 
@@ -122,6 +126,8 @@ claude mcp add --scope user apple-mcp -- npx -y apple-mcp@latest
 Shared in git:
 - `claude-config/*`
 - `codex-config/*`
+- `project-template/*`
+- `new-project-agents.sh`
 - `install-all.sh`
 
 Local only (not shared):
@@ -129,6 +135,9 @@ Local only (not shared):
 - `~/.claude/history.jsonl`, `~/.claude/projects/`, `~/.claude/debug/`
 - `~/.codex/auth.json`, `~/.codex/history.jsonl`, `~/.codex/sessions/`, `~/.codex/tmp/`
 - `~/.codex/rules/default.rules`
+- `~/.codex/skills/.system/`
+
+For a full surface map, see `docs/AGENT-CAPABILITIES.md`.
 
 ## Per-Tool Installers
 

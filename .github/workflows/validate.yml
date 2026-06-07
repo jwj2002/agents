@@ -2,16 +2,20 @@ name: Validate config
 on:
   pull_request:
     paths:
+      - '.github/workflows/validate.yml'
       - 'claude-config/**'
       - 'knowledge/**'
       - 'codex-config/**'
+      - 'docs/**'
+      - 'project-template/**'
+      - 'new-project-agents.sh'
       - 'install*.sh'
   workflow_dispatch: {}
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,19 +25,71 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: Install dependencies
-        run: pip install pyyaml
+        run: |
+          pip install pyyaml
+          npm install -g @openai/codex
 
       - name: Validate settings.json is valid JSON
         run: python3 -c "import json; json.load(open('claude-config/settings.json'))"
 
-      - name: Validate install.sh shell syntax
-        run: bash -n claude-config/install.sh
+      - name: Validate shell script syntax
+        run: |
+          bash -n install-all.sh
+          bash -n claude-config/install.sh
+          bash -n codex-config/install.sh
+          bash -n new-project-agents.sh
+          bash -n claude-config/new-project-claude.sh
 
       - name: Validate hook script paths in settings.json
         env:
           SETTINGS_PATH: ${{ github.workspace }}/claude-config/settings.json
         run: python3 claude-config/scripts/validate-hooks.py
+
+      - name: Validate Codex command-policy rules
+        run: |
+          set -e
+          for f in codex-config/rules/*.rules; do
+            codex execpolicy check --pretty --rules "$f" -- git status
+          done
+
+      - name: Validate shared skill portability
+        run: |
+          set -e
+          for f in codex-config/skills/*/SKILL.md claude-config/skills/*/SKILL.md; do
+            [ -f "$f" ] || continue
+            claude-config/scripts/check-skill-portability.sh "$f"
+          done
+
+      - name: Smoke test Codex install in temp HOME
+        run: |
+          set -e
+          tmp="$(mktemp -d)"
+          HOME="$tmp" ./codex-config/install.sh
+          test -L "$tmp/.codex/AGENTS.md"
+          test -L "$tmp/.codex/rules/shared.rules"
+          test -L "$tmp/.codex/skills/technical-spec-review"
+          test -L "$tmp/.agents/skills/technical-spec-review"
+
+      - name: Smoke test project bootstrap idempotency
+        run: |
+          set -e
+          tmp="$(mktemp -d)"
+          ./new-project-agents.sh "$tmp"
+          ./new-project-agents.sh "$tmp"
+          test -f "$tmp/AGENTS.md"
+          test -f "$tmp/CLAUDE.md"
+          test -f "$tmp/.claude/settings.json"
+          test -f "$tmp/.agents/skills/.gitkeep"
+
+          tmp_codex="$(mktemp -d)"
+          ./new-project-agents.sh --with-codex-config "$tmp_codex"
+          test -f "$tmp_codex/.codex/config.toml"
 
       - name: Verify pattern ID slug format
         run: |
