@@ -62,6 +62,8 @@ and verify behavior before declaring completion.
 - Before commit or PR work, check branch and status.
 - For projects bootstrapped by `~/agents`, read project `AGENTS.md` and follow
   the standardized git process in `~/agents/docs/git-process.md`.
+- Before agent-owned edits, run `~/agents/bin/agent-git preflight` when it is
+  available and treat reported errors as stop gates.
 - Agent-owned issues default to shipped work: commit, PR, validate, squash
   merge, sync `main`, prune stale refs, delete the merged branch, and close or
   update the linked issue unless a documented stop gate applies.

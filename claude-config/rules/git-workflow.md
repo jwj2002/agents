@@ -34,6 +34,9 @@ update the linked issue unless a documented stop gate applies.
 Before creating any PR, run these steps in order:
 
 ```bash
+# 0. Run shared preflight before agent-owned edits
+~/agents/bin/agent-git preflight
+
 # 1. Rebase on latest main
 git fetch origin && git rebase origin/main
 
