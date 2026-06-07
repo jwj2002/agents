@@ -232,6 +232,7 @@ def cache_by_project(records: list) -> dict:
         label = _billing_label(rs)
         res[proj] = {
             **_cost_group(rs),
+            "total_input_tokens": inp,  # consumed by usage_recommend type-4 (cache inefficiency)
             "cache_pct": round(cr / (inp + cr), 4) if (inp + cr) else 0.0,
             "cache_saved_usd": (
                 round(sum(saved_by_billing.values()), 10) if label != "mixed" else None

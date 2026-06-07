@@ -28,6 +28,7 @@ SECTIONS = [
     ("by_account", "By Account & Computer"),
     ("by_tier", "Cost by Task Tier"),
     ("concurrency", "Concurrency & Utilization"),
+    ("recommendations", "Right-Sizing Recommendations"),
 ]
 _NOTIONAL_FOOTNOTE = (
     "* notional API-equivalent value (subscription billing) — NOT cash paid"
@@ -128,26 +129,35 @@ def trends(records: list, *, period: str = "week") -> dict:
     return out
 
 
-def _right_sizing_callout(agg: dict) -> str:
-    """Cost-only right-sizing hint (rework companion is P2 #268): for each project's COMPLEX tier, if a
-    cheaper model also appears, note the cheaper-model share."""
-    lines = []
-    for proj, tiers in (agg.get("cost_by_model_tier") or {}).items():
-        complex_models = tiers.get("COMPLEX") or {}
-        if len(complex_models) >= 2:
-            costs = {
-                m: _fnum((g or {}).get("cost_usd")) for m, g in complex_models.items()
-            }
-            top = max(costs, key=costs.get)
-            lines.append(
-                f"{html.escape(str(proj))}: COMPLEX work spans {len(costs)} models "
-                f"(most spend on {html.escape(str(top))}) — review if a cheaper tier suffices."
-            )
-    return (
-        "<br>".join(lines)
-        if lines
-        else "No multi-model COMPLEX tiers to right-size yet."
-    )
+def _render_recommendations(agg: dict, records: list | None) -> str:
+    """Render the Recommendations section HTML.
+
+    Imports usage_recommend lazily (same pattern as _dim_rows imports usage_aggregator) to
+    avoid circular deps. Each recommendation finding is rendered as an <li> with finding,
+    impact, and action. estimated_impact is pre-formatted with the correct billing framing
+    so this renderer never branches on billing_type.
+    """
+    from importlib import import_module
+
+    rec_mod = import_module("usage_recommend")
+    recs = rec_mod.recommend(agg, records or [])
+    if not recs:
+        return '<p class="nodata">No recommendations — data looks well-optimized.</p>'
+    parts = []
+    for r in recs:
+        impact = (
+            r.get("estimated_impact")
+            or "impact not computable (mixed billing or insufficient data)"
+        )
+        proj_label = f" — {html.escape(str(r['project']))}" if r.get("project") else ""
+        parts.append(
+            f"<li><strong>{html.escape(r['type'])}</strong>"
+            f"{proj_label}: "
+            f"{html.escape(r['finding'])} "
+            f"<em>Impact: {html.escape(impact)}</em> "
+            f"<strong>Action:</strong> {html.escape(r['action'])}</li>"
+        )
+    return "<ul>" + "".join(parts) + "</ul>"
 
 
 def _table(headers: list, rows: list) -> str:
@@ -182,16 +192,14 @@ def render_html(
         + _table(["Project", "Cost"], proj_rows)
         + "<canvas id='c_pr_trend'></canvas>"
     )
-    # Section 2: model mix + right-sizing
+    # Section 2: model mix
     mm_rows = [
         [p, m, _fmt_cost(g)]
         for p, models in (agg.get("model_mix") or {}).items()
         for m, g in models.items()
     ]
-    s2 = (
-        f"<h2 id='model_mix'>{SECTIONS[1][1]}</h2>"
-        + _table(["Project", "Model", "Cost"], mm_rows)
-        + f"<p class='callout'>{_right_sizing_callout(agg)}</p>"
+    s2 = f"<h2 id='model_mix'>{SECTIONS[1][1]}</h2>" + _table(
+        ["Project", "Model", "Cost"], mm_rows
     )
     # Section 3: cache efficiency (table + trend chart). _pct/_money are crash-safe on malformed data.
     cache_rows = [
@@ -238,6 +246,10 @@ def render_html(
         + _table(["Host", "peak concurrent", "burn $/hr"], conc_rows)
         + "<canvas id='c_conc'></canvas>"
     )
+    # Section 7: right-sizing recommendations (usage_recommend loaded lazily)
+    s7 = f"<h2 id='recommendations'>{SECTIONS[6][1]}</h2>" + _render_recommendations(
+        agg, records
+    )
 
     footnote = (
         f"<p class='footnote'>{_NOTIONAL_FOOTNOTE}</p>" if has_subscription else ""
@@ -259,7 +271,7 @@ table{{border-collapse:collapse;margin:.5rem 0}}th,td{{border:1px solid #ccc;pad
 </head><body>
 <h1>{html.escape(title)}</h1>
 <p>Total: {html.escape(_fmt_cost(totals))} &middot; {html.escape(str(totals.get("records", 0)))} records</p>
-{s1}{s2}{s3}{s4}{s5}{s6}
+{s1}{s2}{s3}{s4}{s5}{s6}{s7}
 {footnote}
 <!-- Chart labels are data-derived strings, but Chart.js renders them on the CANVAS as text (no
      innerHTML / DOM-injection path; no HTML-tooltip plugin is used), and the embedded blob is
