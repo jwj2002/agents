@@ -267,3 +267,283 @@ def test_record_schema():
     assert rec["provider"] == "claude"
     assert rec["account"] is None and rec["billing_type"] is None  # filled by #265
     assert rec["cost_usd"] > 0
+
+
+# --- Issue #311: cross-repo attribution via --repo and git -C -----------------------------------
+
+
+# Test A — `gh --repo owner/name` sets project on subsequent message
+def test_gh_repo_flag_sets_project():
+    recs = _extract(
+        [
+            _asst(
+                1,
+                ts="t1",
+                content=[_bash("gh pr merge 99 --repo jwj2002/agents --squash")],
+            ),
+            _asst(2, ts="t2"),
+        ]
+    )
+    assert recs[0]["project"] is None  # issuing message: pre-command
+    assert recs[1]["project"] == "agents"
+    assert recs[1]["task"] == "unattributed"  # no branch → task still unattributed
+
+
+# Test B — `git -C <abs-path>` sets project on subsequent message
+def test_git_dash_c_sets_project():
+    recs = _extract(
+        [
+            _asst(1, ts="t1", content=[_bash("git -C /Users/jjob/agents status")]),
+            _asst(2, ts="t2"),
+        ]
+    )
+    assert recs[1]["project"] == "agents"
+
+
+# Test C — `git -C $R` (shell variable) does NOT set project (no mis-attribution)
+def test_git_dash_c_shell_var_ignored():
+    recs = _extract(
+        [
+            _asst(1, ts="t1", content=[_bash("git -C $R log --oneline")]),
+            _asst(2, ts="t2"),
+        ]
+    )
+    assert recs[1]["project"] is None
+
+
+# Test D — `git -C <path> checkout -b feat/issue-N-foo` sets BOTH project AND task
+def test_git_dash_c_checkout_sets_project_and_task():
+    recs = _extract(
+        [
+            _asst(
+                1,
+                ts="t1",
+                content=[
+                    _bash("git -C ~/agents checkout -b feat/issue-311-attr origin/main")
+                ],
+            ),
+            _asst(2, ts="t2"),
+        ]
+    )
+    assert recs[1]["project"] == "agents"
+    assert recs[1]["task"] == "issue:311"
+
+
+# Test E — conflicting --repo and git -C in same command → stays unattributed (precision over recall)
+def test_conflicting_signals_no_project():
+    recs = _extract(
+        [
+            _asst(
+                1,
+                ts="t1",
+                content=[_bash("git -C /path/to/repo-a status --repo owner/repo-b")],
+            ),
+            _asst(2, ts="t2"),
+        ]
+    )
+    # conflicting signals → project remains None (precision over recall)
+    assert recs[1]["project"] is None
+
+
+# Test F — no cross-repo signal → stays unattributed, never mis-attributed
+def test_no_cross_repo_signal_stays_unattributed():
+    recs = _extract(
+        [
+            _asst(1, ts="t1", content=[_bash("echo hello")]),
+            _asst(2, ts="t2"),
+        ]
+    )
+    assert recs[1]["task"] == "unattributed"
+    assert recs[1]["project"] is None
+
+
+# Test G — `cd` takes precedence over `--repo` flag on the same command
+def test_cd_takes_precedence_over_repo_flag():
+    # cd /Users/.../agents in command wins over a stray --repo flag
+    recs = _extract(
+        [
+            _asst(
+                1,
+                ts="t1",
+                content=[
+                    _bash("cd /Users/jjob/agents && gh pr create --title x --body y")
+                ],
+            ),
+            _asst(2, ts="t2"),
+        ]
+    )
+    assert recs[1]["project"] == "agents"
+
+
+# Test G2 — `--repo` pointing to a DIFFERENT repo does NOT override `cd`-established project
+def test_cd_beats_conflicting_repo_flag():
+    # cd sets agents; --repo points to maison-scaffold; cd wins (precision over recall)
+    recs = _extract(
+        [
+            _asst(
+                1,
+                ts="t1",
+                content=[
+                    _bash(
+                        "cd /Users/jjob/agents && gh pr create --repo jwj2002/maison-scaffold --title x"
+                    )
+                ],
+            ),
+            _asst(2, ts="t2"),
+        ]
+    )
+    # cd fires first → project = "agents"; --repo block is skipped ("project" already in out)
+    assert recs[1]["project"] == "agents"
+
+
+# Test H — AC4: the feature REDUCES project-unattributed. Demonstrated by a counterfactual
+# (identical sessions WITH vs WITHOUT a `--repo` signal — the with-signal run has fewer
+# project=None records), plus an honest per-run outcome from collect() (attributed + unattributed
+# = written). We do NOT diff the append-only shard total, which only grows.
+def test_collect_repo_target_reduces_unattributed(tmp_path):
+    # Counterfactual. WITHOUT a repo signal: no cwd repo → every record stays project=None.
+    without = list(
+        U.extract_records([_asst(1, ts="t1"), _asst(2, ts="t2")], inference_host=HOST)
+    )
+    # WITH a `--repo` signal in msg1: the subsequent message gains project=agents.
+    with_signal = list(
+        U.extract_records(
+            [
+                _asst(
+                    1, ts="t1", content=[_bash("gh pr merge 1 --repo jwj2002/agents")]
+                ),
+                _asst(2, ts="t2"),
+            ],
+            inference_host=HOST,
+        )
+    )
+    none_without = sum(1 for r in without if r.get("project") is None)
+    none_with = sum(1 for r in with_signal if r.get("project") is None)
+    assert none_with < none_without  # the mined --repo rescued at least one record
+
+    # collect() reports the run's honest attribution outcome (no append-only shard diff).
+    proj = tmp_path / "projects" / "-proj-x"
+    proj.mkdir(parents=True)
+    shard = tmp_path / "telemetry" / HOST / "usage.jsonl"
+    (proj / "s1.jsonl").write_text(
+        "\n".join(
+            json.dumps(e)
+            for e in [
+                _asst(
+                    1, ts="t1", content=[_bash("gh pr merge 1 --repo jwj2002/agents")]
+                ),
+                _asst(2, ts="t2"),  # gets project=agents from the mined signal
+            ]
+        )
+    )
+    result = U.collect(tmp_path / "projects", shard, inference_host=HOST)
+    assert (
+        result["project_attributed"] + result["project_unattributed"]
+        == result["written"]
+    )
+    assert (
+        result["project_attributed"] >= 1
+    )  # the mined --repo attributed at least one record
+    # Also confirm msg3 is the attributed one: read the shard
+    records = [
+        json.loads(line) for line in shard.read_text().splitlines() if line.strip()
+    ]
+    new_records = [r for r in records if r.get("dedup_key", "").startswith("s1:")]
+    attributed = [r for r in new_records if r.get("project") == "agents"]
+    assert len(attributed) >= 1  # at least msg3 got project=agents
+
+
+# mine_command unit tests for AC compliance
+def test_mine_command_gh_repo():
+    assert (
+        U.mine_command("gh pr merge 99 --repo jwj2002/agents --squash")["project"]
+        == "agents"
+    )
+
+
+def test_mine_command_git_dash_c_abs():
+    assert U.mine_command("git -C /Users/jjob/agents status")["project"] == "agents"
+
+
+def test_mine_command_git_dash_c_shell_var():
+    assert "project" not in U.mine_command("git -C $R log")
+
+
+def test_mine_command_git_dash_c_checkout():
+    result = U.mine_command("git -C ~/agents checkout -b feat/issue-311-foo")
+    assert result["project"] == "agents"
+    assert result["task"] == "issue:311"
+
+
+def test_mine_command_conflicting_signals():
+    result = U.mine_command("git -C /path/to/repo-a status --repo owner/repo-b")
+    assert result.get("project") is None or "project" not in result
+
+
+# AC3 precision: per-message cwd-vs-mined precedence tests (issue #311 fix 2)
+
+
+# Test I — hijack prevention: cwd=agents + stray --repo in earlier message → later msgs stay project=agents
+def test_cwd_repo_beats_stray_mined_project():
+    """A real-cwd session (cwd=/Users/jjob/agents) must not be hijacked by a stray --repo flag.
+    After msg1 mines project=maison-scaffold, msg2 has cwd=agents → must get project=agents (cwd wins)."""
+    recs = _extract(
+        [
+            _asst(
+                1,
+                ts="t1",
+                cwd="/Users/jjob/agents",
+                content=[_bash("gh pr view 99 --repo jwj2002/maison-scaffold")],
+            ),
+            _asst(2, ts="t2", cwd="/Users/jjob/agents"),
+        ]
+    )
+    # msg1: pre-command, cwd=agents → project=agents (cwd wins over nothing mined yet)
+    assert recs[0]["project"] == "agents"
+    # msg2: active["project"] is now "maison-scaffold" from mining msg1, but cwd=agents → cwd wins
+    assert recs[1]["project"] == "agents"
+
+
+# Test J — #311 target: cwd=None (no repo) + --repo signal → project from mined signal
+def test_scratch_cwd_uses_mined_project():
+    """The primary #311 target: cwd is absent (simulates abs-path-outside-any-repo session).
+    cwd yields None → mined active["project"] fills the gap (the #311 win)."""
+    recs = _extract(
+        [
+            _asst(
+                1,
+                ts="t1",
+                cwd=None,
+                content=[_bash("gh pr merge 5 --repo jwj2002/agents --squash")],
+            ),
+            _asst(2, ts="t2", cwd=None),
+        ]
+    )
+    # msg1: no cwd → project=None (pre-command, nothing mined yet)
+    assert recs[0]["project"] is None
+    # msg2: no cwd → cwd_project=None → falls back to mined active["project"] = "agents"
+    assert recs[1]["project"] == "agents"
+
+
+# Test K — ssh-develop regression: ssh-derived project still wins when work_host != inference_host
+def test_ssh_develop_project_attribution_not_regressed():
+    """SSH-develop (§4.2): when ssh sets work_host to a remote, active["project"] (mined from ssh
+    'cd repo') must still win for subsequent messages — even though cwd is local."""
+    recs = _extract(
+        [
+            _asst(
+                1,
+                ts="t1",
+                cwd="/Users/jjob",  # local cwd — irrelevant under ssh-develop
+                content=[_bash("ssh jns 'cd ~/app-repos/app-buddy && git status'")],
+            ),
+            _asst(2, ts="t2", cwd="/Users/jjob"),  # still local cwd after ssh
+        ]
+    )
+    # msg1: pre-command, cwd=/Users/jjob → _project_from_path gives "jjob"; work_host still HOST
+    # so on_remote is False for msg1 → cwd wins → project="jjob"
+    assert recs[0]["project"] == "jjob"
+    # msg2: after ssh, work_host="jns" (≠ HOST) → on_remote=True → ssh-mined active["project"]
+    # wins. ssh 'cd ~/app-repos/app-buddy' → mine_command sets project="app-buddy" via cd.
+    assert recs[1]["work_host"] == "jns"
+    assert recs[1]["project"] == "app-buddy"

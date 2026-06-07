@@ -54,6 +54,12 @@ _ISSUE_RE = re.compile(r"issue-(\d+)", re.IGNORECASE)
 _CLOSES_RE = re.compile(r"\b(?:closes|fixes|resolves)\s+#(\d+)", re.IGNORECASE)
 _CHECKOUT_RE = re.compile(r"git\s+checkout\s+-b\s+(\S+)")
 _CD_RE = re.compile(r"\bcd\s+([~\w./-]+)")
+# Cross-repo attribution signals (issue #311):
+#   _GH_REPO_RE  — `gh ... --repo owner/name`  → project = <name>
+#   _GIT_C_RE    — `git -C <path> ...`          → project = _project_from_path(<path>)
+# Paths that start with '$' or '"$' are shell variables and cannot be resolved at parse time.
+_GH_REPO_RE = re.compile(r"--repo\s+[a-zA-Z0-9_.-]+/([a-zA-Z0-9_.-]+)")
+_GIT_C_RE = re.compile(r"\bgit\s+-C\s+(\S+)")
 _NONTASK_BRANCHES = {"head", "main", "master", "", None}
 # OpenSSH short flags that consume the NEXT token as their argument — so the host parser skips both
 # (else `ssh -p 22 host` mis-reads "22" as the host; Codex #262).
@@ -150,6 +156,47 @@ def mine_command(cmd: str) -> dict:
         proj = _project_from_path(cd.group(1))
         if proj:
             out["project"] = proj
+    # Cross-repo attribution: fill project gap when cd gave nothing (issue #311).
+    #
+    # PRECEDENCE (precision over recall — false attribution is worse than none):
+    #   1. cd <path>  — already handled above; most specific (context-setting)
+    #   2. --repo owner/name  — explicit gh flag; fills gap when cd is absent
+    #   3. git -C <path>  — fills gap when neither cd nor --repo is present
+    #   4. If BOTH --repo and git -C fire on the SAME command with DIFFERENT values
+    #      → clear project (conflicting signals, do not guess).
+    #   5. Per-message cwd-vs-mined precedence is enforced in extract_records (not here):
+    #      cwd-derived project wins for local work; mined wins under SSH-develop (§4.2);
+    #      mined fills the gap when cwd yields nothing (the #311 scratch-session target).
+    if "project" not in out:
+        # Determine candidates from --repo and git -C
+        repo_match = _GH_REPO_RE.search(cmd)
+        gitc_match = _GIT_C_RE.search(cmd)
+
+        repo_proj = repo_match.group(1) if repo_match else None
+
+        gitc_proj = None
+        if gitc_match:
+            raw_path = gitc_match.group(1)
+            # Skip shell variables (unresolvable at parse time)
+            if not raw_path.startswith("$") and not raw_path.startswith('"$'):
+                gitc_proj = _project_from_path(raw_path)
+                # Also extract task from `git -C <path> checkout -b <branch>` — the
+                # existing _CHECKOUT_RE requires `git\s+checkout` (no gap) and misses
+                # this form, so we handle it here alongside project extraction.
+                if gitc_proj and "task" not in out:
+                    gitc_co = re.search(r"\bcheckout\s+-b\s+(\S+)", cmd)
+                    if gitc_co:
+                        t = _task_from_branch(gitc_co.group(1))
+                        if t:
+                            out["task"] = t
+
+        if repo_proj and gitc_proj and repo_proj != gitc_proj:
+            # Conflicting signals in the same command — stay unattributed (precision over recall)
+            pass
+        elif repo_proj:
+            out["project"] = repo_proj
+        elif gitc_proj:
+            out["project"] = gitc_proj
     return out
 
 
@@ -289,7 +336,26 @@ def extract_records(
             # `git checkout -b` message still shows the OLD branch → it naturally gives the "subsequent
             # message" boundary). Mined `active` is the fallback when gitBranch is unusable (cross-repo).
             cur_task = _task_from_branch(entry.get("gitBranch")) or active["task"]
-            cur_project = active["project"] or _project_from_path(entry.get("cwd"))
+            # Per-message project precedence (AC3 precision — enforced here, not in mine_command):
+            #   1. SSH-develop (§4.2): when work_host != inference_host, cwd is LOCAL and meaningless
+            #      for attribution.  The ssh-mined active["project"] (set by ssh 'cd repo') wins.
+            #   2. Local work: the current message's cwd is GROUND TRUTH.  If cwd resolves to a repo,
+            #      use that — regardless of any mined active["project"] from a stray --repo flag in an
+            #      earlier message.  This prevents a one-off `gh pr view --repo other/repo` from
+            #      hijacking all subsequent messages in a real cwd=agents session.
+            #   3. Fallback: cwd yields nothing (scratch dir, temp path) → use mined active["project"].
+            #      This is the #311 target: scratch sessions with cross-repo `--repo`/`git -C` signals.
+            cwd_project = _project_from_path(entry.get("cwd"))
+            on_remote = active["work_host"] != inference_host
+            if on_remote:
+                # SSH-develop: trust the ssh-mined project; cwd is local and irrelevant.
+                cur_project = active["project"] or cwd_project
+            elif cwd_project:
+                # Local work with a real cwd repo: cwd wins over any stray mined signal.
+                cur_project = cwd_project
+            else:
+                # Local work, no cwd repo (scratch / temp): fall back to mined active project.
+                cur_project = active["project"]
             usage = msg.get("usage") or {}
             tok = {
                 norm: int(usage.get(raw, 0) or 0) for raw, norm in _USAGE_MAP.items()
@@ -375,7 +441,7 @@ def collect(
     fallback_account = current_account(claude_json_path or home / ".claude.json")
     shard_path = Path(shard_path)
     seen = _existing_dedup_keys(shard_path)
-    written = skipped = 0
+    written = skipped = project_attributed = 0
     shard_path.parent.mkdir(parents=True, exist_ok=True)
     with shard_path.open("a", encoding="utf-8") as fh:
         for tpath in sorted(glob.glob(str(Path(projects_dir) / "*" / "*.jsonl"))):
@@ -392,4 +458,17 @@ def collect(
                 seen.add(rec["dedup_key"])
                 fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
                 written += 1
-    return {"written": written, "skipped": skipped, "shard": str(shard_path)}
+                if rec.get("project") is not None:
+                    project_attributed += 1
+    # AC4: attribution OUTCOME of THIS run's written records — honest and non-silent. We do NOT
+    # diff the append-only shard (its project=None total only ever grows as rows accumulate, so it
+    # can never show a "reduction"). The feature's actual EFFECT — records rescued from project=None
+    # by a mined --repo/git-C target that cwd alone would miss — is demonstrated by the with/without
+    # counterfactual in test_collect_repo_target_reduces_unattributed.
+    return {
+        "written": written,
+        "skipped": skipped,
+        "shard": str(shard_path),
+        "project_attributed": project_attributed,
+        "project_unattributed": written - project_attributed,
+    }
