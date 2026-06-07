@@ -64,6 +64,12 @@ An issue is not complete merely because files were added. It must be:
 - documented when operationally meaningful
 - shipped or explicitly blocked by a documented stop gate
 
+Prefer the shared ship workflow when available:
+
+```bash
+~/agents/bin/agent-git ship --issue <N> --summary "<summary>" --test-evidence "<command/result>"
+```
+
 ## PR Creation
 
 - **Title**: Must follow Conventional Commits format
