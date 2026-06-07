@@ -93,9 +93,12 @@ GitLab access (jbox06 only): `~/.claude/rules/gitlab-access.md`.
 - Canonical process: `~/agents/docs/git-process.md`
 - Claude rule adapter: `~/.claude/rules/git-workflow.md`
 - Project-local instructions: read `AGENTS.md` first when present.
-- Agent-owned issues default to shipped work: commit, PR, validate, squash
-  merge, sync `main`, prune stale refs, delete the merged branch, and close or
-  update the issue unless a documented stop gate applies.
+- **Ship by default.** Agent-owned issues are taken end-to-end — commit, PR,
+  validate, squash-merge, sync `main`, prune the branch, post-merge verify,
+  close the issue — **without pausing to ask for merge approval.** Stop before
+  merge ONLY on a specific agreement ("PR only" / "hold") or a documented stop
+  gate. CI-red / unresolved REQUEST_CHANGES / conflicts are "fix then ship",
+  not stop gates. Full rule: `~/.claude/rules/git-workflow.md`.
 - Completion requires implementation to be wired through its intended
   entrypoint and exercised with evidence, not merely present in files.
 
