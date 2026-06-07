@@ -60,3 +60,11 @@ and verify behavior before declaring completion.
   destructive cleanup unless explicitly requested.
 - Do not bypass hooks with `--no-verify` unless explicitly authorized.
 - Before commit or PR work, check branch and status.
+- For projects bootstrapped by `~/agents`, read project `AGENTS.md` and follow
+  the standardized git process in `~/agents/docs/git-process.md`.
+- Agent-owned issues default to shipped work: commit, PR, validate, squash
+  merge, sync `main`, prune stale refs, delete the merged branch, and close or
+  update the linked issue unless a documented stop gate applies.
+- Do not call work complete until it is implemented, wired through the intended
+  entrypoint, exercised, observed with evidence, documented when operationally
+  meaningful, and shipped or explicitly blocked.

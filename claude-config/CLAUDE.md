@@ -86,15 +86,14 @@ GitLab access (jbox06 only): `~/.claude/rules/gitlab-access.md`.
 
 ## Git workflow essentials
 
-- Always branch from latest `origin/main`: `git fetch && git checkout -b {branch} origin/main`
-- Naming: `{type}/issue-{N}-{slug}` (feature/, fix/, chore/, docs/, test/, perf/)
-- One branch = one PR = one logical change
-- Conventional Commits: `type(scope): description`
-- Squash merge only
-- Run lint/tests before opening PR
-- Never `--no-verify` unless explicitly authorized
-
-Full rules: `~/.claude/rules/git-workflow.md`.
+- Canonical process: `~/agents/docs/git-process.md`
+- Claude rule adapter: `~/.claude/rules/git-workflow.md`
+- Project-local instructions: read `AGENTS.md` first when present.
+- Agent-owned issues default to shipped work: commit, PR, validate, squash
+  merge, sync `main`, prune stale refs, delete the merged branch, and close or
+  update the issue unless a documented stop gate applies.
+- Completion requires implementation to be wired through its intended
+  entrypoint and exercised with evidence, not merely present in files.
 
 Post-merge verification: `~/.claude/rules/post-merge-verification.md`.
 
