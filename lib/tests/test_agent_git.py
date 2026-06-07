@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from lib.agent_git import parse_status, preflight, readiness
+from lib.agent_git import parse_status, preflight, readiness, ship
 
 
 def run(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -268,3 +268,99 @@ def test_readiness_cli_generates_pr_body(tmp_path: Path) -> None:
     payload = json.loads(completed.stdout)
     assert payload["ok"] is True
     assert "Closes #42" in payload["pr_body"]
+
+
+def test_ship_dry_run_passes_through_gates(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/tool.py")
+
+    result = ship(
+        work,
+        issue=42,
+        summary="add shared git tooling",
+        test_evidence=["pytest lib/tests/test_agent_git.py -q"],
+        allowed_paths=["src/"],
+        dry_run=True,
+        no_fetch=True,
+    )
+
+    assert result.ok
+    assert result.dry_run is True
+    assert result.stopped is False
+    assert "squash_merge" in result.steps
+
+
+def test_ship_stops_on_preflight_failure(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+
+    result = ship(
+        work,
+        issue=42,
+        summary="add shared git tooling",
+        test_evidence=["pytest -q"],
+        dry_run=True,
+        no_fetch=True,
+    )
+
+    assert not result.ok
+    assert result.stopped is True
+    assert result.stop_reason == "preflight failed"
+    assert any("Current branch is main" in error for error in result.errors)
+
+
+def test_ship_stops_on_readiness_failure(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/tool.py")
+
+    result = ship(
+        work,
+        issue=42,
+        summary="add shared git tooling",
+        dry_run=True,
+        no_fetch=True,
+    )
+
+    assert not result.ok
+    assert result.stopped is True
+    assert result.stop_reason == "readiness failed"
+    assert any("Test Plan evidence is required" in error for error in result.errors)
+
+
+def test_ship_cli_dry_run_json(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/tool.py")
+    script = Path(__file__).resolve().parents[2] / "bin" / "agent-git"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "ship",
+            "--repo",
+            str(work),
+            "--issue",
+            "42",
+            "--summary",
+            "add shared git tooling",
+            "--test-evidence",
+            "pytest lib/tests/test_agent_git.py -q",
+            "--allowed-path",
+            "src/",
+            "--dry-run",
+            "--no-fetch",
+            "--json",
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    payload = json.loads(completed.stdout)
+    assert payload["ok"] is True
+    assert payload["dry_run"] is True
+    assert "squash_merge" in payload["steps"]

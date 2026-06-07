@@ -131,6 +131,45 @@ class ReadinessResult:
         }
 
 
+@dataclass
+class ShipResult:
+    repo: str
+    branch: str | None
+    issue: int | None
+    dry_run: bool
+    stopped: bool
+    stop_reason: str | None
+    steps: list[str]
+    preflight: dict[str, Any]
+    readiness: dict[str, Any]
+    pr_number: int | None = None
+    pr_url: str | None = None
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.stopped and not self.errors
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "repo": self.repo,
+            "branch": self.branch,
+            "issue": self.issue,
+            "dry_run": self.dry_run,
+            "stopped": self.stopped,
+            "stop_reason": self.stop_reason,
+            "steps": self.steps,
+            "preflight": self.preflight,
+            "readiness": self.readiness,
+            "pr_number": self.pr_number,
+            "pr_url": self.pr_url,
+            "errors": self.errors,
+            "warnings": self.warnings,
+        }
+
+
 class Runner:
     def __call__(self, args: list[str], cwd: Path) -> CommandResult:
         completed = subprocess.run(
@@ -561,6 +600,312 @@ def render_readiness_text(result: ReadinessResult) -> str:
     return "\n".join(lines) + "\n"
 
 
+def latest_commit_subject(runner: Runner, repo: Path) -> str:
+    subject = run_git(runner, repo, ["log", "-1", "--format=%s"])
+    if subject.returncode != 0 or not subject.stdout.strip():
+        return "chore: ship agent-owned issue"
+    return subject.stdout.strip()
+
+
+def current_pr(runner: Runner, repo: Path) -> tuple[int | None, str | None]:
+    result = runner(["gh", "pr", "view", "--json", "number,url"], repo)
+    if result.returncode != 0:
+        return None, None
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        return None, None
+    number = payload.get("number")
+    url = payload.get("url")
+    return (int(number), url) if number is not None else (None, url)
+
+
+def create_pr(runner: Runner, repo: Path, title: str, body: str) -> tuple[int | None, str | None, str | None]:
+    result = runner(["gh", "pr", "create", "--title", title, "--body", body], repo)
+    if result.returncode != 0:
+        return None, None, result.stderr.strip() or result.stdout.strip()
+    url = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else None
+    number = None
+    if url and "/" in url:
+        try:
+            number = int(url.rstrip("/").split("/")[-1])
+        except ValueError:
+            number = None
+    return number, url, None
+
+
+def post_comment(runner: Runner, repo: Path, issue_or_pr: int, body: str) -> None:
+    runner(["gh", "issue", "comment", str(issue_or_pr), "--body", body], repo)
+
+
+def stop_comment(result: ShipResult) -> str:
+    errors = "\n".join(f"- {item}" for item in result.errors) or "- none"
+    warnings = "\n".join(f"- {item}" for item in result.warnings) or "- none"
+    return "\n".join(
+        [
+            "## Agent ship stopped",
+            "",
+            f"Branch: `{result.branch or '(detached)'}`",
+            f"Stop reason: {result.stop_reason or 'unknown'}",
+            "",
+            "Errors:",
+            errors,
+            "",
+            "Warnings:",
+            warnings,
+            "",
+            "Next action: resolve the stop gate, rerun validation, then rerun `agent-git ship`.",
+        ]
+    )
+
+
+def ship(
+    repo: Path,
+    *,
+    issue: int | None = None,
+    summary: str | None = None,
+    test_evidence: list[str] | None = None,
+    allowed_paths: list[str] | None = None,
+    dry_run: bool = False,
+    no_fetch: bool = False,
+    skip_checks_wait: bool = False,
+    comment_on_stop: bool = False,
+    runner: Runner | None = None,
+) -> ShipResult:
+    runner = runner or Runner()
+    repo = repo.resolve()
+    steps: list[str] = []
+    warnings: list[str] = []
+    errors: list[str] = []
+
+    def add_warnings(items: list[str]) -> None:
+        for item in items:
+            if item not in warnings:
+                warnings.append(item)
+
+    branch_result = run_git(runner, repo, ["branch", "--show-current"])
+    branch = branch_result.stdout.strip() or None
+
+    steps.append("preflight")
+    preflight_result = preflight(repo, no_fetch=no_fetch, runner=runner)
+    add_warnings(preflight_result.warnings)
+    if not preflight_result.ok:
+        errors.extend(preflight_result.errors)
+        result = ShipResult(
+            repo=str(repo),
+            branch=branch,
+            issue=issue or extract_issue_from_branch(branch),
+            dry_run=dry_run,
+            stopped=True,
+            stop_reason="preflight failed",
+            steps=steps,
+            preflight=preflight_result.to_dict(),
+            readiness={},
+            errors=errors,
+            warnings=warnings,
+        )
+        if comment_on_stop and result.issue:
+            post_comment(runner, repo, result.issue, stop_comment(result))
+        return result
+
+    steps.append("readiness")
+    readiness_result = readiness(
+        repo,
+        stage="merge",
+        issue=issue,
+        summary=summary,
+        test_evidence=test_evidence,
+        allowed_paths=allowed_paths,
+        generate_pr_body=True,
+        runner=runner,
+    )
+    add_warnings(readiness_result.warnings)
+    resolved_issue = readiness_result.issue
+    if not readiness_result.ok:
+        errors.extend(readiness_result.errors)
+        result = ShipResult(
+            repo=str(repo),
+            branch=branch,
+            issue=resolved_issue,
+            dry_run=dry_run,
+            stopped=True,
+            stop_reason="readiness failed",
+            steps=steps,
+            preflight=preflight_result.to_dict(),
+            readiness=readiness_result.to_dict(),
+            errors=errors,
+            warnings=warnings,
+        )
+        if comment_on_stop and result.issue:
+            post_comment(runner, repo, result.issue, stop_comment(result))
+        return result
+
+    planned = ["create_or_reuse_pr", "wait_for_checks", "squash_merge", "sync_main", "prune", "delete_branch"]
+    steps.extend(planned)
+    if dry_run:
+        return ShipResult(
+            repo=str(repo),
+            branch=branch,
+            issue=resolved_issue,
+            dry_run=True,
+            stopped=False,
+            stop_reason=None,
+            steps=steps,
+            preflight=preflight_result.to_dict(),
+            readiness=readiness_result.to_dict(),
+            warnings=warnings,
+        )
+
+    if shutil.which("gh") is None:
+        errors.append("GitHub CLI not found; cannot create or merge PR.")
+        return ShipResult(
+            repo=str(repo),
+            branch=branch,
+            issue=resolved_issue,
+            dry_run=False,
+            stopped=True,
+            stop_reason="missing GitHub CLI",
+            steps=steps,
+            preflight=preflight_result.to_dict(),
+            readiness=readiness_result.to_dict(),
+            errors=errors,
+            warnings=warnings,
+        )
+
+    pr_number, pr_url = current_pr(runner, repo)
+    if pr_number is None:
+        title = latest_commit_subject(runner, repo)
+        pr_number, pr_url, create_error = create_pr(runner, repo, title, readiness_result.pr_body or "")
+        if create_error:
+            errors.append(f"Could not create PR: {create_error}")
+            result = ShipResult(
+                repo=str(repo),
+                branch=branch,
+                issue=resolved_issue,
+                dry_run=False,
+                stopped=True,
+                stop_reason="PR creation failed",
+                steps=steps,
+                preflight=preflight_result.to_dict(),
+                readiness=readiness_result.to_dict(),
+                errors=errors,
+                warnings=warnings,
+            )
+            if comment_on_stop and resolved_issue:
+                post_comment(runner, repo, resolved_issue, stop_comment(result))
+            return result
+
+    if pr_number is None:
+        errors.append("Could not determine PR number.")
+        return ShipResult(
+            repo=str(repo),
+            branch=branch,
+            issue=resolved_issue,
+            dry_run=False,
+            stopped=True,
+            stop_reason="PR number unavailable",
+            steps=steps,
+            preflight=preflight_result.to_dict(),
+            readiness=readiness_result.to_dict(),
+            errors=errors,
+            warnings=warnings,
+            pr_url=pr_url,
+        )
+
+    if not skip_checks_wait:
+        checks = runner(["gh", "pr", "checks", str(pr_number), "--watch", "--interval", "10"], repo)
+        if checks.returncode != 0:
+            errors.append("PR checks failed or could not be verified.")
+            result = ShipResult(
+                repo=str(repo),
+                branch=branch,
+                issue=resolved_issue,
+                dry_run=False,
+                stopped=True,
+                stop_reason="checks failed",
+                steps=steps,
+                preflight=preflight_result.to_dict(),
+                readiness=readiness_result.to_dict(),
+                errors=errors,
+                warnings=warnings,
+                pr_number=pr_number,
+                pr_url=pr_url,
+            )
+            if comment_on_stop:
+                post_comment(runner, repo, pr_number, stop_comment(result))
+            return result
+
+    merge = runner(["gh", "pr", "merge", str(pr_number), "--squash", "--delete-branch"], repo)
+    if merge.returncode != 0:
+        errors.append(f"PR merge failed: {merge.stderr.strip() or merge.stdout.strip()}")
+        result = ShipResult(
+            repo=str(repo),
+            branch=branch,
+            issue=resolved_issue,
+            dry_run=False,
+            stopped=True,
+            stop_reason="merge failed",
+            steps=steps,
+            preflight=preflight_result.to_dict(),
+            readiness=readiness_result.to_dict(),
+            errors=errors,
+            warnings=warnings,
+            pr_number=pr_number,
+            pr_url=pr_url,
+        )
+        if comment_on_stop:
+            post_comment(runner, repo, pr_number, stop_comment(result))
+        return result
+
+    run_git(runner, repo, ["switch", preflight_result.default_branch])
+    run_git(runner, repo, ["pull", "--ff-only"])
+    run_git(runner, repo, ["fetch", "--prune", "origin"])
+    if branch:
+        run_git(runner, repo, ["branch", "-D", branch])
+
+    return ShipResult(
+        repo=str(repo),
+        branch=branch,
+        issue=resolved_issue,
+        dry_run=False,
+        stopped=False,
+        stop_reason=None,
+        steps=steps,
+        preflight=preflight_result.to_dict(),
+        readiness=readiness_result.to_dict(),
+        pr_number=pr_number,
+        pr_url=pr_url,
+        warnings=warnings,
+    )
+
+
+def render_ship_text(result: ShipResult) -> str:
+    lines = [
+        f"ship: {'pass' if result.ok else 'stopped'}",
+        f"repo: {result.repo}",
+        f"branch: {result.branch or '(detached)'}",
+        f"issue: {result.issue if result.issue is not None else '(none)'}",
+        f"dry_run: {str(result.dry_run).lower()}",
+        f"stopped: {str(result.stopped).lower()}",
+        f"stop_reason: {result.stop_reason or '(none)'}",
+        "steps:",
+        *[f"- {step}" for step in result.steps],
+    ]
+    if result.pr_number:
+        lines.append(f"pr: #{result.pr_number}")
+    if result.pr_url:
+        lines.append(f"pr_url: {result.pr_url}")
+    if result.errors:
+        lines.append("")
+        lines.append("errors:")
+        lines.extend(f"- {item}" for item in result.errors)
+    if result.warnings:
+        lines.append("")
+        lines.append("warnings:")
+        lines.extend(f"- {item}" for item in result.warnings)
+    return "\n".join(lines) + "\n"
+
+
 def add_preflight_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = subparsers.add_parser("preflight", help="inspect git state before agent-owned edits")
     parser.add_argument("--repo", default=".", help="repository path")
@@ -584,11 +929,26 @@ def add_readiness_parser(subparsers: argparse._SubParsersAction[argparse.Argumen
     parser.add_argument("--generate-pr-body", action="store_true", help="include generated PR body in output")
 
 
+def add_ship_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser("ship", help="ship an agent-owned issue through PR, merge, and cleanup")
+    parser.add_argument("--repo", default=".", help="repository path")
+    parser.add_argument("--json", action="store_true", help="emit JSON")
+    parser.add_argument("--issue", type=int, help="linked GitHub issue number")
+    parser.add_argument("--summary", required=True, help="summary evidence for the PR body")
+    parser.add_argument("--test-evidence", action="append", default=[], required=True, help="test plan evidence; repeatable")
+    parser.add_argument("--allowed-path", action="append", default=[], help="allowed changed-file prefix; repeatable")
+    parser.add_argument("--dry-run", action="store_true", help="exercise ship gates without creating or merging a PR")
+    parser.add_argument("--no-fetch", action="store_true", help="skip git fetch origin --prune during preflight")
+    parser.add_argument("--skip-checks-wait", action="store_true", help="do not wait for gh pr checks before merge")
+    parser.add_argument("--comment-on-stop", action="store_true", help="comment on the linked issue or PR when stopped")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agent-git")
     subparsers = parser.add_subparsers(dest="command", required=True)
     add_preflight_parser(subparsers)
     add_readiness_parser(subparsers)
+    add_ship_parser(subparsers)
 
     args = parser.parse_args(argv)
 
@@ -604,6 +964,24 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
         else:
             print(render_preflight_text(result), end="")
+        return 0 if result.ok else 1
+
+    if args.command == "ship":
+        result = ship(
+            Path(args.repo),
+            issue=args.issue,
+            summary=args.summary,
+            test_evidence=args.test_evidence,
+            allowed_paths=args.allowed_path,
+            dry_run=args.dry_run,
+            no_fetch=args.no_fetch,
+            skip_checks_wait=args.skip_checks_wait,
+            comment_on_stop=args.comment_on_stop,
+        )
+        if args.json:
+            print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+        else:
+            print(render_ship_text(result), end="")
         return 0 if result.ok else 1
 
     if args.command == "readiness":

@@ -38,6 +38,22 @@ For agent-owned issues, the expected lifecycle is:
 10. Sync `main`, prune stale refs, and delete the merged branch.
 11. Confirm the linked issue closed or update it with the remaining blocker.
 
+The shared helper for this lifecycle is:
+
+```bash
+~/agents/bin/agent-git ship \
+  --issue 123 \
+  --summary "implemented the scoped change" \
+  --test-evidence "pytest tests/test_example.py -q" \
+  --allowed-path src/
+```
+
+Preview the full gate sequence without creating or merging a PR:
+
+```bash
+~/agents/bin/agent-git ship --dry-run --issue 123 --summary "..." --test-evidence "..."
+```
+
 Stopping is not completion. If an agent stops before merge, it must leave a PR
 or issue comment with the blocker, current branch, validation status, and exact
 next action.

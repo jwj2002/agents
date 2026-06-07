@@ -66,6 +66,8 @@ and verify behavior before declaring completion.
   available and treat reported errors as stop gates.
 - Before opening or merging an agent-owned PR, run
   `~/agents/bin/agent-git readiness` when it is available.
+- Prefer `~/agents/bin/agent-git ship` for end-to-end issue shipping when it is
+  available; use `--dry-run` first for high-risk changes.
 - Agent-owned issues default to shipped work: commit, PR, validate, squash
   merge, sync `main`, prune stale refs, delete the merged branch, and close or
   update the linked issue unless a documented stop gate applies.

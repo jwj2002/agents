@@ -62,6 +62,8 @@ Required baseline:
   user request for draft/local-only work.
 - Use squash merge by default, then sync `main`, prune, and delete the merged
   branch.
+- Prefer `~/agents/bin/agent-git ship` for agent-owned issues when available;
+  use `--dry-run` to inspect stop gates before mutating GitHub.
 
 ## Shared Agent Rules
 
