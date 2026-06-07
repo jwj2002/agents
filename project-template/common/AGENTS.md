@@ -54,6 +54,8 @@ Required baseline:
 - Prove implementation through the intended entrypoint. Completion requires the
   change to be implemented, wired, exercised, observed, documented when
   operationally meaningful, and shipped or explicitly blocked.
+- Run `~/agents/bin/agent-git readiness` before opening or merging an
+  agent-owned PR when the helper is available.
 - Stop before merge only for a documented stop gate: failing validation, unsafe
   approval requirement, branch protection requiring human review, blocking dirty
   user work, ambiguous scope, GitHub/network/credential failure, or explicit

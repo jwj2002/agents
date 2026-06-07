@@ -46,6 +46,9 @@ pytest tests/ --timeout=60
 
 # 3. Verify only relevant files changed
 git diff --name-only origin/main
+
+# 4. Verify branch, issue, commit, scope, and test evidence
+~/agents/bin/agent-git readiness --issue <N> --summary "<summary>" --test-evidence "<command/result>"
 ```
 
 If any check fails, fix it before creating the PR. Never skip checks.
