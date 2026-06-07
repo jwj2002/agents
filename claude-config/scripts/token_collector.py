@@ -8,7 +8,6 @@ only as `diagnostic_only`.
 server-a's lane; built host-agnostic by scratch against simulated sink data (live data lands once
 the #252 collector deploy runs on jns-server). Pure logic, no side effects.
 """
-
 from __future__ import annotations
 
 import sys
@@ -19,14 +18,12 @@ import otel_sink as O  # noqa: E402
 
 # Work types with no valid code-quality measurement — cost-tracked but EXCLUDED from targets (§2.5).
 EXCLUDED_WORK_TYPES = frozenset({"deliberative", "ops"})
-RECONCILE_TOLERANCE_DEFAULT = (
-    0.01  # 1% — per-task sum must reconcile vs global OTEL (§2.5 watchdog)
-)
+RECONCILE_TOLERANCE_DEFAULT = 0.01  # 1% — per-task sum must reconcile vs global OTEL (§2.5 watchdog)
 
 
 def is_known_model(model: str) -> bool:
-    """True if the model maps to a real price row (not the DEFAULT_PRICE fallback).
-    Uses O._matches_family — the single source of truth for family matching."""
+    """True if the model maps to a real price row. Uses O._matches_family — the single
+    source of truth for family matching — so this never drifts from _price_for."""
     if not model:
         return False
     m = str(model).lower()
@@ -56,9 +53,7 @@ def _task_link(meta: dict) -> str | None:
     return None
 
 
-def collect_sessions(
-    sink_records: list, session_meta: dict | None = None, *, strict: bool = True
-) -> list:
+def collect_sessions(sink_records: list, session_meta: dict | None = None, *, strict: bool = True) -> list:
     """Per-session cost records (the primary unit, §1.3). `session_meta` joins capture metadata
     (work_type / issue / branch from #229) onto the OTEL token records by session_id."""
     session_meta = session_meta or {}
@@ -67,17 +62,15 @@ def collect_sessions(
         sid = r.get("session_id")
         meta = session_meta.get(sid, {})
         work_type = meta.get("work_type") or r.get("work_type")
-        out.append(
-            {
-                "session_id": sid,
-                "model": r.get("model"),
-                "work_type": work_type,
-                "tokens": {f: int(r.get(f, 0) or 0) for f in O.TOKEN_FIELDS},
-                "cost_usd": session_cost(r, strict=strict),
-                "task_link": _task_link({**meta, **r}),
-                "excluded": work_type in EXCLUDED_WORK_TYPES,
-            }
-        )
+        out.append({
+            "session_id": sid,
+            "model": r.get("model"),
+            "work_type": work_type,
+            "tokens": {f: int(r.get(f, 0) or 0) for f in O.TOKEN_FIELDS},
+            "cost_usd": session_cost(r, strict=strict),
+            "task_link": _task_link({**meta, **r}),
+            "excluded": work_type in EXCLUDED_WORK_TYPES,
+        })
     return out
 
 
@@ -108,25 +101,15 @@ def aggregate(session_costs: list) -> dict:
         "attributed_cost_usd": round(attributed, 10),
         "unattributed_cost_usd": round(unattributed, 10),
         "excluded_cost_usd": round(excluded, 10),
-        "attribution_coverage": round(
-            coverage, 4
-        ),  # feeds the §0.5 target-promotion gate
+        "attribution_coverage": round(coverage, 4),  # feeds the §0.5 target-promotion gate
     }
 
 
-def reconcile(
-    attributed_total: float,
-    otel_global_total: float,
-    tolerance: float = RECONCILE_TOLERANCE_DEFAULT,
-) -> dict:
+def reconcile(attributed_total: float, otel_global_total: float, tolerance: float = RECONCILE_TOLERANCE_DEFAULT) -> dict:
     """Token-coverage reconciliation (§2.5 watchdog): per-task attributed cost must track the global
     OTEL total within tolerance, else attribution gaps are hiding spend → alarm."""
     if otel_global_total <= 0:
-        return {
-            "alarm": attributed_total > 0,
-            "reason": "no_global_total",
-            "deviation": None,
-        }
+        return {"alarm": attributed_total > 0, "reason": "no_global_total", "deviation": None}
     deviation = abs(attributed_total - otel_global_total) / otel_global_total
     return {
         "alarm": deviation > tolerance,
@@ -135,20 +118,15 @@ def reconcile(
     }
 
 
-def build_report(
-    sink_records: list,
-    session_meta: dict | None = None,
-    *,
-    otel_global_total: float | None = None,
-    strict: bool = True,
-) -> dict:
+def build_report(sink_records: list, session_meta: dict | None = None, *,
+                 otel_global_total: float | None = None, strict: bool = True) -> dict:
     """The collector's emitted record. Per-session cost + per-task rollup are diagnostics. Cost-per-
     outcome / waste-share are TARGET-GATED (§0.5) so they are explicitly labeled diagnostic_only."""
     sessions = collect_sessions(sink_records, session_meta, strict=strict)
     agg = aggregate(sessions)
     report = {
         "schema_version": 1,
-        "sessions": sessions,  # diagnostic: raw per-session cost
+        "sessions": sessions,            # diagnostic: raw per-session cost
         **agg,
         "diagnostic_only": {
             # not targets until the §0.5 gate clears (source+coverage+proxy-validated+companions)
@@ -158,7 +136,5 @@ def build_report(
         },
     }
     if otel_global_total is not None:
-        report["reconciliation"] = reconcile(
-            agg["attributed_cost_usd"], otel_global_total
-        )
+        report["reconciliation"] = reconcile(agg["attributed_cost_usd"], otel_global_total)
     return report

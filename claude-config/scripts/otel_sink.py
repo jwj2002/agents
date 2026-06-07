@@ -64,7 +64,7 @@ PRICES = {
         "cache_creation": 0.0,
         "cache_read": 0.10e-6,
     },
-    "gpt-5-codex": {  # catch-all: gpt-5-codex and older gpt-5.N-codex variants — VERIFY rates
+    "gpt-5-codex": {  # the literal gpt-5-codex model (prefix match only; a future gpt-5.N-codex with no row intentionally raises under strict, per #231) — VERIFY rates
         "input": 0.75e-6,
         "output": 6e-6,
         "cache_creation": 0.0,
@@ -82,7 +82,7 @@ PRICES = {
         "cache_creation": 0.0,
         "cache_read": 0.025e-6,
     },
-    "gpt-5-mini": {  # catch-all: gpt-5-mini and gpt-5.N-mini variants — VERIFY rates
+    "gpt-5-mini": {  # the literal gpt-5-mini model (prefix match only; a future gpt-5.N-mini with no row intentionally raises under strict, per #231) — VERIFY rates
         "input": 0.10e-6,
         "output": 0.40e-6,
         "cache_creation": 0.0,
@@ -129,7 +129,9 @@ def _matches_family(m: str, family: str) -> bool:
     GPT families use startswith-only: the numeric guard (token.isalpha()) prevents cross-family
     matches via numeric tokens — e.g. "5.2" must NOT match gpt-5.2-mini against gpt-5.2-codex.
     """
-    token = family.split("-")[1]
+    parts = family.split("-")
+    # hyphenless family key → no alpha-substring branch (avoids IndexError)
+    token = parts[1] if len(parts) > 1 else ""
     return m.startswith(family) or (token.isalpha() and token in m)
 
 
