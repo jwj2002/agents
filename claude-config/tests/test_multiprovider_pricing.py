@@ -59,9 +59,10 @@ def test_unknown_model_compute_cost_falls_back():
     assert O.compute_cost({"model": "totally-unknown", "input": 1000}) > 0
 
 
-# Opus 4.8 sanity cross-check against the §2.1 real billing figure -----------------------------------
+# Opus sanity cross-check against the §2.1 real mix, at the CORRECTED rate ------------------------------
 def test_opus_rates_sanity_vs_real_session():
-    # the REAL measured mix (not 954M pure input) → ~$2,159 reference (§2.1)
+    # Same real measured mix as §2.1, but priced at the CORRECT Opus 4.5–4.8 rate ($5/$25/$6.25/$0.50).
+    # The old $2,159 reference used the wrong $15/$75 rate (Opus 4.0/4.1) and was ~3x too high (#337).
     real_mix = {
         "model": "claude-opus-4",
         "input": 657_029,
@@ -70,8 +71,8 @@ def test_opus_rates_sanity_vs_real_session():
         "cache_creation": 24_381_544,
     }
     cost = O.compute_cost(real_mix)
-    assert cost == pytest.approx(2159, rel=0.05), (
-        f"opus rates drifted: ${cost:,.2f} vs $2,159 ref"
+    assert cost == pytest.approx(720, rel=0.05), (
+        f"opus rates drifted: ${cost:,.2f} vs $720 ref"
     )
 
 
@@ -204,5 +205,52 @@ def test_matches_family_exported_and_consistent():
         assert known_via_collector is True, f"{m!r} should be a known model"
 
 
-# --- Unknown model still raises under strict (existing test_unknown_model_still_loud covers this) ---
-# gpt-99-unknown test is preserved above; no additional test needed here.
+# --- Official published rates (Codex review #337): assert the actual per-MTok numbers directly -------
+
+
+def test_opus_4x_official_rates():
+    for m in ("claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6"):
+        row = O._price_for(m)
+        assert row["input"] == 5e-6, m
+        assert row["output"] == 25e-6, m
+        assert row["cache_creation"] == 6.25e-6, m
+        assert row["cache_read"] == 0.50e-6, m
+
+
+def test_opus_hand_recompute_matches_published():
+    # A real smoke-test row, recomputed by hand at the official $5/$25/$6.25/$0.50 rate.
+    cost = O.compute_cost(
+        {
+            "model": "claude-opus-4-7",
+            "input": 6,
+            "output": 425,
+            "cache_creation": 46242,
+            "cache_read": 0,
+        }
+    )
+    assert cost == pytest.approx(0.2996675, abs=1e-7)
+
+
+def test_haiku_45_official_rates():
+    row = O._price_for("claude-haiku-4-5-20251001")
+    assert (row["input"], row["output"], row["cache_creation"], row["cache_read"]) == (
+        1e-6,
+        5e-6,
+        1.25e-6,
+        0.10e-6,
+    )
+
+
+def test_gpt55_official_rates():
+    row = O._price_for("gpt-5.5")
+    assert (row["input"], row["output"], row["cache_read"]) == (5e-6, 30e-6, 0.50e-6)
+
+
+def test_gpt_codex_official_rates():
+    for m in ("gpt-5.2-codex", "gpt-5.3-codex"):
+        row = O._price_for(m)
+        assert (row["input"], row["output"], row["cache_read"]) == (
+            1.75e-6,
+            14e-6,
+            0.175e-6,
+        ), m

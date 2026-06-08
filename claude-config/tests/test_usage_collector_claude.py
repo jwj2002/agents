@@ -48,6 +48,37 @@ def _extract(entries):
     return U.extract_records(entries, inference_host=HOST)
 
 
+# Adversarial fixture from real Claude transcripts: one API turn can be logged as adjacent
+# thinking/text assistant rows with the same timestamp and identical usage counters.
+def test_split_assistant_usage_turn_is_not_double_counted():
+    usage = {
+        "input_tokens": 1,
+        "cache_creation_input_tokens": 2490,
+        "cache_read_input_tokens": 156954,
+        "output_tokens": 519,
+    }
+    recs = _extract(
+        [
+            _asst(
+                "thinking-part",
+                ts="2026-05-23T00:19:30.513Z",
+                sid="real-session",
+                usage=usage,
+                content=[{"type": "thinking", "thinking": "..."}],
+            ),
+            _asst(
+                "text-part",
+                ts="2026-05-23T00:19:30.513Z",
+                sid="real-session",
+                usage=usage,
+                content=[{"type": "text", "text": "done"}],
+            ),
+        ]
+    )
+
+    assert len(recs) == 1
+
+
 # 1. per-message timestamps, not one record at session start ----------------------------------------
 def test_per_message_records_and_timestamps():
     recs = _extract(

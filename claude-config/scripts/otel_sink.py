@@ -28,85 +28,91 @@ TOKEN_FIELDS = ("input", "output", "cache_creation", "cache_read")
 # not 954M pure input — 954M is the token TOTAL across all types.) test_multiprovider_pricing enforces
 # this within 5%.
 PRICES = {
+    # Opus 4.5–4.8 published API rate: $5 in / $25 out; 5-min cache write 1.25x = $6.25; cache read 0.1x
+    # = $0.50. Was $15/$75 (the Opus 4.0/4.1 rate) — that overstated 4.6/4.7/4.8 by 3x (~$34k on the real
+    # dataset; Codex review #337). _matches_family matches every "claude-opus-*" via the "opus" alpha-
+    # substring, so per-version rows can't be distinguished here. Legacy Opus 4.0/4.1 ($15/$75) are
+    # deprecated and absent in real data; if they recur they'd be under-priced — acceptable vs the 3x
+    # over-price this removes.
     "claude-opus-4": {
-        "input": 15e-6,
-        "output": 75e-6,
-        "cache_creation": 18.75e-6,
-        "cache_read": 1.5e-6,
+        "input": 5e-6,
+        "output": 25e-6,
+        "cache_creation": 6.25e-6,
+        "cache_read": 0.50e-6,
     },
-    "claude-sonnet-4": {
+    "claude-sonnet-4": {  # Sonnet 4.5/4.6: $3 in / $15 out / $3.75 cache write / $0.30 cache read
         "input": 3e-6,
         "output": 15e-6,
         "cache_creation": 3.75e-6,
         "cache_read": 0.30e-6,
     },
-    "claude-haiku-4": {
-        "input": 0.80e-6,
-        "output": 4e-6,
-        "cache_creation": 1.0e-6,
-        "cache_read": 0.08e-6,
+    "claude-haiku-4": {  # Haiku 4.5 published API rate: $1 / $5 / $1.25 / $0.10 (Codex review #337)
+        "input": 1e-6,
+        "output": 5e-6,
+        "cache_creation": 1.25e-6,
+        "cache_read": 0.10e-6,
     },
     # OpenAI / Codex. OpenAI bills cached input at a discount and charges no separate cache-WRITE,
-    # so cache_creation = 0 for all GPT rows. Rates are representative (per-MTok / 1e6) —
-    # VERIFY against OpenAI published pricing before treating these as authoritative for billing.
+    # so cache_creation = 0 for all GPT rows. Rates per OpenAI API pricing + the Codex rate card
+    # (1 credit = $0.04, anchored on gpt-5.5 = 125cr = $5/MTok); confirmed in Codex review #337.
     #
     # INSERTION ORDER IS LOAD-BEARING: more-specific prefixes MUST precede any prefix they could
     # shadow (e.g. gpt-5.4-mini before gpt-5.4; gpt-5.2-codex before gpt-5-codex).
-    "gpt-5.2-codex": {  # real data: 2694 events in ~/.codex/sessions — VERIFY rates
+    "gpt-5.2-codex": {  # rate card: $1.75 in / $14 out / $0.175 cached (#337)
+        "input": 1.75e-6,
+        "output": 14e-6,
+        "cache_creation": 0.0,
+        "cache_read": 0.175e-6,
+    },
+    "gpt-5.3-codex": {  # rate card: $1.75 in / $14 out / $0.175 cached (#337)
+        "input": 1.75e-6,
+        "output": 14e-6,
+        "cache_creation": 0.0,
+        "cache_read": 0.175e-6,
+    },
+    "gpt-5-codex": {  # literal gpt-5-codex (prefix-match only); aligned to the codex rate card (#337)
+        "input": 1.75e-6,
+        "output": 14e-6,
+        "cache_creation": 0.0,
+        "cache_read": 0.175e-6,
+    },
+    "gpt-5.4-mini": {  # rate card: $0.75 in / $4.52 out / $0.075 cached (#337)
         "input": 0.75e-6,
-        "output": 6e-6,
+        "output": 4.52e-6,
         "cache_creation": 0.0,
         "cache_read": 0.075e-6,
     },
-    "gpt-5.3-codex": {  # real data: 704 events — VERIFY rates
-        "input": 1.0e-6,
-        "output": 8e-6,
-        "cache_creation": 0.0,
-        "cache_read": 0.10e-6,
-    },
-    "gpt-5-codex": {  # the literal gpt-5-codex model (prefix match only; a future gpt-5.N-codex with no row intentionally raises under strict, per #231) — VERIFY rates
-        "input": 0.75e-6,
-        "output": 6e-6,
-        "cache_creation": 0.0,
-        "cache_read": 0.075e-6,
-    },
-    "gpt-5.4-mini": {  # mini tier, cheaper than flagship — VERIFY rates
+    "gpt-5.2-mini": {  # mini tier — no rate-card entry; representative, VERIFY
         "input": 0.10e-6,
         "output": 0.40e-6,
         "cache_creation": 0.0,
         "cache_read": 0.025e-6,
     },
-    "gpt-5.2-mini": {  # mini tier — VERIFY rates
+    "gpt-5-mini": {  # literal gpt-5-mini (prefix-match only) — representative, VERIFY
         "input": 0.10e-6,
         "output": 0.40e-6,
         "cache_creation": 0.0,
         "cache_read": 0.025e-6,
     },
-    "gpt-5-mini": {  # the literal gpt-5-mini model (prefix match only; a future gpt-5.N-mini with no row intentionally raises under strict, per #231) — VERIFY rates
-        "input": 0.10e-6,
-        "output": 0.40e-6,
-        "cache_creation": 0.0,
-        "cache_read": 0.025e-6,
-    },
-    "gpt-4o-mini": {  # VERIFY rates
+    "gpt-4o-mini": {  # OpenAI: $0.15 in / $0.60 out / $0.075 cached
         "input": 0.15e-6,
         "output": 0.60e-6,
         "cache_creation": 0.0,
         "cache_read": 0.075e-6,
     },
-    "gpt-5.4": {  # real data: 354 events, flagship tier — VERIFY rates
-        "input": 1.25e-6,
-        "output": 10e-6,
+    "gpt-5.4": {  # rate card: $2.50 in / $15 out / $0.25 cached (#337)
+        "input": 2.50e-6,
+        "output": 15e-6,
         "cache_creation": 0.0,
-        "cache_read": 0.125e-6,
+        "cache_read": 0.25e-6,
     },
-    "gpt-5.5": {  # verified in use (Codex CLI, §2.2) — VERIFY rates
-        "input": 1.25e-6,
-        "output": 10e-6,
+    "gpt-5.5": {  # OpenAI API pricing: $5 in / $30 out / $0.50 cached (#337, web-verified)
+        "input": 5e-6,
+        "output": 30e-6,
         "cache_creation": 0.0,
-        "cache_read": 0.125e-6,
+        "cache_read": 0.50e-6,
     },
-    "gpt-4o": {  # VERIFY rates
+    "gpt-4o": {  # OpenAI: $2.50 in / $10 out / $1.25 cached
         "input": 2.50e-6,
         "output": 10e-6,
         "cache_creation": 0.0,
@@ -120,7 +126,7 @@ DEFAULT_PRICE = PRICES[
 # Stamped onto every usage record (cost-telemetry-v0 §D3) so cost_usd is auditable / re-priceable.
 # BUMP this whenever a PRICES rate changes — test_price_table_version pins the current value so any
 # silent rate edit fails CI until the version is bumped.
-PRICE_TABLE_VERSION = "2026-06-08"
+PRICE_TABLE_VERSION = "2026-06-08b"
 
 EXPORTER_FRESHNESS_SLA_DEFAULT = (
     24 * 3600

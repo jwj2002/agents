@@ -79,6 +79,35 @@ def test_billing_headline_three_buckets():
     assert "Unknown: $0.50" in h
 
 
+def test_trends_do_not_sum_mixed_billing_buckets():
+    """Trend data must preserve billing buckets, not plot one mixed API-equivalent dollar."""
+    recs = [
+        _rec(
+            project="buddy",
+            billing_type="unknown",
+            cost_usd=7370.16,
+            session_id="u1",
+            ts="2026-06-03T00:00:00Z",
+        ),
+        _rec(
+            project="buddy",
+            billing_type="subscription",
+            cost_usd=5.11,
+            session_id="s1",
+            ts="2026-06-03T00:01:00Z",
+        ),
+    ]
+
+    tr = R.trends(recs, period="week")
+    bucket = tr["buddy"]["2026-W23"]
+
+    assert bucket["cost_by_billing"] == {
+        "unknown": 7370.16,
+        "subscription": 5.11,
+    }
+    assert "cost" not in bucket
+
+
 def test_billing_headline_subscription_only():
     """Subscription-only data → single labeled subscription line (not old flat total)."""
     recs = [_rec(billing_type="subscription", cost_usd=5.0, session_id="s1")]

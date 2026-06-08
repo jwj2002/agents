@@ -303,11 +303,22 @@ def test_reprocess_quarantine(tmp_path, monkeypatch):
     assert usage_rows[0]["dedup_key"] == "test:reprocess:1"
     assert usage_rows[0]["cost_usd"] is not None  # now priced
 
-    # Quarantine row marked resolved
-    q_rows = [
+    # Resolved row moved OUT of the active quarantine file into the audit trail (#337 finding 4) —
+    # the only row was resolved, so the active quarantine file is now empty.
+    active_q = [
         json.loads(line) for line in q_path.read_text().splitlines() if line.strip()
     ]
-    assert q_rows[0]["resolved"] is True
+    resolved_q = [
+        json.loads(line)
+        for line in (base / "usage-quarantine-resolved.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert active_q == []
+    assert len(resolved_q) == 1 and resolved_q[0]["resolved"] is True
+    # INVARIANT: no dedup_key appears in BOTH usage.jsonl and the active quarantine file.
+    assert {r.get("dedup_key") for r in active_q} & {
+        r["dedup_key"] for r in usage_rows
+    } == set()
 
 
 # ---------------------------------------------------------------------------

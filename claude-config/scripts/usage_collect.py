@@ -749,19 +749,29 @@ def run_reprocess_quarantine(
     if new_usage_rows:
         _append_jsonl(usage_path, new_usage_rows)
 
-    # Rewrite quarantine file marking resolved rows
+    # Move resolved rows OUT of the active quarantine file into an audit trail. A resolved row's
+    # dedup_key now lives in usage.jsonl; leaving it in usage-quarantine.jsonl too would put the same
+    # key in both active files (Codex review #337 finding 4). Active quarantine = unresolved only.
     if resolved_keys:
-        new_qrows = []
+        active_qrows, resolved_qrows = [], []
         for qrow in qrows:
-            dk = qrow.get("dedup_key")
-            if dk in resolved_keys:
+            if qrow.get("dedup_key") in resolved_keys:
                 qrow = dict(qrow)
                 qrow["resolved"] = True
-            new_qrows.append(qrow)
+                resolved_qrows.append(qrow)
+            else:
+                active_qrows.append(qrow)
         quarantine_path.write_text(
-            "\n".join(json.dumps(r, ensure_ascii=False) for r in new_qrows) + "\n",
+            ("\n".join(json.dumps(r, ensure_ascii=False) for r in active_qrows) + "\n")
+            if active_qrows
+            else "",
             encoding="utf-8",
         )
+        if resolved_qrows:
+            _append_jsonl(
+                quarantine_path.parent / "usage-quarantine-resolved.jsonl",
+                resolved_qrows,
+            )
 
     stats = {
         "resolved": len(resolved_keys),

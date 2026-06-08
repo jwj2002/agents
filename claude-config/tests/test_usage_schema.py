@@ -12,7 +12,7 @@ import usage_schema as S  # noqa: E402
 def test_price_table_version_exists_and_pinned():
     assert isinstance(O.PRICE_TABLE_VERSION, str) and O.PRICE_TABLE_VERSION
     # PIN: a silent PRICES rate edit must bump this. If you changed rates, bump the version + this test.
-    assert O.PRICE_TABLE_VERSION == "2026-06-08"
+    assert O.PRICE_TABLE_VERSION == "2026-06-08b"
 
 
 def test_normalize_fills_all_fields_and_stamps_pricing():
@@ -39,6 +39,13 @@ def test_normalize_fills_all_fields_and_stamps_pricing():
 def test_billing_type_none_or_bad_becomes_unknown():
     assert S.normalize({"billing_type": None})["billing_type"] == "unknown"
     assert S.normalize({"billing_type": "console"})["billing_type"] == "unknown"
+
+
+def test_unattributed_task_normalized_to_none():
+    # #337 finding 5: the collector's "unattributed" sentinel must become None at the data layer so the
+    # report's `task is not None` coverage check counts it as missing (it was inflating coverage to 100%).
+    assert S.normalize({"task": "unattributed"})["task"] is None
+    assert S.normalize({"task": "issue:42"})["task"] == "issue:42"  # real task untouched
     assert S.normalize({})["billing_type"] == "unknown"
 
 
