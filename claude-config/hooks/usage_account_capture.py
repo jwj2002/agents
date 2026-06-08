@@ -89,9 +89,14 @@ def main() -> int:
     session_id = data.get("session_id") or os.environ.get("CLAUDE_SESSION_ID")
     if not session_id:
         return 0  # nothing to key on; no-op rather than write a useless entry
-    home = Path.home()
-    entry = build_entry(home / ".claude.json", session_id, now_ts=_now_iso())
-    append_entry(home / ".claude" / "telemetry" / "account-map.jsonl", entry)
+    # A SessionStart hook must NEVER raise or exit nonzero — a sidecar write (bad path, full disk,
+    # perms) must not break or delay session start (#339). Best-effort; on any error, no-op, return 0.
+    try:
+        home = Path.home()
+        entry = build_entry(home / ".claude.json", session_id, now_ts=_now_iso())
+        append_entry(home / ".claude" / "telemetry" / "account-map.jsonl", entry)
+    except Exception:
+        return 0  # never surface a traceback to session start
     return 0
 
 

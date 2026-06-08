@@ -86,3 +86,11 @@ def test_main_exit_codes(tmp_path):
         F.main(["--base", str(tmp_path), "--log", str(tmp_path / "log")]) == 1
     )  # stale
     assert (tmp_path / "log").exists()  # stale wrote a durable log line
+
+
+def test_hook_mode_always_exits_zero_even_when_stale(tmp_path):
+    """#339: --hook must exit 0 even when stale/missing (never fail a session start); CLI stays nonzero."""
+    missing = tmp_path / "nope"
+    log = tmp_path / "log"
+    assert F.main(["--base", str(missing), "--log", str(log)]) == 1  # CLI: stale → nonzero
+    assert F.main(["--base", str(missing), "--log", str(log), "--hook"]) == 0  # hook: always 0

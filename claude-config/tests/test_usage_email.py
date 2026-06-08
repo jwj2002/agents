@@ -88,3 +88,18 @@ def test_next_week_sends_again():
     )
     assert code == 0 and len(calls) == 1
     assert state["last_email_sent_week"] == E._week_key(later)
+
+
+def test_refuses_nonstandard_recipient_unless_opted_in():
+    # #339: the report carries internal cost data — refuse any non-SENDER recipient by default.
+    calls, send_fn = _recorder()
+    code, _ = E.send_weekly(
+        md_summary="x", html_path=None, state={}, host="h",
+        recipient="evil@example.com", now=NOW, send_fn=send_fn,
+    )
+    assert code == 4 and calls == []  # refused, nothing sent
+    code2, _ = E.send_weekly(
+        md_summary="x", html_path=None, state={}, host="h",
+        recipient="evil@example.com", allow_nonstandard_recipient=True, now=NOW, send_fn=send_fn,
+    )
+    assert code2 == 0 and len(calls) == 1  # explicit dev opt-in allows it

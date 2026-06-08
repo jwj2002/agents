@@ -127,6 +127,22 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
+def _try_create_lock(lock: Path) -> bool:
+    """Atomically create the lock file (O_CREAT|O_EXCL) with this run's PID/start_ts. Returns False if
+    it already exists (another run holds it) or on any OS error. Never raises."""
+    payload = json.dumps({"pid": os.getpid(), "start_ts": time.time()})
+    try:
+        fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except (FileExistsError, OSError):
+        return False
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+    except OSError:
+        return False
+    return True
+
+
 def _acquire_lock(lock: Path, tdir: Path) -> str:
     """Try to acquire the PID lock.
 
@@ -136,41 +152,40 @@ def _acquire_lock(lock: Path, tdir: Path) -> str:
       "recovered"       — dead/stale lock replaced; caller may proceed (warn in log)
       "recovery_failed" — could not write new lock; caller should exit 3
     """
+    # Atomic create (O_EXCL) — the uncontended fast path and the mutual-exclusion guarantee against a
+    # second run starting at the same instant (the old read-then-write was a TOCTOU race; #339).
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    if _try_create_lock(lock):
+        return "acquired"
+
+    # Lock already exists — decide running vs reclaim by PID LIVENESS ONLY. A live holder is NEVER
+    # overlapped, regardless of age (the old `age < LOCK_STALE_MIN` path overlapped a legitimately
+    # long-running collector; #339). A crashed holder leaves a dead-PID lock that is reclaimed here on
+    # the next run; the §D6 freshness watchdog backstops the rare PID-recycle wedge.
     info = _read_lock(lock)
-    if info is not None:
-        pid = info.get("pid", 0)
-        start_ts = info.get("start_ts", 0)
-        age_min = (time.time() - start_ts) / 60
-        alive = _pid_alive(int(pid)) if pid else False
-        if alive and age_min < LOCK_STALE_MIN:
-            logger.info(
-                "Lock held by live PID %s (age %.1f min) — skipping run", pid, age_min
-            )
-            return "running"
-        # Dead PID or stale lock
-        reason = (
-            "dead PID"
-            if not alive
-            else f"stale ({age_min:.1f} min > {LOCK_STALE_MIN} min)"
-        )
-        logger.warning(
-            "Stale lock found (PID %s, %s) — recovering; previous holder may have crashed",
-            pid,
-            reason,
-        )
-        # Record recovery in state
-        _update_state(
-            tdir,
-            {
-                "last_lock_recovery": datetime.now(timezone.utc).isoformat(),
-                "lock_recovery_reason": reason,
-            },
-        )
+    if info is not None and _pid_alive(int(info.get("pid", 0) or 0)):
+        logger.info("Lock held by live PID %s — skipping run", info.get("pid"))
+        return "running"
+    reason = "dead PID" if info is not None else "unreadable/corrupt lock"
+    logger.warning(
+        "Reclaiming lock (PID %s, %s) — previous holder crashed",
+        (info or {}).get("pid"),
+        reason,
+    )
+    _update_state(
+        tdir,
+        {
+            "last_lock_recovery": datetime.now(timezone.utc).isoformat(),
+            "lock_recovery_reason": reason,
+        },
+    )
     try:
-        _write_lock(lock)
-        return "recovered" if info is not None else "acquired"
+        lock.unlink(missing_ok=True)
+        if _try_create_lock(lock):
+            return "recovered"
+        return "recovery_failed"  # someone else won the re-create race
     except OSError as exc:
-        logger.error("Failed to write lock file %s: %s", lock, exc)
+        logger.error("Failed to write lock file %s: %s", lock, type(exc).__name__)
         return "recovery_failed"
 
 
@@ -298,7 +313,9 @@ def _collect_claude_transcript(
     try:
         entries = UC.read_transcript(tpath)
     except Exception as exc:
-        logger.warning("Unreadable Claude transcript %s: %s", tpath, exc)
+        # Log the exception TYPE only — never the message: an int()/parse error on a transcript field
+        # can echo the raw field value, which could contain a token/secret (#339 hard gate).
+        logger.warning("Unreadable Claude transcript %s: %s", tpath, type(exc).__name__)
         return {
             "sources_unreadable": 1,
             "usage_rows": [],
@@ -320,7 +337,7 @@ def _collect_claude_transcript(
             fallback_account=fallback_account,
         )
     except Exception as exc:
-        logger.warning("Error extracting records from %s: %s", tpath, exc)
+        logger.warning("Error extracting records from %s: %s", tpath, type(exc).__name__)
         return {
             "sources_unreadable": 1,
             "usage_rows": [],
@@ -386,7 +403,7 @@ def _collect_codex_session(
     try:
         entries = CC.read_session(spath)
     except Exception as exc:
-        logger.warning("Unreadable Codex session %s: %s", spath, exc)
+        logger.warning("Unreadable Codex session %s: %s", spath, type(exc).__name__)
         return {
             "sources_unreadable": 1,
             "usage_rows": [],
@@ -407,7 +424,7 @@ def _collect_codex_session(
             strict=False,
         )
     except Exception as exc:
-        logger.warning("Error extracting records from %s: %s", spath, exc)
+        logger.warning("Error extracting records from %s: %s", spath, type(exc).__name__)
         return {
             "sources_unreadable": 1,
             "usage_rows": [],

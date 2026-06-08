@@ -83,6 +83,11 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--check", action="store_true", help="print status regardless of freshness"
     )
+    ap.add_argument(
+        "--hook",
+        action="store_true",
+        help="SessionStart hook mode: log+warn on stale but ALWAYS exit 0 (never break a session start)",
+    )
     args = ap.parse_args(argv)
 
     stale, reason = check(args.base, sla_days=args.sla_days)
@@ -91,6 +96,10 @@ def main(argv=None) -> int:
         print(f"⚠ cost-telemetry {reason}", file=sys.stderr)
     elif args.check:
         print(f"cost-telemetry {reason}")
+    # Hook mode must NEVER fail a session start — exit 0 even when stale (the logged warning is enough).
+    # Nonzero is reserved for the CLI/--check monitoring path (#339).
+    if args.hook:
+        return 0
     return 1 if stale else 0
 
 

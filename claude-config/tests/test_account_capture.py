@@ -177,3 +177,21 @@ def test_integration_hook_then_collect(tmp_path):
     assert rec["account"] == "87a-uuid"
     assert rec["billing_type"] == "subscription"
     assert rec["account_source"] == "sidecar"
+
+
+def test_capture_hook_never_raises_on_append_failure(monkeypatch):
+    """#339: SessionStart hook must return 0 even if the sidecar write fails — never a traceback."""
+    import io
+    import sys as _sys
+
+    fake = io.StringIO("")
+    fake.isatty = lambda: True  # skip the stdin read path
+    monkeypatch.setattr(_sys, "stdin", fake)
+    monkeypatch.setenv("CLAUDE_SESSION_ID", "sess-x")
+    monkeypatch.setattr(H, "build_entry", lambda *a, **k: {"session_id": "sess-x"})
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(H, "append_entry", boom)
+    assert H.main() == 0  # error swallowed, no traceback to session start
