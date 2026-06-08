@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- cost-telemetry-v0 §D2 — runs usage_collect.py every 6h. NOT loaded automatically; activate via
+     scripts/install_cost_telemetry.sh (the deferred activation / joint smoke-test step). No API-key
+     env vars by default (launchd env ≠ hook env; adding a key would force every row to 'metered'). -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.cost-telemetry-collect</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/jasonjob/agents/claude-config/scripts/usage_collect.py</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/jasonjob/agents/claude-config/scripts</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>21600</integer>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>/Users/jasonjob/.claude/logs/cost-telemetry.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/jasonjob/.claude/logs/cost-telemetry.log</string>
+</dict>
+</plist>
