@@ -35,7 +35,7 @@ def _claude_json(tmp_path, oauth=OAUTH, secret=True):
 # Hook: build_entry copies the identity fields, classifies billing, and leaks NO secret --------------
 def test_hook_build_entry(tmp_path):
     entry = H.build_entry(
-        _claude_json(tmp_path), "sess-1", now_ts="2026-06-06T00:00:00Z"
+        _claude_json(tmp_path), "sess-1", now_ts="2026-06-06T00:00:00Z", env={}
     )
     assert entry["session_id"] == "sess-1"
     assert entry["account_uuid"] == "87a-uuid"
@@ -43,6 +43,18 @@ def test_hook_build_entry(tmp_path):
     assert entry["email"] == "jas@example.com"
     assert entry["billing_type"] == "subscription"
     assert SECRET not in json.dumps(entry)  # the auth token never reaches the sidecar
+
+
+def test_build_entry_env_api_key_is_metered(tmp_path):
+    # #337/#339: an env API key beats a stale OAuth 'subscription' login → metered (else subscription).
+    cj = _claude_json(tmp_path)  # OAUTH billingType = subscription
+    assert (
+        H.build_entry(cj, "s", now_ts="t", env={"ANTHROPIC_API_KEY": "sk-x"})[
+            "billing_type"
+        ]
+        == "metered"
+    )
+    assert H.build_entry(cj, "s", now_ts="t", env={})["billing_type"] == "subscription"
 
 
 def test_hook_classify_billing():
@@ -148,7 +160,9 @@ def test_codex_billing_classification(tmp_path):
 def test_integration_hook_then_collect(tmp_path):
     # capture
     sidecar = tmp_path / "telemetry" / "account-map.jsonl"
-    H.append_entry(sidecar, H.build_entry(_claude_json(tmp_path), "sessZ", now_ts="t0"))
+    H.append_entry(
+        sidecar, H.build_entry(_claude_json(tmp_path), "sessZ", now_ts="t0", env={})
+    )
     # a transcript for that session
     proj = tmp_path / "projects" / "-p"
     proj.mkdir(parents=True)
