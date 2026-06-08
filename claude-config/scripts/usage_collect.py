@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import files_changed_enrich as FCE  # noqa: E402
 import otel_sink as O  # noqa: E402
 import token_collector as C  # noqa: E402
 import usage_collector_claude as UC  # noqa: E402
@@ -463,6 +464,9 @@ def run_collect(
     *,
     base_dir: Path | None = None,
     full: bool = False,
+    enrich: bool = True,
+    repo_root: Path | None = None,
+    metrics_path: Path | None = None,
     claude_projects_dir: Path | None = None,
     codex_sessions_dir: Path | None = None,
     sidecar_path: Path | None = None,
@@ -601,6 +605,28 @@ def run_collect(
             stats["dup_keys_skipped"] += result.get("dup_keys_skipped", 0)
             all_usage_rows.extend(result["usage_rows"])
             all_quarantine_rows.extend(result["quarantine_rows"])
+
+    # --- enrich files_changed / files_changed_source ---
+    # Resolve the sessions shard for this host (best-effort; None if absent).
+    if enrich and all_usage_rows:
+        _sessions_shard = tdir / "sessions.jsonl"
+        _resolved_metrics = metrics_path
+        _resolved_repo = repo_root
+        _enrich_cache: dict = {}  # task -> (files_changed, source)
+        for row in all_usage_rows:
+            task = row.get("task")
+            if task not in _enrich_cache:
+                _enrich_cache[task] = FCE.enrich_task(
+                    task,
+                    repo_root=_resolved_repo,
+                    metrics_path=_resolved_metrics,
+                    sessions_shard=_sessions_shard
+                    if _sessions_shard.exists()
+                    else None,
+                )
+            fc, fcs = _enrich_cache[task]
+            row["files_changed"] = fc
+            row["files_changed_source"] = fcs
 
     # --- write rows ---
     if all_usage_rows:
@@ -829,6 +855,11 @@ def main(argv: list | None = None) -> int:
         "--full", action="store_true", help="Ignore watermark; rescan all transcripts"
     )
     parser.add_argument(
+        "--no-enrich",
+        action="store_true",
+        help="Skip files_changed enrichment (rows get files_changed=null/source=none)",
+    )
+    parser.add_argument(
         "--reprocess-quarantine",
         action="store_true",
         help="Re-price quarantined rows after PRICES update",
@@ -858,6 +889,7 @@ def main(argv: list | None = None) -> int:
     code, _stats = run_collect(
         base_dir=args.base_dir,
         full=args.full,
+        enrich=not args.no_enrich,
         claude_projects_dir=args.claude_projects_dir,
         codex_sessions_dir=args.codex_sessions_dir,
         sidecar_path=args.sidecar_path,
