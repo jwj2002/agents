@@ -173,17 +173,189 @@ def _table(headers: list, rows: list) -> str:
     return f"<table><thead><tr>{th}</tr></thead><tbody>{trs}</tbody></table>"
 
 
+def _billing_headline_html(totals: dict) -> str:
+    """Three labeled billing-headline lines (D4 AC): Metered (real $), Subscription (projected $,
+    notional *), Unknown. NEVER renders a single summed total when metered+subscription both present.
+    When only one bucket exists the single line is still rendered under its label (not the old flat
+    total) so the label is always explicit."""
+    cbb = totals.get("cost_by_billing") or {}
+    if not cbb:
+        # fall back gracefully — should not normally happen
+        return f"<p>Total: {html.escape(_fmt_cost(totals))} &middot; {html.escape(str(totals.get('records', 0)))} records</p>"
+    lines = []
+    metered = cbb.get("metered")
+    subscription = cbb.get("subscription")
+    unknown = cbb.get("unknown")
+    if metered is not None:
+        lines.append(f"Metered (real $): {html.escape(_money(metered))}")
+    if subscription is not None:
+        lines.append(
+            f"Subscription (projected $, notional) *: {html.escape(_money(subscription))}"
+        )
+    if unknown is not None:
+        lines.append(f"Unknown: {html.escape(_money(unknown))}")
+    if not lines:
+        lines.append(f"Total: {html.escape(_fmt_cost(totals))}")
+    record_count = html.escape(str(totals.get("records", 0)))
+    joined = " &middot; ".join(lines)
+    return f"<p>{joined} &middot; {record_count} records</p>"
+
+
+def _build_tier_approx_index(records: list | None) -> dict:
+    """Build a (project, tier, model) → bool(is_approximate) lookup from raw records.
+    A group is NOT approximate only if ALL its records have files_changed_source == 'pr_git'.
+    Records absent or with missing/non-pr_git files_changed_source → approximate."""
+    from collections import defaultdict
+    from importlib import import_module
+
+    agg_mod = import_module("usage_aggregator")
+    # Track whether any non-pr_git record exists per key
+    has_non_pr_git: dict = defaultdict(bool)
+    group_seen: set = set()
+    for r in records or []:
+        proj = r.get("project")
+        tier = agg_mod.task_tier(r.get("files_changed"))
+        model = r.get("model")
+        key = (proj, tier, model)
+        group_seen.add(key)
+        fcs = r.get("files_changed_source")
+        if fcs != "pr_git":
+            has_non_pr_git[key] = True
+    # A group is approximate if any record is NOT pr_git (or no records seen → approximate)
+    return {key: has_non_pr_git.get(key, False) for key in group_seen}
+
+
+def _model_tier_html(agg: dict, records: list | None = None) -> str:
+    """By model × tier table (D4 AC). Each cell is marked '(tier approximate)' unless ALL
+    records in that group carry files_changed_source == 'pr_git'."""
+    cmt = agg.get("cost_by_model_tier") or {}
+    approx_index = _build_tier_approx_index(records)
+    rows = []
+    for proj, tiers in sorted(cmt.items(), key=lambda kv: str(kv[0])):
+        for tier, models in sorted(tiers.items(), key=lambda kv: str(kv[0])):
+            for model, grp in sorted(models.items(), key=lambda kv: str(kv[0])):
+                key = (proj, tier, model)
+                approx = approx_index.get(key, True)
+                tier_label = f"{tier} (tier approximate)" if approx else tier
+                proj_label = proj if proj is not None else "unattributed"
+                rows.append([proj_label, tier_label, model, _fmt_cost(grp)])
+    return _table(["Project", "Tier", "Model", "Cost"], rows)
+
+
+def _by_project_task_html(records: list | None) -> str:
+    """By project/task table (D4 AC). project/task == None → 'unattributed' row (not hidden)."""
+    from collections import defaultdict
+    from importlib import import_module
+
+    agg_mod = import_module("usage_aggregator")
+    groups: dict = defaultdict(list)
+    for r in records or []:
+        key = (r.get("project"), r.get("task"))
+        groups[key].append(r)
+    rows = []
+    for (proj, task), rs in sorted(
+        groups.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))
+    ):
+        proj_label = proj if proj is not None else "unattributed"
+        task_label = task if task is not None else "unattributed"
+        rows.append([proj_label, task_label, _fmt_cost(agg_mod._cost_group(rs))])
+    return _table(["Project", "Task", "Cost"], rows)
+
+
+def _attribution_coverage_html(records: list | None) -> str:
+    """Attribution coverage per billing bucket (D4 AC): % of cost with project AND task present;
+    unattributed $ shown explicitly."""
+    from collections import defaultdict
+
+    recs = records or []
+    if not recs:
+        return '<p class="nodata">No records — attribution coverage unavailable.</p>'
+
+    from importlib import import_module
+
+    agg_mod = import_module("usage_aggregator")
+
+    # Build per-billing-bucket totals and attributed totals
+    bucket_total: dict = defaultdict(float)
+    bucket_attributed: dict = defaultdict(float)
+    bucket_unattributed: dict = defaultdict(float)
+    for r in recs:
+        bt = r.get("billing_type") or "unknown"
+        c = agg_mod._f(r.get("cost_usd", 0))
+        bucket_total[bt] += c
+        has_proj = r.get("project") is not None
+        has_task = r.get("task") is not None
+        if has_proj and has_task:
+            bucket_attributed[bt] += c
+        else:
+            bucket_unattributed[bt] += c
+
+    all_buckets = sorted(set(bucket_total) | set(bucket_attributed))
+    rows = []
+    for bt in all_buckets:
+        total = bucket_total[bt]
+        attributed = bucket_attributed[bt]
+        unattributed = bucket_unattributed[bt]
+        pct = (attributed / total * 100) if total > 0 else 0.0
+        label = bt.capitalize()
+        rows.append(
+            [
+                label,
+                f"{pct:.1f}%",
+                _money(attributed),
+                _money(unattributed),
+            ]
+        )
+    return _table(
+        ["Billing Bucket", "Attribution Coverage", "Attributed $", "Unattributed $"],
+        rows,
+    )
+
+
+def _quarantine_html(quarantine) -> str:
+    """Quarantine summary (D4 AC). quarantine may be:
+    - None / empty → return '' (section omitted)
+    - dict with keys 'count' (int) and 'models' (list[str])
+    - int → treat as count with no model names
+    """
+    if quarantine is None:
+        return ""
+    count = 0
+    models: list = []
+    if isinstance(quarantine, dict):
+        count = int(quarantine.get("count") or 0)
+        models = list(quarantine.get("models") or [])
+    elif isinstance(quarantine, int):
+        count = quarantine
+    elif hasattr(quarantine, "__len__"):
+        count = len(quarantine)
+        models = [str(x) for x in quarantine]
+    if count == 0 and not models:
+        return ""
+    model_part = ""
+    if models:
+        escaped_models = ", ".join(html.escape(str(m)) for m in models)
+        model_part = f" &mdash; models needing pricing: {escaped_models}"
+    return (
+        f"<p class='callout'><strong>Quarantine: {count} rows</strong>{model_part}</p>"
+    )
+
+
 def render_html(
     agg: dict,
     *,
     records: list | None = None,
     period: str = "week",
     title: str = "Fleet Usage Report",
+    quarantine=None,
 ) -> str:
     agg = agg or {}
     tr = trends(records or [], period=period)
     totals = agg.get("totals") or {}
     has_subscription = "subscription" in json.dumps(agg)
+
+    # Billing headline: three labeled lines (D4 AC) — never a single summed total
+    headline = _billing_headline_html(totals)
 
     # Section 1: cost by project (table) — $/PR trend chart fed by `tr`. _table escapes cells (raw in).
     proj_rows = [[p, _fmt_cost(_proj_group(agg, p))] for p in _projects(agg)]
@@ -192,15 +364,22 @@ def render_html(
         + _table(["Project", "Cost"], proj_rows)
         + "<canvas id='c_pr_trend'></canvas>"
     )
-    # Section 2: model mix
+    # Section 2: model mix + by model × tier (D4 AC)
     mm_rows = [
         [p, m, _fmt_cost(g)]
         for p, models in (agg.get("model_mix") or {}).items()
         for m, g in models.items()
     ]
-    s2 = f"<h2 id='model_mix'>{SECTIONS[1][1]}</h2>" + _table(
-        ["Project", "Model", "Cost"], mm_rows
+    s2 = (
+        f"<h2 id='model_mix'>{SECTIONS[1][1]}</h2>"
+        + _table(["Project", "Model", "Cost"], mm_rows)
+        + "<h3>By Model &times; Tier</h3>"
+        + _model_tier_html(agg, records)
     )
+    # Section 2b: by project / task (D4 AC) — unattributed row shown explicitly
+    s2b = "<h3>By Project / Task</h3>" + _by_project_task_html(records)
+    # Section 2c: attribution coverage (D4 AC)
+    s2c = "<h3>Attribution Coverage</h3>" + _attribution_coverage_html(records)
     # Section 3: cache efficiency (table + trend chart). _pct/_money are crash-safe on malformed data.
     cache_rows = [
         [
@@ -246,9 +425,12 @@ def render_html(
         + _table(["Host", "peak concurrent", "burn $/hr"], conc_rows)
         + "<canvas id='c_conc'></canvas>"
     )
-    # Section 7: right-sizing recommendations (usage_recommend loaded lazily)
-    s7 = f"<h2 id='recommendations'>{SECTIONS[6][1]}</h2>" + _render_recommendations(
-        agg, records
+    # Quarantine summary (D4 AC) — rendered before recommendations; omitted when empty/None
+    s_quarantine = _quarantine_html(quarantine)
+    # Section 7: right-sizing recommendations with [diagnostic] badge (D4 AC)
+    s7 = (
+        f"<h2 id='recommendations'>{SECTIONS[6][1]} <span class='badge-diagnostic'>[diagnostic]</span></h2>"
+        + _render_recommendations(agg, records)
     )
 
     footnote = (
@@ -267,11 +449,12 @@ def render_html(
 <style>body{{font-family:system-ui,sans-serif;margin:2rem;max-width:1100px}}
 table{{border-collapse:collapse;margin:.5rem 0}}th,td{{border:1px solid #ccc;padding:.3rem .6rem}}
 .nodata{{color:#999;font-style:italic}}.footnote{{color:#666;font-size:.85rem;margin-top:2rem}}
-.callout{{background:#f5f7ff;padding:.6rem;border-left:3px solid #36c}}canvas{{max-height:320px}}</style>
+.callout{{background:#f5f7ff;padding:.6rem;border-left:3px solid #36c}}canvas{{max-height:320px}}
+.badge-diagnostic{{background:#e8f4f8;color:#0366d6;font-size:.75rem;padding:.1rem .4rem;border-radius:3px;border:1px solid #b0d4e8}}</style>
 </head><body>
 <h1>{html.escape(title)}</h1>
-<p>Total: {html.escape(_fmt_cost(totals))} &middot; {html.escape(str(totals.get("records", 0)))} records</p>
-{s1}{s2}{s3}{s4}{s5}{s6}{s7}
+{headline}
+{s1}{s2}{s2b}{s2c}{s3}{s4}{s5}{s6}{s_quarantine}{s7}
 {footnote}
 <!-- Chart labels are data-derived strings, but Chart.js renders them on the CANVAS as text (no
      innerHTML / DOM-injection path; no HTML-tooltip plugin is used), and the embedded blob is
@@ -320,13 +503,105 @@ def _dim_rows(records: list | None, field: str) -> list:
     return rows
 
 
+def _md_summary(agg: dict, records: list | None, quarantine) -> str:
+    """Plain-text Markdown summary for the D5 email body: billing split + coverage + quarantine."""
+    totals = agg.get("totals") or {}
+    cbb = totals.get("cost_by_billing") or {}
+    lines = ["# Usage Report Summary", ""]
+
+    # Billing split
+    lines.append("## Billing")
+    if cbb:
+        for bt, cost in sorted(cbb.items()):
+            label_map = {
+                "metered": "Metered (real $)",
+                "subscription": "Subscription (projected $, notional) *",
+                "unknown": "Unknown",
+            }
+            label = label_map.get(bt, bt.capitalize())
+            lines.append(f"- {label}: {_money(cost)}")
+    else:
+        lines.append(f"- Total: {_fmt_cost(totals)}")
+    lines.append(f"- Records: {totals.get('records', 0)}")
+    lines.append("")
+
+    # Attribution coverage
+    recs = records or []
+    lines.append("## Attribution Coverage")
+    if recs:
+        from collections import defaultdict
+        from importlib import import_module
+
+        agg_mod = import_module("usage_aggregator")
+        bucket_total: dict = defaultdict(float)
+        bucket_attributed: dict = defaultdict(float)
+        bucket_unattributed: dict = defaultdict(float)
+        for r in recs:
+            bt = r.get("billing_type") or "unknown"
+            c = agg_mod._f(r.get("cost_usd", 0))
+            bucket_total[bt] += c
+            has_proj = r.get("project") is not None
+            has_task = r.get("task") is not None
+            if has_proj and has_task:
+                bucket_attributed[bt] += c
+            else:
+                bucket_unattributed[bt] += c
+        for bt in sorted(bucket_total):
+            total = bucket_total[bt]
+            attributed = bucket_attributed[bt]
+            unattributed = bucket_unattributed[bt]
+            pct = (attributed / total * 100) if total > 0 else 0.0
+            lines.append(
+                f"- {bt.capitalize()}: {pct:.1f}% attributed"
+                f" | attributed {_money(attributed)}"
+                f" | unattributed {_money(unattributed)}"
+            )
+    else:
+        lines.append("- No records")
+    lines.append("")
+
+    # Quarantine
+    lines.append("## Quarantine")
+    if quarantine is None:
+        lines.append("- None")
+    else:
+        count = 0
+        models: list = []
+        if isinstance(quarantine, dict):
+            count = int(quarantine.get("count") or 0)
+            models = list(quarantine.get("models") or [])
+        elif isinstance(quarantine, int):
+            count = quarantine
+        elif hasattr(quarantine, "__len__"):
+            count = len(quarantine)
+            models = [str(x) for x in quarantine]
+        if count == 0 and not models:
+            lines.append("- None")
+        else:
+            lines.append(f"- {count} rows quarantined")
+            if models:
+                lines.append(
+                    f"- Models needing pricing: {', '.join(str(m) for m in models)}"
+                )
+    lines.append("")
+    return "\n".join(lines)
+
+
 def write_report(
-    agg: dict, out_path, *, records: list | None = None, period: str = "week"
+    agg: dict,
+    out_path,
+    *,
+    records: list | None = None,
+    period: str = "week",
+    quarantine=None,
 ) -> str:
     from pathlib import Path
 
-    html_str = render_html(agg, records=records, period=period)
+    html_str = render_html(agg, records=records, period=period, quarantine=quarantine)
     p = Path(out_path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(html_str, encoding="utf-8")
+    # Also write .md summary (D4 AC: same basename, .md extension)
+    md_path = p.with_suffix(".md")
+    md_path.write_text(_md_summary(agg, records, quarantine), encoding="utf-8")
     return str(p)
