@@ -83,6 +83,10 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/usage_account_capture.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 /Users/jasonjob/agents/claude-config/scripts/cost_telemetry_freshness.py --hook"
           }
         ]
       }
