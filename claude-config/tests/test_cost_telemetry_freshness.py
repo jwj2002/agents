@@ -94,3 +94,14 @@ def test_hook_mode_always_exits_zero_even_when_stale(tmp_path):
     log = tmp_path / "log"
     assert F.main(["--base", str(missing), "--log", str(log)]) == 1  # CLI: stale → nonzero
     assert F.main(["--base", str(missing), "--log", str(log), "--hook"]) == 0  # hook: always 0
+
+
+def test_fresh_when_shard_in_per_host_subdir(tmp_path):
+    """#339: real layout writes the shard to <base>/<host>/usage.jsonl, not <base>/usage.jsonl —
+    freshness must find it there and NOT false-alarm 'shard missing'."""
+    _state(tmp_path, (NOW - timedelta(days=1)).isoformat())
+    host = tmp_path / "jns-mac"
+    host.mkdir()
+    (host / F.SHARD_FILENAME).write_text("{}\n", encoding="utf-8")
+    stale, reason = F.check(tmp_path, now=NOW)
+    assert stale is False, reason
