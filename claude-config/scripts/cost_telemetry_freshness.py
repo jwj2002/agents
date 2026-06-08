@@ -36,7 +36,11 @@ def check(
     now = now or _now()
     base = Path(base_dir)
     state_path = base / STATE_FILENAME
-    shard_path = base / SHARD_FILENAME
+    # The collector writes the shard to a PER-HOST subdir (<base>/<host>/usage.jsonl) and the state to
+    # the root (<base>/cost-telemetry.state). Accept either the per-host subdir shard (real layout) or a
+    # base-level shard (flat/test layout) — checking only <base>/usage.jsonl false-alarms live (#339).
+    def _shard_exists() -> bool:
+        return (base / SHARD_FILENAME).exists() or any(base.glob(f"*/{SHARD_FILENAME}"))
 
     if not state_path.exists():
         return True, "collector has never run (no cost-telemetry.state)"
@@ -61,7 +65,7 @@ def check(
             f"stale: last successful collection {age_days:.1f}d ago (SLA {sla_days}d)",
         )
     # Healthy run, but the shard itself must exist (a missing shard after a 'success' is alarming).
-    if not shard_path.exists():
+    if not _shard_exists():
         return True, "usage.jsonl missing despite a recent successful run"
     return False, f"fresh: last success {age_days:.1f}d ago"
 
