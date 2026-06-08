@@ -117,6 +117,11 @@ DEFAULT_PRICE = PRICES[
     "claude-sonnet-4"
 ]  # conservative fallback for unrecognized models (compute_cost only)
 
+# Stamped onto every usage record (cost-telemetry-v0 §D3) so cost_usd is auditable / re-priceable.
+# BUMP this whenever a PRICES rate changes — test_price_table_version pins the current value so any
+# silent rate edit fails CI until the version is bumped.
+PRICE_TABLE_VERSION = "2026-06-08"
+
 EXPORTER_FRESHNESS_SLA_DEFAULT = (
     24 * 3600
 )  # 24h: sink must be written within SLA or alarm (§0.1)
