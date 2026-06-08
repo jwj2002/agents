@@ -607,10 +607,14 @@ def run_collect(
             all_quarantine_rows.extend(result["quarantine_rows"])
 
     # --- enrich files_changed / files_changed_source ---
-    # Resolve the sessions shard for this host (best-effort; None if absent).
+    # Resolve enrichment inputs to their LIVE defaults (the bug behind "100% files_changed_source=none":
+    # run_collect was never handed these, so all tiers were inert). metrics.jsonl is the orchestrate
+    # outcome log; the sessions shard is the per-host capture stream (best-effort, None if absent).
     if enrich and all_usage_rows:
         _sessions_shard = tdir / "sessions.jsonl"
-        _resolved_metrics = metrics_path
+        _resolved_metrics = metrics_path or (
+            Path.home() / ".claude" / "memory" / "metrics.jsonl"
+        )
         _resolved_repo = repo_root
         _enrich_cache: dict = {}  # task -> (files_changed, source)
         for row in all_usage_rows:
