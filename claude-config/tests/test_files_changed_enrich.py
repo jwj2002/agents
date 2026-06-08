@@ -512,3 +512,18 @@ def test_enrich_does_not_change_attribution_fields(tmp_path):
             )
         # enrichment fields differ (that's the point)
         assert re_.get("files_changed") is not None or re_.get("task") != "issue:42"
+
+
+# #335: metrics.jsonl has `complexity` (not a file count) → derive a tier-band so the tier is computable
+def test_project_metrics_uses_complexity_band(tmp_path):
+    m = tmp_path / "metrics.jsonl"
+    m.write_text(
+        '{"issue": 42, "complexity": "COMPLEX", "status": "PASS"}\n'
+        '{"issue": 7, "complexity": "TRIVIAL"}\n'
+        '{"issue": 9, "files_changed": 3}\n',
+        encoding="utf-8",
+    )
+    assert FCE._project_metrics_files(42, m) == 4  # COMPLEX → 4 (task_tier → COMPLEX)
+    assert FCE._project_metrics_files(7, m) == 1  # TRIVIAL → 1
+    assert FCE._project_metrics_files(9, m) == 3  # a real files_changed int still wins
+    assert FCE._project_metrics_files(999, m) is None  # no match

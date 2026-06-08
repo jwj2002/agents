@@ -350,11 +350,15 @@ def _apply_account(rec: dict, account_map: dict | None, fallback: dict | None) -
             account_source="sidecar",
         )
     elif fallback:
+        # Identity (account/org/email) is stable across sessions → safe to back-fill from the current
+        # account. billing MODE is NOT: a historical session may have been on an API key. We did not
+        # capture it (the sidecar only began #265), so it is genuinely UNKNOWN — never assume the
+        # current account's mode (that falsely labels all history 'subscription'). Honest > convenient.
         rec.update(
             account=fallback.get("account_uuid"),
             org=fallback.get("org"),
             email=fallback.get("email"),
-            billing_type=fallback.get("billing_type"),
+            billing_type="unknown",
             account_source=fallback.get("account_source", "current_fallback"),
         )
     return rec

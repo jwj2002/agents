@@ -690,3 +690,26 @@ def test_311_target_vs_old_cwd_basename():
     assert hijack_recs[1]["project"] == "agents", (
         f"hijack FAILED: expected 'agents', got {hijack_recs[1]['project']!r}"
     )
+
+
+# #335: fallback (no sidecar) must NOT inherit the current account's billing mode → 'unknown'
+def test_apply_account_fallback_billing_is_unknown():
+    fb = {
+        "account_uuid": "u-1",
+        "org": "Org",
+        "email": "x@y.com",
+        "billing_type": "subscription",
+    }
+    rec = U._apply_account({"session_id": "no-sidecar"}, account_map={}, fallback=fb)
+    assert (
+        rec["billing_type"] == "unknown"
+    )  # historical billing mode is unknown, never assumed
+    assert rec["account"] == "u-1"  # but stable identity still back-fills
+    # a sidecar match DOES use the captured per-session billing_type
+    amap = {"s1": {"account_uuid": "u-1", "billing_type": "metered"}}
+    assert (
+        U._apply_account({"session_id": "s1"}, account_map=amap, fallback=fb)[
+            "billing_type"
+        ]
+        == "metered"
+    )

@@ -80,9 +80,16 @@ def _git_files_for_issue(issue_number: int, repo_root: Path) -> int | None:
 # ---------------------------------------------------------------------------
 
 
+# metrics.jsonl records `complexity` (the tier), not a raw file count. Map it to a representative
+# files-band so the existing usage_aggregator.task_tier() (1→TRIVIAL, 2-3→SIMPLE, 4+→COMPLEX) yields
+# that same tier. This is a TIER PROXY, not a literal file count — the report marks project_metrics
+# rows "(tier approximate)" (only pr_git is authoritative), so it is honestly labelled.
+_COMPLEXITY_FILES = {"TRIVIAL": 1, "SIMPLE": 2, "COMPLEX": 4}
+
+
 def _project_metrics_files(issue_number: int, metrics_path: Path) -> int | None:
-    """Look up files_changed for issue_number in metrics.jsonl.
-    Returns the first match or None."""
+    """files_changed for issue_number from metrics.jsonl: a real `files_changed` int if present, else
+    a tier-band derived from `complexity` (metrics carries the tier, not a file count). First match wins."""
     if not metrics_path or not metrics_path.exists():
         return None
     try:
@@ -102,6 +109,9 @@ def _project_metrics_files(issue_number: int, metrics_path: Path) -> int | None:
                 fc = rec.get("files_changed")
                 if isinstance(fc, int) and fc >= 0:
                     return fc
+                band = _COMPLEXITY_FILES.get(str(rec.get("complexity") or "").upper())
+                if band is not None:
+                    return band
     except OSError:
         return None
     return None
