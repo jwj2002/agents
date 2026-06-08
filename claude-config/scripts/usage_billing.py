@@ -9,8 +9,8 @@ This is a PURE helper (inject `env` + path) so it's testable. It is meant to be 
 SessionStart account-capture hook (where `env` is the session's own environment) so each session is
 tagged at capture time. ⚠ launchd does NOT inherit a shell's env — under launchd the API-key keys are
 absent unless explicitly added to the plist `EnvironmentVariables`, so the env-key branch only fires in
-the hook context, not in a launchd-run collector. (Wiring this into the live hook is part of the
-deferred activation / smoke test, not this change.)
+the hook context, not in a launchd-run collector. (Wired into the live SessionStart account-capture
+hook via runbook Step 7 — #337/#339 review.)
 """
 
 from __future__ import annotations
