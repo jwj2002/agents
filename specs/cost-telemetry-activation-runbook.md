@@ -82,16 +82,17 @@ launchctl list | grep cost-telemetry            # confirm loaded
 
 ---
 
-## Step 5 — Enable the Stop hook (marker on session end)
-Edit `~/.claude/settings.json` → `hooks.Stop[0].hooks` array, **append**:
-```json
-{ "type": "command", "command": "python3 ~/.claude/hooks/cost_collect_request.py" }
-```
-**Verify:** `python3 -c "import json;json.load(open('$HOME/.claude/settings.json'))"` parses OK; start
-and end a throwaway session; confirm `~/.claude/telemetry/.collect-requested` is touched and the session
-exited normally (no error, no delay).
-**Rollback:** delete that one array entry from `settings.json`.
-**Reversible:** yes (config-only; the hook never raises and only touches a marker).
+## Step 5 — SKIP (superseded by the timer + transcript-mtime)
+**Decided 2026-06-08: do not wire the Stop hook.** It was conceived as a "session ended" marker, but the
+Claude Code `Stop` hook fires at the end of **every turn** (not at session end), and nothing consumes
+the marker — the launchd collector (Step 4) runs on its own 6h timer and mines transcript JSONLs by
+**mtime**, which already captures **resumed** sessions (transcript keeps appending) and **multi-day**
+sessions (a still-open transcript keeps a fresh mtime → its running cost is collected every cycle, not
+only when it ends). So the timer + transcript is strictly more reliable than any hook here.
+
+If lower-than-6h latency is ever wanted, wire a **`SessionEnd`** hook (the correct "ended" event) to
+`launchctl kickstart` the job — **not** the per-turn `Stop` hook. `cost_collect_request.py` is left in
+the repo, dormant, with a docstring documenting this.
 
 ---
 
