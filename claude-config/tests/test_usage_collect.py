@@ -486,25 +486,48 @@ def test_check_output(tmp_path, capsys):
 
 
 # ---------------------------------------------------------------------------
-# 12. Stale lock (age > LOCK_STALE_MIN): replaced and run proceeds
+# 12. A LIVE-PID lock is NEVER reclaimed by age — no overlap with a long-running collector (#339)
 # ---------------------------------------------------------------------------
-def test_stale_lock_replaced(tmp_path):
-    """Lock older than LOCK_STALE_MIN minutes is replaced; run proceeds normally."""
+def test_live_lock_never_overlaps_even_when_old(tmp_path):
+    """A lock held by a LIVE pid must skip the new run regardless of age — never overlap (#339).
+    The old behavior reclaimed it once age > LOCK_STALE_MIN, overlapping a legitimately slow run."""
     base, claude_dir, _ = _base_setup(tmp_path)
     entries = [_asst("u1", ts="2026-06-01T00:00:00Z")]
     _write_transcript(claude_dir, "sess1", entries)
 
     lock = UC._lock_path(base)
     lock.parent.mkdir(parents=True, exist_ok=True)
-    stale_ts = time.time() - (UC.LOCK_STALE_MIN + 1) * 60
-    # Use current PID so os.kill(pid, 0) passes — but age > LOCK_STALE_MIN triggers stale
+    very_old_ts = time.time() - (UC.LOCK_STALE_MIN + 999) * 60  # ancient, but pid is ALIVE
     lock.write_text(
-        json.dumps({"pid": os.getpid(), "start_ts": stale_ts}), encoding="utf-8"
+        json.dumps({"pid": os.getpid(), "start_ts": very_old_ts}), encoding="utf-8"
     )
 
     code, stats, _ = _run(tmp_path, full=True, claude_dir=claude_dir)
-    # Stale lock is replaced; run continues normally
-    assert code in (0, 1)  # 1 if any quarantine, 0 if all known
+    assert code == 0
+    assert stats.get("note") == "already_running"  # skipped — did NOT overlap the live holder
+
+
+# 12b. Secret hard gate: a token in a numeric field must NOT leak into logs (#339)
+# ---------------------------------------------------------------------------
+def test_secret_in_token_field_not_logged(tmp_path, caplog):
+    """A transcript whose usage.input_tokens is a non-numeric secret triggers an int() error; the
+    durable log must record the exception TYPE only, never the raw value (#339 hard gate)."""
+    import logging
+
+    _, claude_dir, _ = _base_setup(tmp_path)
+    secret = "sk-SECRET-IN-TOKEN-FIELD"
+    entries = [
+        _asst(
+            "u1",
+            ts="2026-06-01T00:00:00Z",
+            usage={"input_tokens": secret, "output_tokens": 1},
+        )
+    ]
+    _write_transcript(claude_dir, "sess1", entries)
+    with caplog.at_level(logging.DEBUG, logger="usage_collect"):
+        _run(tmp_path, full=True, claude_dir=claude_dir)
+    blob = caplog.text + " ".join(r.getMessage() for r in caplog.records)
+    assert secret not in blob, "raw token leaked into the collector log"
 
 
 # ---------------------------------------------------------------------------

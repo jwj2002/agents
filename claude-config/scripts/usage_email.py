@@ -52,13 +52,18 @@ def send_weekly(
     state: dict,
     host: str,
     recipient: str = SENDER,
+    allow_nonstandard_recipient: bool = False,
     now: datetime | None = None,
     send_fn=None,
 ) -> tuple[int, dict]:
     """Send the weekly report if not already sent this ISO week.
-    Returns (exit_code, updated_state): 0 = sent OR idempotent-skip; 4 = send failure (caller logs;
-    collection is never blocked). State is only advanced on a successful send."""
+    Returns (exit_code, updated_state): 0 = sent OR idempotent-skip; 4 = send failure / refused
+    recipient (caller logs; collection is never blocked). State is only advanced on a successful send."""
     now = now or datetime.now(timezone.utc)
+    # The report carries internal cost data — refuse any recipient other than the fixed sender unless a
+    # caller EXPLICITLY opts in (a dev-only escape hatch). Never silently send elsewhere (#339).
+    if recipient != SENDER and not allow_nonstandard_recipient:
+        return 4, state
     wk = _week_key(now)
     if state.get("last_email_sent_week") == wk:
         return 0, state  # idempotent — already sent this week
