@@ -120,7 +120,7 @@ def test_downshift_savings_math():
 
 
 def test_downshift_savings_opus_to_sonnet():
-    """1M input tokens opus→sonnet savings = 1M × (15e-6 - 3e-6) = 12.00."""
+    """1M input tokens opus→sonnet savings = 1M × (5e-6 - 3e-6) = 2.00 (corrected Opus rate, #337)."""
     rec = _r(
         model="claude-opus-4",
         input=1_000_000,
@@ -129,7 +129,7 @@ def test_downshift_savings_opus_to_sonnet():
         cache_creation=0,
     )
     savings = REC._downshift_savings([rec], "claude-sonnet-4")
-    assert abs(savings - 12.00) < 1e-6
+    assert abs(savings - 2.00) < 1e-6
 
 
 def test_downshift_savings_empty_records():

@@ -380,6 +380,12 @@ def extract_records(
     active = {"task": "unattributed", "project": None, "work_host": inference_host}
     pending_compaction = False
     records = []
+    # Split-turn de-dup (Codex review #337 finding 2): Claude logs ONE API turn as adjacent assistant
+    # rows (a thinking block + a text block) sharing sessionId/timestamp/model and IDENTICAL usage, with
+    # DIFFERENT uuids. sessionId:uuid de-dup counts both → double-counts that turn's spend. Collapse them
+    # by an API-turn signature. Gated on uuid-present so the malformed-fallback path (#262) is untouched,
+    # and the full token tuple keeps legitimate retries (different ts/tokens) distinct.
+    seen_turn_sigs: set = set()
     for idx, entry in enumerate(entries):
         if _is_compaction(entry):
             pending_compaction = True
@@ -456,8 +462,23 @@ def extract_records(
                 "compaction": pending_compaction,
                 "dedup_key": dedup_key,
             }
-            records.append(_apply_account(rec, account_map, fallback_account))
-            pending_compaction = False
+            turn_sig = (
+                sid,
+                entry.get("timestamp"),
+                msg.get("model"),
+                tok["input"],
+                tok["output"],
+                tok["cache_read"],
+                tok["cache_creation"],
+            )
+            if uuid and turn_sig in seen_turn_sigs:
+                # Adjacent split-turn duplicate (thinking+text of one API turn) — already counted.
+                pending_compaction = False
+            else:
+                if uuid:
+                    seen_turn_sigs.add(turn_sig)
+                records.append(_apply_account(rec, account_map, fallback_account))
+                pending_compaction = False
         # mine this entry's commands → update active state for subsequent messages (segmentation)
         # Cross-command conflict guard (issue #311 Finding 4): if two commands in the SAME assistant
         # message mine DIFFERENT projects, last-write-win is a mis-attribution risk.  Detect conflict

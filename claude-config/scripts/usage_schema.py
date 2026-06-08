@@ -65,6 +65,11 @@ def normalize(rec: dict) -> dict:
     out["billing_type"] = bt if bt in _BILLING else "unknown"
     out["price_basis"] = PRICE_BASIS
     out["price_table_version"] = O.PRICE_TABLE_VERSION
+    # Data layer uses None for "no attribution" — the collector's "unattributed" sentinel was being
+    # counted as attributed by the report's `task is not None` coverage check (Codex review #337
+    # finding 5: 100% vs the true ~88%). Normalize it to None; the report renders None as "unattributed".
+    if out.get("task") == "unattributed":
+        out["task"] = None
     out["files_changed"] = out.get("files_changed")  # null when absent (never 0/"")
     fcs = out.get("files_changed_source")
     out["files_changed_source"] = fcs if fcs in _FCS else "none"

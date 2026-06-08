@@ -116,16 +116,23 @@ def trends(records: list, *, period: str = "week") -> dict:
             continue
         proj = r.get("project") or "unknown"
         cell = out.setdefault(proj, {}).setdefault(
-            bucket, {"cost": 0.0, "input": 0, "cache_read": 0}
+            bucket, {"cost_by_billing": {}, "input": 0, "cache_read": 0}
         )
-        cell["cost"] += _fnum(r.get("cost_usd"))
+        # Never sum across billing types (§6): keep metered/subscription/unknown as separate buckets so
+        # the trend chart plots them as distinct series, never one mixed dollar (Codex review #337 finding 3).
+        bt = r.get("billing_type") or "unknown"
+        cell["cost_by_billing"][bt] = cell["cost_by_billing"].get(bt, 0.0) + _fnum(
+            r.get("cost_usd")
+        )
         cell["input"] += int(_fnum(r.get("input")))
         cell["cache_read"] += int(_fnum(r.get("cache_read")))
     for proj, buckets in out.items():
         for b, c in buckets.items():
             denom = c["input"] + c["cache_read"]
             c["cache_pct"] = round(c["cache_read"] / denom, 4) if denom else 0.0
-            c["cost"] = round(c["cost"], 6)
+            c["cost_by_billing"] = {
+                k: round(v, 6) for k, v in c["cost_by_billing"].items()
+            }
     return out
 
 
@@ -466,7 +473,10 @@ function line(id,series,title){{const el=document.getElementById(id);if(!el)retu
  const labels=[...new Set([].concat(...Object.values(series).map(b=>Object.keys(b))))].sort();
  const ds=Object.entries(series).map(([k,b])=>({{label:k,data:labels.map(l=>(b[l]||{{}}).cost||0)}}));
  if(ds.length)new Chart(el,{{type:'line',data:{{labels,datasets:ds}},options:titleOpt(title)}});}}
-try{{line('c_pr_trend',D.trends,COST_T);
+try{{
+ // One line per project × billing-type — buckets are never summed into a single plotted dollar (#337).
+ const prT={{}};for(const[p,b]of Object.entries(D.trends)){{for(const[k,v]of Object.entries(b)){{const cbb=v.cost_by_billing||{{}};for(const[bt,c]of Object.entries(cbb)){{const key=p+' / '+bt;(prT[key]=prT[key]||{{}})[k]={{cost:c}};}}}}}}
+ line('c_pr_trend',prT,COST_T);
  const ct={{}};for(const[p,b]of Object.entries(D.trends)){{ct[p]={{}};for(const[k,v]of Object.entries(b))ct[p][k]={{cost:v.cache_pct}};}}
  line('c_cache_trend',ct,'cache read %');
  const te=document.getElementById('c_tier');if(te){{const t=D.by_tier;new Chart(te,{{type:'bar',
