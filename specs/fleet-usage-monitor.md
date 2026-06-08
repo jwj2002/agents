@@ -14,7 +14,7 @@ fine on Sonnet; stop spending Opus on it."*
 **Non-goals (v1).** Real-time streaming; OTEL collectors (transcripts/sessions ALREADY carry the data —
 see §2, confirmed 2026-06-06); the rigorous quality/validation anchor (that is the separate
 `telemetry-validation` spec — this cost/efficiency view ships without proven quality). Benchmark-4 /
-cross-dev comparison stays out (k-anon, §6.2 of team-knowledge).
+cross-dev comparison stays out (k-anon, §6.2 of knowledgemesh — jwj2002/knowledgemesh).
 
 ## §1 Dimensions (the query axes)
 Every normalized record carries all six so any can be a group-by:

@@ -19,8 +19,8 @@ Miss ANY of 2-6 → `unverified` (NOT "good", never silently dropped). A correct
 The 30d window is measured from the task-freeze timestamp (frozen at the first implementation artifact,
 #229) — never re-anchored after the outcome is known.
 
-Cross-spec gate: a confirmed `no_observed_defect` is the ONLY state the team-knowledge auto-observe
-pipeline (team-knowledge-mvp-v1 §1.2) may consume as a positive example — `unverified`/`pending`/
+Cross-spec gate: a confirmed `no_observed_defect` is the ONLY state the KnowledgeMesh auto-observe
+pipeline (jwj2002/knowledgemesh, knowledgemesh-mvp-v1 §1.2) may consume as a positive example — `unverified`/`pending`/
 `correction_detected` are not auto-observable. `auto_observe_event` enforces that.
 
 Host-agnostic and pure: takes injected tracer results + exposure evidence. Owner lane: server-a.
@@ -148,7 +148,7 @@ def classify_unit(
 
 
 def auto_observe_event(classification: dict) -> dict | None:
-    """The team-knowledge auto-observe hookpoint (tk-mvp-v1 §1.2). Emits a positive-example event ONLY
+    """The KnowledgeMesh auto-observe hookpoint (km-mvp-v1 §1.2). Emits a positive-example event ONLY
     for a CONFIRMED `no_observed_defect` — `unverified` / `pending` / `correction_detected` are NOT
     auto-observable (the cross-spec gate). Defense-in-depth (Codex): the label alone is not trusted —
     the classification must ALSO show a confirmed no-correction tracer result, complete exposure, and
