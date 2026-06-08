@@ -329,8 +329,12 @@ def test_git_dash_c_checkout_sets_project_and_task():
     assert recs[1]["task"] == "issue:311"
 
 
-# Test E — conflicting --repo and git -C in same command → stays unattributed (precision over recall)
+# Test E — tokenized parsing: `--repo` in a `git` command is NOT a gh signal; only `-C` fires
 def test_conflicting_signals_no_project():
+    # With tokenized parsing: `git -C /path/to/repo-a status --repo owner/repo-b` is a `git`
+    # invocation.  Only `-C /path/to/repo-a` fires (tokenized git-C match requires toks[0]=="git").
+    # `--repo owner/repo-b` requires toks[0]=="gh" to fire → it doesn't.
+    # Result: project = "repo-a" (no conflict — the `--repo` is ignored in a git context).
     recs = _extract(
         [
             _asst(
@@ -341,8 +345,9 @@ def test_conflicting_signals_no_project():
             _asst(2, ts="t2"),
         ]
     )
-    # conflicting signals → project remains None (precision over recall)
-    assert recs[1]["project"] is None
+    assert (
+        recs[1]["project"] == "repo-a"
+    )  # only git -C fires; --repo in git context is ignored
 
 
 # Test F — no cross-repo signal → stays unattributed, never mis-attributed
@@ -476,74 +481,212 @@ def test_mine_command_git_dash_c_checkout():
 
 
 def test_mine_command_conflicting_signals():
+    # With tokenized parsing, `--repo` in a `git` command is NOT a gh signal.
+    # Only `git -C /path/to/repo-a` fires → project = "repo-a".
     result = U.mine_command("git -C /path/to/repo-a status --repo owner/repo-b")
-    assert result.get("project") is None or "project" not in result
+    assert result.get("project") == "repo-a"
 
 
 # AC3 precision: per-message cwd-vs-mined precedence tests (issue #311 fix 2)
 
 
-# Test I — hijack prevention: cwd=agents + stray --repo in earlier message → later msgs stay project=agents
+# Test I — hijack prevention: gitBranch present → real repo → stray --repo cannot override
 def test_cwd_repo_beats_stray_mined_project():
-    """A real-cwd session (cwd=/Users/jjob/agents) must not be hijacked by a stray --repo flag.
-    After msg1 mines project=maison-scaffold, msg2 has cwd=agents → must get project=agents (cwd wins)."""
+    """A real-cwd session must not be hijacked by a stray --repo flag.
+    gitBranch present confirms cwd IS a real git repo → cwd-derived project is authoritative.
+    A later message with gitBranch=feat/... must get project=agents (branch 2 wins), NOT
+    the mined project=maison-scaffold from mining the earlier --repo flag."""
     recs = _extract(
         [
             _asst(
                 1,
                 ts="t1",
-                cwd="/Users/jjob/agents",
+                cwd="/Users/x/agents",
+                gitBranch="feat/issue-9-x",
                 content=[_bash("gh pr view 99 --repo jwj2002/maison-scaffold")],
             ),
-            _asst(2, ts="t2", cwd="/Users/jjob/agents"),
+            _asst(2, ts="t2", cwd="/Users/x/agents", gitBranch="feat/issue-9-x"),
         ]
     )
-    # msg1: pre-command, cwd=agents → project=agents (cwd wins over nothing mined yet)
+    # msg1: gitBranch present → branch 2 → cwd-derived project wins → "agents"
     assert recs[0]["project"] == "agents"
-    # msg2: active["project"] is now "maison-scaffold" from mining msg1, but cwd=agents → cwd wins
+    # msg2: active["project"] is now "maison-scaffold" from mining msg1, but gitBranch present →
+    # branch 2 fires → cwd wins → project stays "agents" (hijack prevented)
     assert recs[1]["project"] == "agents"
 
 
-# Test J — #311 target: cwd=None (no repo) + --repo signal → project from mined signal
+# Test J — #311 TARGET: cwd=/Users/x/projects/scratch (non-repo), gitBranch absent → mined --repo wins
 def test_scratch_cwd_uses_mined_project():
-    """The primary #311 target: cwd is absent (simulates abs-path-outside-any-repo session).
-    cwd yields None → mined active["project"] fills the gap (the #311 win)."""
+    """THE #311 TARGET CASE — realistic non-repo cwd with a cross-repo --repo signal.
+    cwd=/Users/x/projects/scratch is a real path but NOT a git repo → gitBranch is absent/empty.
+    With the old code, _project_from_path("scratch") would fire branch 2 and return "scratch",
+    IGNORING the mined --repo agents signal entirely.
+    With the gitBranch discriminant: gitBranch absent → branch 3 → mined project wins."""
     recs = _extract(
         [
             _asst(
                 1,
                 ts="t1",
-                cwd=None,
-                content=[_bash("gh pr merge 5 --repo jwj2002/agents --squash")],
+                cwd="/Users/x/projects/scratch",
+                gitBranch=None,  # not in a git repo
+                content=[_bash("gh pr merge 1 --repo jwj2002/agents --squash")],
             ),
-            _asst(2, ts="t2", cwd=None),
+            _asst(2, ts="t2", cwd="/Users/x/projects/scratch", gitBranch=None),
         ]
     )
-    # msg1: no cwd → project=None (pre-command, nothing mined yet)
-    assert recs[0]["project"] is None
-    # msg2: no cwd → cwd_project=None → falls back to mined active["project"] = "agents"
+    # msg1: gitBranch absent, no mined project yet → branch 4 fallback → cwd basename "scratch"
+    assert recs[0]["project"] == "scratch"
+    # msg2: gitBranch absent, active["project"]="agents" (mined from msg1) → branch 3 → "agents"
+    # THIS IS THE #311 WIN: scratch-session gets attributed to agents, not "scratch".
     assert recs[1]["project"] == "agents"
 
 
 # Test K — ssh-develop regression: ssh-derived project still wins when work_host != inference_host
 def test_ssh_develop_project_attribution_not_regressed():
     """SSH-develop (§4.2): when ssh sets work_host to a remote, active["project"] (mined from ssh
-    'cd repo') must still win for subsequent messages — even though cwd is local."""
+    'cd repo') must still win for subsequent messages — even though cwd is local.
+    Uses realistic cwd (a real local dir, but not the remote repo) and gitBranch to confirm
+    branch 1 (on_remote) fires before branch 2 (gitBranch) and wins."""
     recs = _extract(
         [
             _asst(
                 1,
                 ts="t1",
-                cwd="/Users/jjob",  # local cwd — irrelevant under ssh-develop
+                cwd="/Users/x/projects/scratch",
+                gitBranch=None,  # local cwd is not a git repo; user is SSHing out
                 content=[_bash("ssh jns 'cd ~/app-repos/app-buddy && git status'")],
             ),
-            _asst(2, ts="t2", cwd="/Users/jjob"),  # still local cwd after ssh
+            _asst(
+                2, ts="t2", cwd="/Users/x/projects/scratch", gitBranch=None
+            ),  # still local after ssh
         ]
     )
-    # msg1: pre-command, cwd=/Users/jjob → _project_from_path gives "jjob"; work_host still HOST
-    # so on_remote is False for msg1 → cwd wins → project="jjob"
-    assert recs[0]["project"] == "jjob"
-    # msg2: after ssh, work_host="jns" (≠ HOST) → on_remote=True → ssh-mined active["project"]
-    # wins. ssh 'cd ~/app-repos/app-buddy' → mine_command sets project="app-buddy" via cd.
+    # msg1: on_remote=False (ssh fires but work_host still HOST until NEXT message), gitBranch absent,
+    # no mined project yet → branch 4 → cwd basename "scratch"
+    assert recs[0]["project"] == "scratch"
+    # msg2: after ssh cmd, work_host="jns" (≠ HOST) → on_remote=True → branch 1 → ssh-mined
+    # active["project"] wins. ssh 'cd ~/app-repos/app-buddy' → project="app-buddy" via cd.
     assert recs[1]["work_host"] == "jns"
     assert recs[1]["project"] == "app-buddy"
+
+
+# --- Finding 3: tokenization tests (no raw-string false positives) ---------------------------------
+
+
+def test_tokenization_echo_repo_not_matched():
+    """echo '--repo evil/repo' must NOT mine a project — it is not a real gh invocation."""
+    result = U.mine_command("echo '--repo evil/repo'")
+    assert "project" not in result or result.get("project") is None
+
+
+def test_tokenization_comment_not_matched():
+    """A comment containing --repo must NOT mine a project."""
+    result = U.mine_command("# gh pr view --repo jwj2002/agents")
+    assert "project" not in result or result.get("project") is None
+
+
+def test_tokenization_gh_inline_equals():
+    """gh --repo=owner/name (inline =) must mine the project."""
+    result = U.mine_command("gh pr create --repo=jwj2002/agents --title x")
+    assert result.get("project") == "agents"
+
+
+def test_tokenization_gh_no_slash_ignored():
+    """gh --repo noSlashHere must not produce a project (no owner/name separator)."""
+    result = U.mine_command("gh pr view --repo noSlashHere")
+    assert "project" not in result or result.get("project") is None
+
+
+# --- Finding 4: cross-command conflict guard --------------------------------------------------------
+
+
+def test_cross_command_conflict_clears_project():
+    """Two commands in the same message mining DIFFERENT projects → active["project"] cleared.
+    The conflicting mined signal must NOT determine subsequent attribution; cwd fallback applies.
+    Specifically: the project must NOT be "agents" or "maison-scaffold" (neither wins)."""
+    recs = _extract(
+        [
+            _asst(
+                1,
+                ts="t1",
+                cwd="/Users/x/projects/scratch",
+                gitBranch=None,
+                content=[
+                    _bash("gh pr view 1 --repo jwj2002/agents"),
+                    _bash("gh pr view 2 --repo jwj2002/maison-scaffold"),
+                ],
+            ),
+            _asst(2, ts="t2", cwd="/Users/x/projects/scratch", gitBranch=None),
+        ]
+    )
+    # Conflicting mines → active["project"] cleared → branch 3 doesn't fire.
+    # Branch 4 falls back to cwd basename "scratch" (the cwd itself is unambiguous).
+    # Neither "agents" nor "maison-scaffold" must win (last-write-win prevented).
+    assert recs[1]["project"] not in ("agents", "maison-scaffold"), (
+        f"conflict guard FAILED: a conflicted project leaked through as {recs[1]['project']!r}"
+    )
+
+
+def test_cross_command_same_project_not_cleared():
+    """Two commands mining the SAME project must NOT clear it (only conflict clears)."""
+    recs = _extract(
+        [
+            _asst(
+                1,
+                ts="t1",
+                cwd="/Users/x/projects/scratch",
+                gitBranch=None,
+                content=[
+                    _bash("gh pr view 1 --repo jwj2002/agents"),
+                    _bash("gh pr view 2 --repo jwj2002/agents"),
+                ],
+            ),
+            _asst(2, ts="t2", cwd="/Users/x/projects/scratch", gitBranch=None),
+        ]
+    )
+    # Same project from both commands → no conflict → project = "agents"
+    assert recs[1]["project"] == "agents"
+
+
+# --- AC4 counterfactual: #311 target vs old cwd-basename mis-attribution ---------------------------
+
+
+def test_311_target_vs_old_cwd_basename():
+    """Demonstrate the #311 win: with gitBranch discriminant, a scratch session with
+    gh --repo jwj2002/agents correctly attributes to agents, not to the cwd basename 'scratch'.
+    Also demonstrate that the hijack case (gitBranch present) correctly prevents override."""
+    # THE #311 TARGET: cwd=scratch (not a repo), gitBranch absent → mined --repo wins
+    target_recs = _extract(
+        [
+            _asst(
+                1,
+                ts="t1",
+                cwd="/Users/x/projects/scratch",
+                gitBranch=None,
+                content=[_bash("gh pr merge 1 --repo jwj2002/agents --squash")],
+            ),
+            _asst(2, ts="t2", cwd="/Users/x/projects/scratch", gitBranch=None),
+        ]
+    )
+    # msg2 must get project=agents (not "scratch", which the old code would return)
+    assert target_recs[1]["project"] == "agents", (
+        f"#311 target FAILED: expected 'agents', got {target_recs[1]['project']!r}"
+    )
+
+    # HIJACK-PREVENTED: cwd=agents with gitBranch present → cwd wins, stray --repo ignored
+    hijack_recs = _extract(
+        [
+            _asst(
+                1,
+                ts="t1",
+                cwd="/Users/x/agents",
+                gitBranch="feat/issue-9-x",
+                content=[_bash("gh pr view 99 --repo jwj2002/maison-scaffold")],
+            ),
+            _asst(2, ts="t2", cwd="/Users/x/agents", gitBranch="feat/issue-9-x"),
+        ]
+    )
+    # msg2 must get project=agents (not "maison-scaffold" — hijack prevented)
+    assert hijack_recs[1]["project"] == "agents", (
+        f"hijack FAILED: expected 'agents', got {hijack_recs[1]['project']!r}"
+    )
