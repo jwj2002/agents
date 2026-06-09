@@ -505,6 +505,14 @@ out later) rather than a hardcoded but plausible default that would lie
 about what actually ran. The helpers fail open on IOError; losing one
 metric line never fails the orchestrate run.
 
+**FAIL halts the workflow (#360).** A recorded verdict of `FAIL` or `BLOCKED`
+(including a PASS downgraded by AC-FORBIDS-APPROVE) means the workflow STOPS
+here: report the verdict and the failing ACs, do NOT hand off to `/ship`, do
+NOT merge. The same verdict is independently enforced at merge time by
+`scripts/prove_gate.py` (ship.md Step 7.5), so a FAIL that slips past this
+step is still caught — but the orchestrator should never rely on that
+backstop deliberately. Fix, re-run PATCH/PROVE, and only then ship.
+
 ### Step 5: Report Status
 
 ```
