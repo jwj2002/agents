@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import sys
+
+import pytest
 from pathlib import Path
 
 # Ensure action package is importable without an action/__init__.py
@@ -21,6 +23,8 @@ def _args(**kwargs) -> argparse.Namespace:
 
 # ---------- list_known_projects ----------
 
+@pytest.mark.skipif(not (Path.home() / "agents").is_dir(),
+                    reason="machine-integration test: requires the real ~/agents layout")
 def test_list_known_projects():
     """Returns a sorted non-empty list filtered by subscriptions (or all if no subs)."""
     projects = cli.list_known_projects()
@@ -43,6 +47,8 @@ def test_list_known_projects_tmp(tmp_path, monkeypatch):
 
 # ---------- resolve_project (existing, unchanged) ----------
 
+@pytest.mark.skipif(not (Path.home() / "agents").is_dir(),
+                    reason="machine-integration test: requires the real ~/agents layout")
 def test_resolve_project_cwd_agents(monkeypatch):
     """cwd = ~/agents → resolves to 'agents' without touching the picker."""
     monkeypatch.chdir(cli.HOME / "agents")
