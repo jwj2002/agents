@@ -10,23 +10,41 @@ This CLI is the missing read path.
         match count + recency, and print the matching bodies (the "why").
 
     memory doctor [--project SUBSTR]
-        Reconcile each project's MEMORY.md index against its fact files:
-        dead pointers (index → missing file) and unindexed files.
+        Reconcile each project's MEMORY.md index against its fact files
+        (dead pointers, unindexed files) and report TTL candidates:
+        expired facts (explicit `expires:`) and stale perishables (heuristic).
 
-Read-only. Stdlib only (no PyYAML dependency — runs anywhere python3 does).
+    memory archive [--project SUBSTR] [--apply]
+        Move expired / stale-perishable facts to <project>/memory/archive/
+        (preserve, never delete) and drop their MEMORY.md index line.
+        Dry-run by default; --apply performs the moves.
+
+recall / doctor / `archive` (dry-run) are read-only; only `archive --apply`
+mutates. Stdlib only (no PyYAML dependency — runs anywhere python3 does).
 """
 
 from __future__ import annotations
 
 import argparse
+import datetime
 import re
 import sys
+import time
 from pathlib import Path
 
 PROJECTS_ROOT = Path.home() / ".claude" / "projects"
 INDEX_NAME = "MEMORY.md"
+ARCHIVE_DIR = "archive"
 MD_LINK = re.compile(r"\]\(([^)]+\.md)\)")  # markdown link targets ending .md
 BODY_CAP = 50  # max body lines printed per recall hit
+# Legacy-backlog heuristic: a type=project fact whose filename looks like
+# session-state (handoff / milestone / resume) AND is untouched this long is a
+# TTL candidate even without an explicit `expires:`.
+PERISHABLE_PAT = re.compile(
+    r"resume|shipped|complete|cancell|in.?progress|next.?step|session|_plan|wip|status|summary",
+    re.I,
+)
+STALE_DAYS = 90
 
 
 def _memory_dirs():
@@ -56,7 +74,7 @@ def _split_frontmatter(text: str):
     Captures name/description/type; `type` may be top-level or nested under a
     `metadata:` block (both shapes exist in the store).
     """
-    meta = {"name": "", "description": "", "type": ""}
+    meta = {"name": "", "description": "", "type": "", "expires": ""}
     if not text.startswith("---"):
         return meta, text
     end = text.find("\n---", 3)
@@ -66,7 +84,7 @@ def _split_frontmatter(text: str):
     body = text[end + 4:].lstrip("\n")
     for line in fm.splitlines():
         s = line.strip()
-        for key in ("name", "description", "type"):
+        for key in ("name", "description", "type", "expires"):
             # match `key:` whether top-level or indented (metadata.type)
             if s.startswith(key + ":") and not meta[key]:
                 meta[key] = s[len(key) + 1:].strip()
@@ -74,7 +92,57 @@ def _split_frontmatter(text: str):
 
 
 def _fact_files(memory_dir: Path):
+    # Top-level glob only → archive/ subdir is naturally excluded.
     return [p for p in sorted(memory_dir.glob("*.md")) if p.name != INDEX_NAME]
+
+
+def _is_expired(meta: dict, today: datetime.date) -> bool:
+    """True if an explicit `expires:` date has passed."""
+    raw = (meta.get("expires") or "").strip()
+    if not raw:
+        return False
+    try:
+        return datetime.date.fromisoformat(raw) < today
+    except ValueError:
+        return False
+
+
+def _is_stale_perishable(path: Path, meta: dict, mtime: float, now: float, stale_days: int) -> bool:
+    """Heuristic for the legacy backlog (no explicit `expires:`).
+
+    Durable types (feedback/user/reference) never go stale. A `type: project`
+    fact whose filename looks like session-state and is untouched > stale_days
+    is a TTL candidate.
+    """
+    if meta.get("type", "") != "project":
+        return False
+    if not PERISHABLE_PAT.search(path.name):
+        return False
+    return (now - mtime) > stale_days * 86400
+
+
+def _ttl_reason(path: Path, meta: dict, mtime: float, today: datetime.date, now: float, stale_days: int):
+    """Return a human reason string if the fact is a TTL candidate, else None."""
+    if _is_expired(meta, today):
+        return f"expired {meta['expires']}"
+    if _is_stale_perishable(path, meta, mtime, now, stale_days):
+        age_days = int((now - mtime) / 86400)
+        return f"stale perishable (type=project, {age_days}d untouched)"
+    return None
+
+
+def _deindex(index_path: Path, filename: str) -> None:
+    """Drop any MEMORY.md index line linking to `filename` (avoids a dead pointer)."""
+    if not index_path.is_file():
+        return
+    try:
+        lines = index_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    except OSError:
+        return
+    needle = f"]({filename})"
+    kept = [ln for ln in lines if needle not in ln]
+    if len(kept) != len(lines):
+        index_path.write_text("".join(kept), encoding="utf-8")
 
 
 # ---------------------------------------------------------------- recall
@@ -85,6 +153,7 @@ def cmd_recall(args) -> int:
         print("recall: empty query", file=sys.stderr)
         return 2
 
+    today = datetime.date.today()
     hits = []
     for mem in _memory_dirs():
         label = _project_label(mem)
@@ -96,6 +165,10 @@ def cmd_recall(args) -> int:
             except OSError:
                 continue
             meta, body = _split_frontmatter(text)
+            # Hide explicitly-expired facts unless --all. (Heuristic-stale facts
+            # still show until archived — the heuristic is a guess, not a hide.)
+            if not args.all and _is_expired(meta, today):
+                continue
             hay_body = body.lower()
             hay_title = (meta["name"] + " " + meta["description"]).lower()
             # title matches weighted higher than body matches
@@ -148,8 +221,25 @@ def cmd_recall(args) -> int:
 
 # ---------------------------------------------------------------- doctor
 
+def _ttl_candidates(mem: Path, today: datetime.date, now: float, stale_days: int):
+    """List (filename, reason) for expired / stale-perishable facts in a store."""
+    out = []
+    for path in _fact_files(mem):
+        try:
+            meta, _ = _split_frontmatter(path.read_text(encoding="utf-8"))
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        reason = _ttl_reason(path, meta, mtime, today, now, stale_days)
+        if reason:
+            out.append((path.name, reason))
+    return sorted(out)
+
+
 def cmd_doctor(args) -> int:
-    total_dead = total_unindexed = total_projects = 0
+    total_dead = total_unindexed = total_ttl = total_projects = 0
+    today = datetime.date.today()
+    now = time.time()
     for mem in _memory_dirs():
         label = _project_label(mem)
         if args.project and args.project.lower() not in label.lower():
@@ -166,8 +256,9 @@ def cmd_doctor(args) -> int:
         targets.discard(INDEX_NAME)
         dead = sorted(t for t in targets if t not in files)
         unindexed = sorted(f for f in files if f not in targets)
+        ttl = _ttl_candidates(mem, today, now, args.stale_days)
 
-        if dead or unindexed or not index.is_file():
+        if dead or unindexed or ttl or not index.is_file():
             print(f"## {label}  ({len(files)} fact file(s), {len(targets)} index entr(ies))")
             if not index.is_file():
                 print("  ! no MEMORY.md index")
@@ -175,16 +266,55 @@ def cmd_doctor(args) -> int:
                 print(f"  ✗ dead pointer: index → {d} (no such file)")
             for u in unindexed:
                 print(f"  ⚠ unindexed:   {u} (file not in MEMORY.md)")
+            for name, reason in ttl:
+                print(f"  ⏳ ttl:        {name}  ({reason}) → `memory archive`")
             print()
         total_dead += len(dead)
         total_unindexed += len(unindexed)
+        total_ttl += len(ttl)
 
     print(
-        f"checked {total_projects} project(s): "
-        f"{total_dead} dead pointer(s), {total_unindexed} unindexed file(s)"
+        f"checked {total_projects} project(s): {total_dead} dead pointer(s), "
+        f"{total_unindexed} unindexed file(s), {total_ttl} TTL candidate(s)"
     )
-    if args.strict and (total_dead or total_unindexed):
+    if args.strict and (total_dead or total_unindexed or total_ttl):
         return 1
+    return 0
+
+
+# ---------------------------------------------------------------- archive
+
+def cmd_archive(args) -> int:
+    today = datetime.date.today()
+    now = time.time()
+    total = moved = 0
+    for mem in _memory_dirs():
+        label = _project_label(mem)
+        if args.project and args.project.lower() not in label.lower():
+            continue
+        cands = _ttl_candidates(mem, today, now, args.stale_days)
+        if not cands:
+            continue
+        total += len(cands)
+        print(f"## {label}")
+        archdir = mem / ARCHIVE_DIR
+        for name, reason in cands:
+            verb = "archived" if args.apply else "would archive"
+            print(f"  {verb}: {name}  ({reason})")
+            if args.apply:
+                try:
+                    archdir.mkdir(exist_ok=True)
+                    _deindex(mem / INDEX_NAME, name)
+                    (mem / name).rename(archdir / name)
+                    moved += 1
+                except OSError as e:
+                    print(f"    ! failed: {e}", file=sys.stderr)
+        print()
+
+    if args.apply:
+        print(f"archived {moved} fact(s) → <project>/memory/{ARCHIVE_DIR}/ (recall skips them)")
+    else:
+        print(f"{total} TTL candidate(s) across the store — re-run with --apply to archive")
     return 0
 
 
@@ -199,12 +329,20 @@ def main(argv=None) -> int:
     p_recall.add_argument("--project", help="limit to projects whose label contains this substring")
     p_recall.add_argument("--limit", type=int, default=5, help="max facts to print (default 5)")
     p_recall.add_argument("--compact", action="store_true", help="one-line index per hit (path + name + description), no bodies")
+    p_recall.add_argument("--all", action="store_true", help="include explicitly-expired facts (hidden by default)")
     p_recall.set_defaults(func=cmd_recall)
 
-    p_doctor = sub.add_parser("doctor", help="reconcile MEMORY.md indexes against fact files")
+    p_doctor = sub.add_parser("doctor", help="reconcile indexes + report TTL candidates")
     p_doctor.add_argument("--project", help="limit to projects whose label contains this substring")
-    p_doctor.add_argument("--strict", action="store_true", help="exit 1 if any drift is found")
+    p_doctor.add_argument("--strict", action="store_true", help="exit 1 if any drift or TTL candidate is found")
+    p_doctor.add_argument("--stale-days", type=int, default=STALE_DAYS, help=f"perishable-staleness threshold in days (default {STALE_DAYS})")
     p_doctor.set_defaults(func=cmd_doctor)
+
+    p_archive = sub.add_parser("archive", help="move expired/stale-perishable facts to memory/archive/")
+    p_archive.add_argument("--project", help="limit to projects whose label contains this substring")
+    p_archive.add_argument("--apply", action="store_true", help="perform the moves (default: dry-run)")
+    p_archive.add_argument("--stale-days", type=int, default=STALE_DAYS, help=f"perishable-staleness threshold in days (default {STALE_DAYS})")
+    p_archive.set_defaults(func=cmd_archive)
 
     args = parser.parse_args(argv)
     return args.func(args)
