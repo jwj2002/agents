@@ -61,24 +61,40 @@ def _resolve_settings_path() -> Path:
 
 
 def _resolve_to_repo_source(script: str, settings_path: Path) -> Path | None:
-    """Map a deployed-symlink path to the source-of-truth file in the repo.
+    """Map a deployed or machine-specific path to the repo source-of-truth file.
 
-    install.sh symlinks claude-config/<dir>/<file> into ~/.claude/<dir>/<file>.
-    When install.sh hasn't run (e.g. CI), the deployed path doesn't resolve
-    but the source path under claude-config/ does. This lets the validator
-    pass in both pre- and post-install environments.
+    Two shapes resolve to the same source under claude-config/, so the
+    validator passes in both pre- and post-install environments (incl. CI):
 
-    Returns None if the script doesn't look like a deployed claude-config
-    path (in which case only the deployed-path check applies).
+      1. Deployed-symlink path — install.sh symlinks claude-config/<dir>/<file>
+         into ~/.claude/<dir>/<file>. When install.sh hasn't run, the deployed
+         path doesn't exist but the repo source does.
+      2. Absolute in-repo path — a hardcoded /Users/<me>/agents/claude-config/…
+         path (used for scripts that install.sh does NOT symlink). The leading
+         dirs are machine-specific, so remap onto this checkout's claude-config.
+
+    Returns None if the script matches neither shape (only the literal-path
+    check then applies).
     """
-    home_prefix = "~/.claude/"
-    if not script.startswith(home_prefix):
-        return None
-    rel = script[len(home_prefix):]
     # settings.json lives at <repo>/claude-config/settings.json
     repo_claude_config = settings_path.parent
-    candidate = repo_claude_config / rel
-    return candidate
+
+    # Case 1: deployed-symlink path (~/.claude/<dir>/<file>) → repo source.
+    home_prefix = "~/.claude/"
+    if script.startswith(home_prefix):
+        return repo_claude_config / script[len(home_prefix):]
+
+    # Case 2: an absolute, machine-specific path that points into the repo's
+    # claude-config/ tree — e.g. a hook authored with a hardcoded
+    # /Users/<me>/agents/claude-config/scripts/foo.py path (the convention for
+    # scripts that install.sh does NOT symlink into ~/.claude/). Remap the part
+    # after the last "/claude-config/" segment onto this checkout's
+    # claude-config root so it resolves on any machine / in CI.
+    marker = "/claude-config/"
+    if marker in script:
+        return repo_claude_config / script.rsplit(marker, 1)[1]
+
+    return None
 
 
 def _extract_script(cmd: str) -> str | None:
