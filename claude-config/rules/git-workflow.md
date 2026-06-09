@@ -192,5 +192,9 @@ found and cleaned up 2026-06-02 because unattended runs stashed to get a clean
 `pull --ff-only` and never restored. A named branch keeps every change recoverable.
 
 > Note: the perpetually-dirty-tree problem caused by telemetry shards
-> (`telemetry/<host>/*.jsonl`) is tracked as Win C under issue #220 and will be
-> resolved in lockstep with REC 0.1. Do not stash or commit shards unilaterally.
+> (`telemetry/<host>/*.jsonl`) is **resolved** (#220 Win C): all shards are now
+> gitignored and local-only. REC 0.1's OTEL hub — the intended cross-machine
+> transport — is deferred indefinitely, so telemetry stays off the code repo
+> (per the REC 0.1 principle) and the tree stays clean. The aggregate hook still
+> writes shards locally; `/learn` + `telemetry_gate` still read them locally.
+> There is no longer anything to stash or commit — shards never enter git.

@@ -49,6 +49,11 @@ google/*.json
 google/**/*.json
 google/*.bin
 
-# Telemetry capture-hook runtime outputs (#229) — high-frequency, hub-synced not git-tracked
+# Telemetry shards — local-only, never git-tracked (#205/#220 Win C).
+# REC 0.1's OTEL hub (the intended cross-machine transport) is deferred
+# indefinitely, so telemetry stays off the code repo per the REC 0.1 principle
+# and the working tree stays clean. The aggregate hook still writes these
+# locally; /learn + telemetry_gate still read them locally.
 telemetry/*/sessions.jsonl
 telemetry/*/capture_heartbeat.json
+telemetry/*/failures.jsonl
