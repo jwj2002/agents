@@ -125,6 +125,10 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/context_monitor.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/edit_quality_feedback.py"
           }
         ]
       }
