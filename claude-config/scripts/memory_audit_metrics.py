@@ -138,6 +138,28 @@ def store_stats():
     return total, cold
 
 
+def autoinject_stats(cutoff: float) -> tuple[int, int]:
+    """(sessions auto-injected, facts injected) within the window, from the
+    SessionStart hook's sidecar log (#365). Auto-recall is counted separately
+    from manual recall so the trend can tell push from pull."""
+    log = Path.home() / ".claude" / "memory-autoinject.jsonl"
+    injections = facts = 0
+    try:
+        with log.open(encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                    ts = datetime.fromisoformat(rec["ts"]).timestamp()
+                except (ValueError, KeyError, TypeError):
+                    continue
+                if ts >= cutoff:
+                    injections += 1
+                    facts += int(rec.get("facts_injected", 0))
+    except OSError:
+        pass
+    return injections, facts
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="memory_audit_metrics")
     ap.add_argument("--days", type=int, default=7, help="rolling window in days (default 7)")
@@ -165,6 +187,9 @@ def main(argv=None) -> int:
         "sessions_with_recall": sessions_with_recall,
         "active_recall_pct": round(100 * sessions_with_recall / sessions, 1) if sessions else 0.0,
     }
+    auto_sessions, auto_facts = autoinject_stats(cutoff)
+    row["auto_inject_sessions"] = auto_sessions
+    row["auto_inject_facts"] = auto_facts
 
     print(json.dumps(row))
     if not args.print_only:
