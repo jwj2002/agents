@@ -296,6 +296,27 @@ the in-flight task documents where the run halted.
 Skip this step entirely on `--resume` runs unless the resumed phase has no
 existing task (re-create only the missing tail of the chain).
 
+### Step 2.8: Recall Project Memory (once per workflow)
+
+Project-memory fact *bodies* are not auto-loaded into subagents. Recall the
+relevant ones **once** here and inject them into every phase prompt via the
+`{PROJECT_MEMORY_BLOCK}` variable (see `templates/agent-prompt.md`), so MAP /
+PLAN / PATCH / PROVE all inherit the same curated context without each running
+the CLI:
+
+```bash
+~/agents/bin/memory recall "<issue title + key entities/subsystem terms>" --compact --limit 8
+```
+
+- Use the issue title plus any distinctive nouns (entity, feature, file/module
+  names) as the query.
+- Capture the output verbatim as `{PROJECT_MEMORY_BLOCK}`. If it's empty, set
+  the block to `(no project-memory facts matched this issue)`.
+- The block is a compact index (paths + descriptions), not bodies — agents
+  Read the full body of any fact that bears on their work (honors the
+  Context-Isolation rule in `templates/agent-prompt.md`).
+- On `--resume`, reuse the block if already captured; otherwise re-recall.
+
 ### Step 3: Spawn Agents (Task Tool)
 
 **CRITICAL**: Use the Task tool to spawn each phase agent via **native subagent

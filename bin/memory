@@ -117,6 +117,17 @@ def cmd_recall(args) -> int:
     hits.sort(key=lambda h: (h[0], h[1]), reverse=True)
     shown = hits[: args.limit]
 
+    if args.compact:
+        # One line per hit: path + label/type + name + description. No bodies —
+        # for injecting a bounded index into another prompt (e.g. /orchestrate).
+        # The reader Reads the path for the full body on demand.
+        for score, _mtime, label, path, meta, _body in shown:
+            typ = f" · {meta['type']}" if meta["type"] else ""
+            name = meta["name"] or path.stem
+            desc = (" — " + meta["description"]) if meta["description"] else ""
+            print(f"- {path}  [{label}{typ}] {name}{desc}")
+        return 0
+
     print(f"# {len(hits)} fact(s) match {args.query!r} — showing {len(shown)}\n")
     for score, _mtime, label, path, meta, body in shown:
         title = meta["name"] or path.stem
@@ -187,6 +198,7 @@ def main(argv=None) -> int:
     p_recall.add_argument("query", help="search terms (space-separated)")
     p_recall.add_argument("--project", help="limit to projects whose label contains this substring")
     p_recall.add_argument("--limit", type=int, default=5, help="max facts to print (default 5)")
+    p_recall.add_argument("--compact", action="store_true", help="one-line index per hit (path + name + description), no bodies")
     p_recall.set_defaults(func=cmd_recall)
 
     p_doctor = sub.add_parser("doctor", help="reconcile MEMORY.md indexes against fact files")

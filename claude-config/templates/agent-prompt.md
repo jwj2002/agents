@@ -40,6 +40,7 @@ that as the system prompt. Pass *only* per-invocation context.
 | `{COMPLEXITY}` | Issue complexity | TRIVIAL, SIMPLE, COMPLEX |
 | `{ARTIFACT_NAME}` | Output artifact filename | map-plan-184-032526.md |
 | `{ARTIFACT_LIST}` | Prior artifacts (markdown list of paths only) | - MAP-PLAN: .agents/outputs/... |
+| `{PROJECT_MEMORY_BLOCK}` | Relevant project-memory facts (compact index; built once by the orchestrator — see commands/orchestrate.md Step 2.8) | - /Users/.../memory/feedback_rbac_pattern.md [recall-ops · feedback] RBAC is the standard... |
 | `{PRIOR_FAILURE_BLOCK}` | Failure context or "First attempt" | ## Prior Failure ... |
 | `{AGENT_INSTRUCTIONS}` | Per-invocation extra instructions (1-2 sentences) | Read MAP-PLAN. Generate test matrix. |
 | `{SCOPE}` | Optional scope constraint | BACKEND ONLY, FRONTEND ONLY |
@@ -55,6 +56,9 @@ that as the system prompt. Pass *only* per-invocation context.
 
 ## Prior Artifacts
 {ARTIFACT_LIST}
+
+## Project Memory (relevant facts — Read the body of any that bear on your work)
+{PROJECT_MEMORY_BLOCK}
 
 {PRIOR_FAILURE_BLOCK}
 
