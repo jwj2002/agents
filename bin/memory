@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+"""memory — recall and audit Claude Code project-memory facts.
+
+The memory store is write-heavy / read-light: SessionStart injects only the
+MEMORY.md *index* (titles), and nothing ever reads a fact *body* into context.
+This CLI is the missing read path.
+
+    memory recall <query> [--project SUBSTR] [--limit N]
+        Search fact BODIES across ~/.claude/projects/*/memory/*.md, rank by
+        match count + recency, and print the matching bodies (the "why").
+
+    memory doctor [--project SUBSTR]
+        Reconcile each project's MEMORY.md index against its fact files:
+        dead pointers (index → missing file) and unindexed files.
+
+Read-only. Stdlib only (no PyYAML dependency — runs anywhere python3 does).
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+PROJECTS_ROOT = Path.home() / ".claude" / "projects"
+INDEX_NAME = "MEMORY.md"
+MD_LINK = re.compile(r"\]\(([^)]+\.md)\)")  # markdown link targets ending .md
+BODY_CAP = 50  # max body lines printed per recall hit
+
+
+def _memory_dirs():
+    """Yield every `<project>/memory/` directory under the projects root."""
+    if not PROJECTS_ROOT.is_dir():
+        return
+    for proj in sorted(PROJECTS_ROOT.iterdir()):
+        mem = proj / "memory"
+        if mem.is_dir():
+            yield mem
+
+
+def _project_label(memory_dir: Path) -> str:
+    """Human-ish label from the encoded project dir name."""
+    name = memory_dir.parent.name  # e.g. -Users-jasonjob-projects-scratch
+    prefix = "-Users-jasonjob"
+    if name == prefix:
+        return "(home)"
+    if name.startswith(prefix + "-"):
+        return name[len(prefix) + 1:]
+    return name.lstrip("-")
+
+
+def _split_frontmatter(text: str):
+    """Return (meta_dict, body). Minimal parser — no YAML dependency.
+
+    Captures name/description/type; `type` may be top-level or nested under a
+    `metadata:` block (both shapes exist in the store).
+    """
+    meta = {"name": "", "description": "", "type": ""}
+    if not text.startswith("---"):
+        return meta, text
+    end = text.find("\n---", 3)
+    if end == -1:
+        return meta, text
+    fm = text[3:end]
+    body = text[end + 4:].lstrip("\n")
+    for line in fm.splitlines():
+        s = line.strip()
+        for key in ("name", "description", "type"):
+            # match `key:` whether top-level or indented (metadata.type)
+            if s.startswith(key + ":") and not meta[key]:
+                meta[key] = s[len(key) + 1:].strip()
+    return meta, body
+
+
+def _fact_files(memory_dir: Path):
+    return [p for p in sorted(memory_dir.glob("*.md")) if p.name != INDEX_NAME]
+
+
+# ---------------------------------------------------------------- recall
+
+def cmd_recall(args) -> int:
+    terms = [t.lower() for t in args.query.split() if t.strip()]
+    if not terms:
+        print("recall: empty query", file=sys.stderr)
+        return 2
+
+    hits = []
+    for mem in _memory_dirs():
+        label = _project_label(mem)
+        if args.project and args.project.lower() not in label.lower():
+            continue
+        for path in _fact_files(mem):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            meta, body = _split_frontmatter(text)
+            hay_body = body.lower()
+            hay_title = (meta["name"] + " " + meta["description"]).lower()
+            # title matches weighted higher than body matches
+            score = sum(hay_body.count(t) for t in terms)
+            score += 3 * sum(hay_title.count(t) for t in terms)
+            if score == 0:
+                continue
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                mtime = 0.0
+            hits.append((score, mtime, label, path, meta, body))
+
+    if not hits:
+        print(f"No facts match: {args.query!r}")
+        return 0
+
+    # rank: score desc, then recency desc
+    hits.sort(key=lambda h: (h[0], h[1]), reverse=True)
+    shown = hits[: args.limit]
+
+    print(f"# {len(hits)} fact(s) match {args.query!r} — showing {len(shown)}\n")
+    for score, _mtime, label, path, meta, body in shown:
+        title = meta["name"] or path.stem
+        typ = f" · {meta['type']}" if meta["type"] else ""
+        print(f"## [{label}{typ}] {title}")
+        print(f"<{path}>  (score {score})")
+        if meta["description"]:
+            print(f"_{meta['description']}_")
+        print()
+        lines = body.splitlines()
+        for ln in lines[:BODY_CAP]:
+            print(ln)
+        if len(lines) > BODY_CAP:
+            print(f"… [{len(lines) - BODY_CAP} more lines — open the file]")
+        print("\n---\n")
+    return 0
+
+
+# ---------------------------------------------------------------- doctor
+
+def cmd_doctor(args) -> int:
+    total_dead = total_unindexed = total_projects = 0
+    for mem in _memory_dirs():
+        label = _project_label(mem)
+        if args.project and args.project.lower() not in label.lower():
+            continue
+        total_projects += 1
+        files = {p.name for p in _fact_files(mem)}
+        index = mem / INDEX_NAME
+        targets = set()
+        if index.is_file():
+            try:
+                targets = set(MD_LINK.findall(index.read_text(encoding="utf-8")))
+            except OSError:
+                targets = set()
+        targets.discard(INDEX_NAME)
+        dead = sorted(t for t in targets if t not in files)
+        unindexed = sorted(f for f in files if f not in targets)
+
+        if dead or unindexed or not index.is_file():
+            print(f"## {label}  ({len(files)} fact file(s), {len(targets)} index entr(ies))")
+            if not index.is_file():
+                print("  ! no MEMORY.md index")
+            for d in dead:
+                print(f"  ✗ dead pointer: index → {d} (no such file)")
+            for u in unindexed:
+                print(f"  ⚠ unindexed:   {u} (file not in MEMORY.md)")
+            print()
+        total_dead += len(dead)
+        total_unindexed += len(unindexed)
+
+    print(
+        f"checked {total_projects} project(s): "
+        f"{total_dead} dead pointer(s), {total_unindexed} unindexed file(s)"
+    )
+    if args.strict and (total_dead or total_unindexed):
+        return 1
+    return 0
+
+
+# ---------------------------------------------------------------- cli
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="memory", description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_recall = sub.add_parser("recall", help="search fact bodies and print matches")
+    p_recall.add_argument("query", help="search terms (space-separated)")
+    p_recall.add_argument("--project", help="limit to projects whose label contains this substring")
+    p_recall.add_argument("--limit", type=int, default=5, help="max facts to print (default 5)")
+    p_recall.set_defaults(func=cmd_recall)
+
+    p_doctor = sub.add_parser("doctor", help="reconcile MEMORY.md indexes against fact files")
+    p_doctor.add_argument("--project", help="limit to projects whose label contains this substring")
+    p_doctor.add_argument("--strict", action="store_true", help="exit 1 if any drift is found")
+    p_doctor.set_defaults(func=cmd_doctor)
+
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
