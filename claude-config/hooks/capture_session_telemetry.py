@@ -17,8 +17,14 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
+
+from hook_common import (  # shared (#369)
+    append_jsonl_fsync as _append_jsonl_fsync,
+    get_host_name as _get_host_name,
+    utc_now_iso as _utc_now_iso,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -38,39 +44,6 @@ def log(msg: str) -> None:
         pass
 
 
-def _utc_now_iso() -> str:
-    """ISO-8601 UTC timestamp with microsecond precision (mirrors state_manager)."""
-    return (
-        datetime.now(timezone.utc)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
-
-
-def _get_host_name() -> str:
-    """Read canonical host name (mirrors aggregate_metrics_to_global.py)."""
-    host_name_path = Path.home() / ".claude" / "host-name"
-    try:
-        text = host_name_path.read_text(encoding="utf-8").strip()
-        if text:
-            return text
-    except FileNotFoundError:
-        pass
-    import socket
-    return (socket.gethostname() or "unknown").split(".")[0].lower()
-
-
-def _append_jsonl_fsync(target: Path, record: dict) -> None:
-    """Append one JSON line to target; fsync for durability (mirrors state_manager)."""
-    target.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(record, separators=(",", ":")) + "\n"
-    with open(target, "a", encoding="utf-8") as fh:
-        fh.write(line)
-        fh.flush()
-        try:
-            os.fsync(fh.fileno())
-        except OSError:
-            pass
 
 
 # ---------------------------------------------------------------------------

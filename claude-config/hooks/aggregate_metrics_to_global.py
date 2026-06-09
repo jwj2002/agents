@@ -31,6 +31,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from hook_common import get_host_name as _get_host_name  # shared (#369)
+
 
 def log(msg: str) -> None:
     """Append a timestamped line to ~/.claude/hooks.log."""
@@ -317,21 +319,6 @@ def aggregate(kind: str, source_dirs: list, global_dir: Path) -> int:
     return len(records)
 
 
-def _get_host_name() -> str:
-    """Read the canonical host name for this machine.
-
-    Mirrors lib/project_resolver.get_host_name() — duplicated here to keep
-    this hook stdlib-only (no sys.path manipulation required).
-    """
-    host_name_path = Path.home() / ".claude" / "host-name"
-    try:
-        text = host_name_path.read_text().strip()
-        if text:
-            return text
-    except FileNotFoundError:
-        pass
-    import socket
-    return (socket.gethostname() or "unknown").split(".")[0].lower()
 
 
 def write_host_shard(failures: list, agents_root: Path) -> int:
