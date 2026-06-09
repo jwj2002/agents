@@ -76,7 +76,10 @@ backup_item() {
 
 link_item() {
     # link_item <source> <target> <label>
-    # Backs up existing non-symlink targets, then creates symlink.
+    # Backs up existing non-symlink targets, then creates or replaces symlink.
+    # Uses -n (no-dereference) so a wrong-target directory symlink is replaced,
+    # not followed. Without -n, BSD ln -sf dereferences a dir symlink and
+    # creates a nested link inside the old target instead of replacing DEST.
     local source="$1"
     local target="$2"
     local label="$3"
@@ -92,7 +95,7 @@ link_item() {
     if [ -L "$target" ] && [ "$(readlink "$target")" = "$source" ]; then
         echo "  ✓ $label (already linked)"
     else
-        ln -sf "$source" "$target"
+        ln -sfn "$source" "$target"
         echo "  ✓ $label → linked"
         LINKS_CREATED=$((LINKS_CREATED + 1))
     fi
