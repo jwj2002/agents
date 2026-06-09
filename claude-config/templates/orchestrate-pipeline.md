@@ -43,6 +43,9 @@ tables below specify just the variables that change.
 ## Prior Artifacts
 {ARTIFACT_LIST}
 
+## Project Memory (relevant facts — Read the body of any that bear on your work)
+{PROJECT_MEMORY_BLOCK}
+
 {PRIOR_FAILURE_BLOCK}
 
 ## Per-Run Instructions
@@ -55,6 +58,12 @@ End your response with `AGENT_RETURN: {ARTIFACT_NAME}`.
 > **Fresh Context Rule**: Each agent gets a clean context window. Pass file
 > PATHS in the artifact list, not file CONTENTS. Let agents use the Read tool
 > to load what they need.
+>
+> `{PROJECT_MEMORY_BLOCK}` is built **once** per workflow at `commands/orchestrate.md`
+> Step 2.8 (`memory recall … --compact`) and reused for every phase — a compact
+> index of paths + descriptions, so it honors the Fresh Context Rule (agents
+> Read the bodies on demand). New phase agents inherit it automatically; no
+> per-agent edit needed.
 
 ---
 
