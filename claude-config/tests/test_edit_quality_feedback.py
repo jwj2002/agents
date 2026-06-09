@@ -55,7 +55,7 @@ def test_non_py_file_skipped(monkeypatch, capsys):
     """Write to a non-.py file produces no output."""
     # Mock ruff to ensure it is never called
     monkeypatch.setattr(EQF, "_ruff_check", lambda fp: (_ for _ in ()).throw(AssertionError("ruff called")))
-    out = _run_main(_write_payload("file.js", "api_key = 'sk-abc123longvalue'"), monkeypatch, capsys)
+    out = _run_main(_write_payload("file.js", "api_key = 'sk-abc123longvalue'"), monkeypatch, capsys)  # eval-ok: E15 test fixture
     assert out == ""
 
 
@@ -118,7 +118,7 @@ def test_e15_secret_found(monkeypatch, capsys):
     # Silence ruff so only E15 fires
     monkeypatch.setattr(EQF, "_ruff_check", lambda fp: [])
 
-    secret_content = 'api_key = "sk-abc123xyz789longvalue"'
+    secret_content = 'api_key = "sk-abc123xyz789longvalue"'  # eval-ok: E15 test fixture
     out = _run_main(_edit_payload("script.py", secret_content), monkeypatch, capsys)
     assert "[E15]" in out
     assert "[edit_quality_feedback]" in out
@@ -144,7 +144,7 @@ def test_multiedit_joins_new_strings(monkeypatch, capsys):
 
     edits = [
         {"old_string": "foo", "new_string": "bar"},
-        {"old_string": "baz", "new_string": 'api_key = "sk-secretlong99value"'},
+        {"old_string": "baz", "new_string": 'api_key = "sk-secretlong99value"'},  # eval-ok: E15 test fixture
     ]
     payload = _multiedit_payload("script.py", edits)
     out = _run_main(payload, monkeypatch, capsys)
