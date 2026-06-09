@@ -34,21 +34,25 @@ def main():
     cwd_display = "~" + cwd_raw[len(home) :] if cwd_raw.startswith(home) else cwd_raw
     cwd = f"{CYAN}{cwd_display}{RESET}"
 
-    # Agent name (orange) — from .mcp.json in cwd, agent config, or env
+    # Agent name (orange) — from .mcp.json in cwd, agent config, or env. While
+    # parsing .mcp.json, also note the channel server's CHANNEL_ENV_FILE (an
+    # ai-channels profile) so the connected channel can be shown below.
     agent_name = (
         input_data.get("agent", {}).get("name") or os.environ.get("AGENT_NAME") or ""
     )
-    if not agent_name:
-        try:
-            mcp_path = os.path.join(os.getcwd(), ".mcp.json")
-            with open(mcp_path) as f:
-                mcp = json.load(f)
-            for srv in mcp.get("mcpServers", {}).values():
-                agent_name = srv.get("env", {}).get("AGENT_NAME", "")
-                if agent_name:
-                    break
-        except Exception:
-            pass
+    channel_env_file = os.environ.get("CHANNEL_ENV_FILE", "")
+    try:
+        mcp_path = os.path.join(os.getcwd(), ".mcp.json")
+        with open(mcp_path) as f:
+            mcp = json.load(f)
+        for srv in mcp.get("mcpServers", {}).values():
+            env = srv.get("env", {})
+            if not agent_name:
+                agent_name = env.get("AGENT_NAME", "")
+            if not channel_env_file:
+                channel_env_file = env.get("CHANNEL_ENV_FILE", "")
+    except Exception:
+        pass
     agent_display = f" | {ORANGE}{agent_name}{RESET}" if agent_name else ""
 
     # Get current date in MM/DD format (orange)
@@ -103,8 +107,23 @@ def main():
 
     rate_display = (" | " + " ".join(rate_segments)) if rate_segments else ""
 
+    # ai-channels: show the connected channel (📡). Prefer an explicit
+    # AI_CHANNELS_CHANNEL env var; otherwise read CHANNEL= from the profile the
+    # session's channel MCP server points at (CHANNEL_ENV_FILE, captured above).
+    channel = os.environ.get("AI_CHANNELS_CHANNEL", "")
+    if not channel and channel_env_file:
+        try:
+            with open(os.path.expanduser(channel_env_file)) as f:
+                for line in f:
+                    if line.startswith("CHANNEL="):
+                        channel = line.split("=", 1)[1].strip().strip("\"'")
+                        break
+        except Exception:
+            pass
+    channel_display = f" | {GREEN}📡 {channel}{RESET}" if channel else ""
+
     # Build status line
-    status_line = f"{server} | {username} | {cwd} | {current_date} | {context_display} ctx{rate_display}{agent_display}"
+    status_line = f"{server} | {username} | {cwd} | {current_date} | {context_display} ctx{rate_display}{agent_display}{channel_display}"
 
     print(status_line)
 
