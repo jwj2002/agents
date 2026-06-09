@@ -15,6 +15,7 @@ guards that prevent dropped commits, red CI, and broken main.
 ```bash
 /ship           # Full sequence; pauses before merge for confirmation (kill switch)
 /ship --auto    # Same guards; skips confirmation prompt at step 7 (merge tail runs unattended)
+/ship --override-prove "<reason>"   # Bypass a blocking PROVE verdict (recorded, never silent)
 ```
 
 `--auto` is safe only because every prior guard must already have passed. The
@@ -153,6 +154,36 @@ Proceed with squash-merge? [y/N]
 Only continue on explicit `y`. Any other input aborts. With `--auto`, skip
 this prompt — the guards above are the contract that makes auto safe.
 
+### Step 7.5 — PROVE Gate (#360)
+
+A PROVE verdict is enforced, not advisory. Derive the issue number from the
+branch name (`issue-{N}` pattern) and run the mechanical gate:
+
+```bash
+ISSUE=$(git branch --show-current | grep -oE 'issue-[0-9]+' | grep -oE '[0-9]+')
+if [ -n "$ISSUE" ]; then
+  python3 ~/agents/claude-config/scripts/prove_gate.py --issue "$ISSUE"   # exit 0 = proceed
+fi
+```
+
+Exit-code contract (from `prove_gate.py`):
+
+| Exit | Meaning | Action |
+|------|---------|--------|
+| 0 | PASS + clean ac_audit, or issue never orchestrate-tracked | Proceed |
+| 2 | PROVE says FAIL/BLOCKED | **STOP** — fix and re-run PROVE |
+| 3 | PASS but ac_audit has missing/partial (AC-FORBIDS-APPROVE) | **STOP** |
+| 4 | Orchestrate-tracked but PROVE never ran | **STOP** — run PROVE first |
+| 5 | Verdict unreadable (fail-closed) | **STOP** — fix the artifact |
+
+On any non-zero exit: STOP, print the gate's reason line, do NOT merge.
+The only bypass is explicit: `--override-prove "<reason>"` reruns the gate
+with `--override "<reason>"`, which records the bypass to
+`.agents/outputs/prove-overrides.jsonl` and then allows the merge. Never
+bypass silently; never bypass without a reason the user gave.
+
+No issue number in the branch name → the gate is skipped (nothing to gate).
+
 ### Step 8 — Merge
 
 ```bash
@@ -250,6 +281,7 @@ Shipped  PR #N  {pr_url}
 | Red CI | Step 6 | Always |
 | HEAD parity | Step 7 | Always |
 | Kill switch (`y/N`) | Step 7 | Plain `/ship` only |
+| PROVE gate | Step 7.5 | Always (override only via `--override-prove`, recorded) |
 | Post-merge test failure | Step 9 | Always (blocks prune) |
 
 `--auto` bypasses only the kill switch (the `y/N` prompt). All other guards
