@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cost-telemetry-report-weekly</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-lc</string>
+        <string>
+          LOG="$HOME/Library/Logs/claude-learn/cost-report.log"
+          mkdir -p "$(dirname "$LOG")"
+          echo "[$(date -Iseconds)] weekly cost report" &gt;&gt;"$LOG"
+          PY="$HOME/agents/.venv/bin/python"; [ -x "$PY" ] || PY=python3
+          cd "$HOME/agents" \
+          &amp;&amp; git pull --ff-only --quiet 2&gt;&gt;"$LOG" ;
+          "$PY" claude-config/scripts/cost_report_weekly.py &gt;&gt;"$LOG" 2&gt;&amp;1
+        </string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/jasonjob/agents</string>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>1</integer>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>5</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/jasonjob/Library/Logs/claude-learn/cost-report.out</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jasonjob/Library/Logs/claude-learn/cost-report.err</string>
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

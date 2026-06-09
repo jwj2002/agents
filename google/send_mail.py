@@ -26,11 +26,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from auth import load_credentials  # noqa: E402
 
 
-def send_mail(to, subject, body, attach=None, cc=None, bcc=None):
-    """Send one email; returns (sender_address, message_id)."""
+def send_mail(to, subject, body, attach=None, cc=None, bcc=None, token_path=None):
+    """Send one email; returns (sender_address, message_id).
+
+    token_path selects which Google account to send as (default: the shared
+    google/token.json). Lets callers pick a specific account per machine.
+    """
     from googleapiclient.discovery import build
 
-    creds = load_credentials()
+    creds = load_credentials(token_path) if token_path else load_credentials()
     svc = build("gmail", "v1", credentials=creds)
 
     msg = EmailMessage()
@@ -74,10 +78,14 @@ def main() -> None:
     ap.add_argument(
         "--attach", action="append", default=[], help="file path (repeatable)"
     )
+    ap.add_argument(
+        "--token",
+        help="path to a Google token.json (default: shared google/token.json) — selects the send account",
+    )
     a = ap.parse_args()
 
     body = sys.stdin.read() if a.body == "-" else a.body
-    sender, mid = send_mail(a.to, a.subject, body, a.attach, a.cc, a.bcc)
+    sender, mid = send_mail(a.to, a.subject, body, a.attach, a.cc, a.bcc, token_path=a.token)
     print(f"SENT from {sender} -> {', '.join(a.to)} (id {mid})")
 
 
