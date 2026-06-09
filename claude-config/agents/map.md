@@ -2,7 +2,7 @@
 name: orchestrate-map
 description: Read-only investigator for COMPLEX orchestrate workflow phase 1. Maps current code state before planning. Use only when dispatched by /orchestrate; do not auto-invoke.
 tools: Read, Grep, Glob, Bash, Write
-model: haiku
+model: sonnet
 agent: "MAP"
 version: 1.2
 phase: 1

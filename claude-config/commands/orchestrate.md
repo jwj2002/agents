@@ -142,13 +142,20 @@ If seeds match, report before proceeding. If no `.planning/seeds/`, skip silentl
 
 ### Step 1: Classify Complexity
 
-| Level | Criteria | Workflow |
-|-------|----------|----------|
-| SIMPLE | 1-3 files | MAP-PLAN |
-| COMPLEX | Endpoints, migrations | MAP + PLAN |
+Four tiers (#387). Estimate the file count from the issue body + a quick grep;
+when two tiers both fit, the RISK signals (migrations, endpoints, fullstack,
+cross-cutting) win over the file count.
 
-TRIVIAL work (typo, single-config-line fix, obvious one-file change) is **not**
-handled by `/orchestrate` — see the routing gate below.
+| Tier | Criteria | Pipeline | Notes |
+|------|----------|----------|-------|
+| TRIVIAL | Typo, single-config-line, obvious one-file fix | — | Rejected below → `/quick` |
+| SIMPLE | 1–3 files, one subsystem, clear behavior | MAP-PLAN | Default cheap path |
+| MODERATE | 4–5 files, single subsystem, clear pattern | MAP-PLAN | Same pipeline as SIMPLE, but Codex review per Step 1.1 and record `complexity: MODERATE` |
+| COMPLEX | 6+ files, OR any migration / new-changed endpoint / cross-cutting refactor / FULLSTACK | MAP → PLAN → PLAN-CHECK | Strong-model overrides at dispatch (Step 3) |
+
+**Canonical complexity enum for telemetry**: `TRIVIAL | SIMPLE | MODERATE |
+COMPLEX` — never `MEDIUM`, never `SUCCESS` for status (it's `PASS`). The
+telemetry already contains drifted labels from older runs; do not add more.
 
 Report:
 
@@ -329,13 +336,47 @@ Task(
     description='<phase> for issue <N>',
     subagent_type='orchestrate-<phase>',  # registered name
     prompt=AGENT_PROMPT,                   # context only — no instructions
+    # model=...  ← ONLY per the routing table below; omit otherwise
 )
 ```
 
 Claude Code auto-loads the agent body, applies the agent's `tools:` restriction,
-and uses the agent's `model:` (Haiku for read-only phases, Sonnet otherwise).
+and uses the agent's `model:` frontmatter unless the dispatch overrides it.
 Do NOT include "read your instructions from agents/X.md" in the prompt — the
 agent body is loaded automatically.
+
+#### Model Routing (#387) — right model for the right step
+
+Frontmatter defaults serve SIMPLE/MODERATE (65%+ of runs — the cheap path).
+On COMPLEX and FULLSTACK, override at dispatch: plan errors cascade into
+PATCH+PROVE recycles (the most expensive place to be wrong), implementation
+correctness is the historical failure bottleneck, and verification rigor
+must scale with blast radius (50/50 COMPLEX PASS with 3 lifetime PROVE
+blocks is a leniency smell, not a quality proof).
+
+| Phase | SIMPLE / MODERATE | COMPLEX / FULLSTACK |
+|-------|-------------------|---------------------|
+| MAP-PLAN | sonnet (frontmatter) | — |
+| MAP | — | sonnet (frontmatter) |
+| PLAN | — | **`model="opus"`** at dispatch |
+| PLAN-CHECK | haiku (frontmatter) | haiku (frontmatter) |
+| CONTRACT | sonnet (frontmatter) | **`model="opus"`** when FULLSTACK |
+| TEST-PLANNER | sonnet (frontmatter) | sonnet (frontmatter) |
+| PATCH | sonnet (frontmatter) | **`model="opus"`** at dispatch |
+| PROVE | sonnet (frontmatter) | **`model="opus"`** at dispatch |
+| DISCUSS | sonnet (frontmatter) | sonnet (frontmatter) |
+
+- "opus" means the strongest model tier available to the session — if the
+  main loop is running a stronger model (e.g. Fable), pass that instead
+  (`model="fable"`); never dispatch a COMPLEX PLAN/PATCH/PROVE on a model
+  weaker than sonnet.
+- Do NOT override upward on SIMPLE/MODERATE "just to be safe" — the tiering
+  IS the safety design; upgrading everything reintroduces the cost of having
+  no tiers.
+- PRIOR-FAIL retries (same issue, second attempt after a PROVE FAIL):
+  upgrade PATCH one tier (sonnet → opus-class) regardless of complexity —
+  failed work gets a different (stronger) model, per
+  `implementation-routing.md`.
 
 For per-agent dispatch tables, validation gates, and failure-context injection,
 **read `templates/orchestrate-pipeline.md`**.
