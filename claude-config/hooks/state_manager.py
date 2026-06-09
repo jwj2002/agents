@@ -18,8 +18,10 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
+
+from hook_common import utc_now_iso as _utc_now_iso  # shared (#369)
 
 _log_file = Path.home() / ".claude" / "hooks.log"
 logging.basicConfig(
@@ -36,29 +38,6 @@ except ImportError:
     HAS_YAML = False
 
 
-def _utc_now_iso() -> str:
-    """ISO-8601 UTC timestamp with **microsecond** precision.
-
-    Returns strings like ``"2026-05-29T14:23:45.123456Z"``.  Used as
-    ``recorded_at`` on every new metrics/failure record so the telemetry
-    gate can compare records across machines using a sortable timestamp.
-
-    Watermark invariant (strict ``>``)
-    ----------------------------------
-    The /learn watermark is advanced to the **max consumed ``recorded_at``**
-    in the snapshot — never to wall-clock ``now()``.  After that advance,
-    any record whose ``recorded_at`` equals the watermark was, by definition,
-    already consumed and is correctly excluded by the ``> watermark`` filter.
-    Any record stamped *after* the snapshot (``recorded_at > consumed_max``)
-    is still counted on the next run.  Microsecond precision makes collisions
-    between concurrent records on the same machine extremely unlikely, and the
-    strict ``>`` gate handles any equality case correctly.
-    """
-    return (
-        datetime.now(timezone.utc)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
 
 
 def _event_id(issue: int, date: str, project: str, root_cause: str, details: str) -> str:
