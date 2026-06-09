@@ -1,5 +1,5 @@
 ---
-paths: ".agents/**/*.md"
+paths: ["**/.agents/**/*.md"]
 ---
 
 # Orchestrate Workflow & Agent Efficiency Guidelines

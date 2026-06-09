@@ -54,70 +54,25 @@ Use the Codex plugin commands instead of inventing ad-hoc prompts:
 /codex:rescue               # delegate implementation when Claude is stuck
 ```
 
-### AC-FORBIDS-APPROVE + scope-freeze clauses
+### Per-AC audit + project review gates
 
-When invoking Codex for any **CODE review** (post-PATCH) or **SPEC review** that
-the prompt arguments allow you to extend, **append the per-AC audit + scope-
-freeze clauses** from the buddy-managed prompt fragment:
+Two generic principles apply to every MODERATE+ Codex review (skip both on
+TRIVIAL):
 
-```
-specs/../prompts/codex-review-clauses.md      (buddy repo)
-```
+1. **Per-AC audit**: extend the review prompt so the verdict must include an
+   `ac_audit` array (`implemented|partial|missing|deferred|n/a` per AC) and a
+   scope-freeze escape hatch (`new_concerns` instead of REQUEST_CHANGES
+   drift). A reviewer that can APPROVE on partial AC coverage will — the
+   per-AC shape forbids it.
+2. **Use the repo's review-gate wrapper when it ships one**: if the project
+   has a chokepoint that runs mechanical gates before `codex exec` (and logs
+   bypass telemetry), route the review through it rather than calling
+   `codex exec` directly.
 
-The fragment contains three sections to append to your Codex prompt:
-1. Per-AC audit (`ac_audit` array with `implemented|partial|missing|deferred|n/a` statuses)
-2. Scope-freeze (`new_concerns` escape hatch instead of REQUEST_CHANGES drift)
-3. Output JSON schema additions
-
-**Why:** issue #1609 (Harold-borrowed loop-closer). Without these clauses,
-Codex can return APPROVE on partial AC coverage — the Mavis Surface spec
-review hit this 4 rounds in a row. Companion: PROVE-side enforcement of the
-same `ac_audit` shape lives in issue #1612.
-
-**Mechanics:** for the spec-review workflow's R1-R4 `/tmp/codex-spec-r*.md`
-prompt files, append the three sections at the end before passing to
-`codex review`. For `/codex:review` plugin invocations, include the
-sections as the `[PROMPT]` positional or via stdin where the plugin allows.
-
-**When to skip:** TRIVIAL changes (one-file typo, copy edit) — the per-AC
-overhead isn't worth it. For everything MODERATE+, include the fragment.
-
-### Chokepoint wrapper (buddy#1613)
-
-Buddy ships a Python chokepoint at `scripts/codex_review_gate/main.py` that
-every Codex review for buddy work flows through. It runs configured
-mechanical gates BEFORE invoking `codex exec`; a gate exit code in `2-8`
-synthesizes a `REQUEST_CHANGES` verdict locally without calling Codex.
-Other non-zero exits (or crashes) fail-OPEN so Codex still runs.
-
-```bash
-python3 -m scripts.codex_review_gate.main \
-    --branch-sha $(git rev-parse HEAD) \
-    --plan /tmp/codex-1610-review.md \
-    --verdict-out /tmp/verdict-1610.json \
-    [--gates name="argv ..." ...] \
-    --codex-args -- --skip-git-repo-check --sandbox read-only "$(cat /tmp/codex-1610-review.md)"
-```
-
-The wrapper writes one row per invocation to
-`<store>/codex-gate-log.jsonl` (path resolved with test-isolation
-honoring `BUDDY_CODEX_GATE_LOG_PATH` → `BUDDY_TEST_STORE_DIR` →
-`PYTEST_CURRENT_TEST` → `BUDDY_HOME` → default). Critically: every row
-carries `gatesPassed = passed AND NOT bypassed`. Emergency bypass via
-`BUDDY_CODEX_GATE_ENFORCE=0` is allowed but the resulting verdict
-carries `bypassed=true, gatesPassed=false`. The pre-push hook at
-`buddy/scripts/pre-push` (and equivalent CI check) refuses any branch
-SHA whose latest log row lacks `gatesPassed=true`.
-
-**Why** (#1613 Harold loop-closer 5 of 5): the "305 reviews logged, 0
-gates ran" + "bypassed bypass" classes are unrecoverable without
-structural enforcement. The chokepoint is the structural answer.
-
-**When to skip:** TRIVIAL changes still skip Codex entirely; nothing to
-gate. For COMPLEX+ Codex reviews on buddy, prefer the chokepoint over
-calling `codex exec` directly. For now, `--gates` may be empty — the
-gate scripts are a separate follow-up — but the telemetry + bypass
-plumbing already enforces gatesPassed semantics.
+Project-specific mechanics (prompt fragments, wrapper CLIs, env vars,
+telemetry paths) live in that project's memory, not here — e.g. buddy's
+clauses + `codex_review_gate` chokepoint:
+`~/.claude/projects/-Users-jasonjob-projects-buddy/memory/codex_review_gates_buddy.md`.
 
 ## Step 2: Announce Routing Briefly
 
