@@ -57,3 +57,7 @@ google/*.bin
 telemetry/*/sessions.jsonl
 telemetry/*/capture_heartbeat.json
 telemetry/*/failures.jsonl
+
+# Safety: these local-only files must never appear in the tracked memory dir
+claude-config/memory/failures.jsonl
+claude-config/memory/metrics.jsonl

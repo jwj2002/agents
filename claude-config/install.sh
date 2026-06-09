@@ -102,6 +102,7 @@ link_item() {
 
 echo "Phase 1: Symlinks"
 mkdir -p "$CLAUDE_DIR"
+mkdir -p "$CLAUDE_DIR/memory"
 
 link_item "$SCRIPT_DIR/settings.json"       "$CLAUDE_DIR/settings.json"       "settings.json"
 link_item "$SCRIPT_DIR/CLAUDE.md"           "$CLAUDE_DIR/CLAUDE.md"           "CLAUDE.md"
@@ -112,6 +113,12 @@ link_item "$SCRIPT_DIR/rules"               "$CLAUDE_DIR/rules"              "ru
 link_item "$SCRIPT_DIR/skills"              "$CLAUDE_DIR/skills"              "skills/"
 link_item "$SCRIPT_DIR/templates"           "$CLAUDE_DIR/templates"           "templates/"
 link_item "$SCRIPT_DIR/statusline.py"       "$CLAUDE_DIR/statusline.py"       "statusline.py"
+link_item "$SCRIPT_DIR/memory/patterns-critical.md" \
+    "$CLAUDE_DIR/memory/patterns-critical.md" \
+    "memory/patterns-critical.md"
+link_item "$SCRIPT_DIR/memory/patterns-full.md" \
+    "$CLAUDE_DIR/memory/patterns-full.md" \
+    "memory/patterns-full.md"
 
 echo ""
 
@@ -522,7 +529,8 @@ echo "Phase 4: Verify"
 ERRORS=0
 
 # Verify symlinks resolve
-for link in settings.json hooks commands agents rules skills templates statusline.py; do
+for link in settings.json hooks commands agents rules skills templates statusline.py \
+            memory/patterns-critical.md memory/patterns-full.md; do
     target="$CLAUDE_DIR/$link"
     if [ -L "$target" ] && [ -e "$target" ]; then
         : # OK
