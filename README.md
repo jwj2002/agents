@@ -66,6 +66,24 @@ git pull
 - Full operations guide: `docs/CONFIG-BOOTSTRAP.md`
 - Claude system reference: `docs/CLAUDE-SETUP.md`
 
+## Sibling Tools in This Repo
+
+Active: `obsidian-agent/` (session → vault writer), `pulse/` + `email-digest/`
+(+ `google/`/`m365/` transports), `action/` / `decision/` / `project/` CLIs
+(deployed via `bin/`), `mcp-server/` (vault-metrics MCP — **active**, wired in
+`~/.claude/settings.local.json`; serves vault_status/search/dashboard +
+agent_metrics/failure_patterns), `knowledge/`, `lib/`, `machines/`,
+`codex-config/`.
+
+Dormant (keep until a decision forces it): `code-review/`, `ui-testing/`,
+`project-template/`.
+
+Removed 2026-06-09 (#368, recoverable at commit `9b236c3` and earlier):
+`youtube-summarizer/`, `doc-reader/`, `daily-standup/` (superseded by
+`/pulse digest`), `pr-changelog/` — none were referenced by any live config,
+bin script, skill, or launchd job. `site/` (mkdocs build output) is deleted
+locally and untracked; rebuild on demand with `mkdocs build`.
+
 ## Local-Only Files (Not Shared)
 
 - Claude runtime state (`~/.claude/history.jsonl`, `~/.claude/projects/`, etc.)
