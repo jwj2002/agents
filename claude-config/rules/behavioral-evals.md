@@ -4,12 +4,23 @@ paths: ["**/backend/**", "**/frontend/**", "**/.agents/**", "**/Dockerfile", "**
 
 # Behavioral Evals — Production-Derived Verification Checks
 
+> **`[AUTOMATED]` evals (#361)** — E01, E04, E13, E14, E15 have executable
+> implementations; PROVE runs them mechanically BEFORE the prose evals:
+>
+> ```bash
+> python3 ~/agents/claude-config/scripts/evals/run_evals.py --diff-range origin/main...HEAD
+> ```
+>
+> Exit 1 lists findings as `[Exx] path:line: message`. False positives are
+> allowlisted in code with `eval-ok: <ID>` + a reason comment. The prose
+> sections below remain authoritative for intent; the scripts are the floor.
+
 Each eval traces back to a real failure. PROVE runs applicable evals based on changed files
 (see `eval-file-mapping.md`). Every eval has: what to check, why, and how to verify.
 
 ---
 
-## E01: ENUM_VALUE_MISMATCH
+## E01: ENUM_VALUE_MISMATCH `[AUTOMATED]`
 **What**: Frontend references backend enum by Python name instead of value
 **Why**: `"CO_OWNER"` silently fails — server expects `"CO-OWNER"`. No error, just wrong behavior.
 **Trigger files**: `*.tsx`, `*.ts`, `schemas/*.py`, `models/base.py`
@@ -36,7 +47,7 @@ Each eval traces back to a real failure. PROVE runs applicable evals based on ch
 2. Check that every referenced variable appears in the dependency array
 3. Check for objects/arrays in deps that should be memoized
 
-## E04: MODEL_WITHOUT_MIGRATION
+## E04: MODEL_WITHOUT_MIGRATION `[AUTOMATED]`
 **What**: SQLAlchemy model changed but no Alembic migration generated
 **Why**: App starts fine in dev but fails in staging/production when DB schema doesn't match
 **Trigger files**: `models/*.py`
@@ -117,7 +128,7 @@ Each eval traces back to a real failure. PROVE runs applicable evals based on ch
 2. Verify `AuditService.log_create/log_update/log_delete` is called
 3. Or verify audit logging is handled in the service layer for this entity
 
-## E13: MISSING_FK_INDEX
+## E13: MISSING_FK_INDEX `[AUTOMATED]`
 **What**: Foreign key column defined without `index=True`
 **Why**: Queries filtering or joining on this FK will do full table scans
 **Trigger files**: `models/*.py`
@@ -126,7 +137,7 @@ Each eval traces back to a real failure. PROVE runs applicable evals based on ch
 2. Check for `index=True` on the column definition
 3. Exception: column is the leading column in a composite unique constraint
 
-## E14: DOCKER_ROOT_USER
+## E14: DOCKER_ROOT_USER `[AUTOMATED]`
 **What**: Dockerfile has no `USER` directive — container runs as root
 **Why**: Code execution vulnerability gives attacker root inside the container
 **Trigger files**: `Dockerfile`
@@ -134,7 +145,7 @@ Each eval traces back to a real failure. PROVE runs applicable evals based on ch
 1. Check for a `USER` directive after the last `RUN` / before `ENTRYPOINT`
 2. Verify a non-root user is created (`adduser` or `useradd`)
 
-## E15: SECRETS_IN_CODE
+## E15: SECRETS_IN_CODE `[AUTOMATED]`
 **What**: Hardcoded API keys, passwords, tokens, or connection strings in source files
 **Why**: Leaked to version control; anyone with repo access has the credentials
 **Trigger files**: `*.py`, `*.ts`, `*.tsx`, `*.env.example`

@@ -47,10 +47,23 @@ ls .agents/outputs/patch-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOCKED: PATC
 
 **Before standard verification**, run production-derived behavioral checks.
 
+0. **Run the executable evals FIRST (#361)** — the mechanical floor that
+   does not depend on your attention:
+   ```bash
+   python3 ~/agents/claude-config/scripts/evals/run_evals.py --diff-range origin/main...HEAD
+   ```
+   Exit 1 = findings (each is `[Exx] path:line: message`) — record every
+   finding as that eval's FAIL in `eval_results` and in Issues Found.
+   Exit 2 = the runner itself failed; fall back to manual checks for
+   E01/E04/E13/E14/E15 and say so in the artifact. A false positive may be
+   allowlisted in code with `eval-ok: <ID>` plus a reason comment — never
+   allowlist to make a real finding go away.
 1. Get changed files: `git diff --name-only origin/main`
 2. Load `~/.claude/rules/eval-file-mapping.md` — match files to eval IDs
 3. Load `~/.claude/rules/behavioral-evals.md` — read applicable evals
-4. Run each eval's "How to verify" checks against the changed code
+4. Run each remaining PROSE eval's "How to verify" checks against the
+   changed code (E01/E04/E13/E14/E15 are already covered by the runner —
+   do not re-derive them by hand unless the runner exited 2)
 5. Report results:
    ```
    Behavioral Evals: 5 applicable, 4 passed, 1 FAILED
