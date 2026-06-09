@@ -17,10 +17,10 @@ be read, `bash -n`-checked, and edited **without re-deploying the plist**.
    cross-project patterns via `claude --print "/learn --apply --cross-project
    --validate"`.
 
-> **Win C (deferred)**: fixing the perpetually-dirty working tree caused by
-> `telemetry/<host>/*.jsonl` shards is tracked under issue #220 / REC 0.1 and
-> will be resolved in lockstep with that coordination effort. This script does
-> not stash or commit shards.
+> **Win C (resolved, #350)**: the perpetually-dirty working tree caused by
+> `telemetry/<host>/*.jsonl` shards is fixed — shards are gitignored + local-only
+> (REC 0.1's OTEL hub is deferred indefinitely, so telemetry stays off the code
+> repo). This script does not stash, commit, or push shards.
 
 ### Why the script is separate
 
@@ -53,4 +53,55 @@ To run once on demand (does not wait for the interval):
 
 ```bash
 bash ~/agents/claude-config/scripts/learn-gate-poller.sh
+```
+
+---
+
+## Memory-health jobs (`com.claude-memory-trend` + `com.claude-memory-audit`)
+
+The two halves of the memory-recall measurement loop (close the loop on the
+write-heavy / read-light store — see `docs/memory-review.md`). Both are local
+(the metrics read the local transcript store + `~/.claude/projects/*/memory/`,
+which a cloud routine can't see). Neither runs at load.
+
+### `com.claude-memory-trend.plist` — **weekly** (Mondays 09:00)
+
+Runs the deterministic
+[`../scripts/memory_audit_metrics.py`](../scripts/memory_audit_metrics.py)
+(no LLM): counts memory writes, fact-body reads, and `memory recall`
+invocations over the trailing 7 days, plus total/cold facts, and appends one
+dated row to **`~/.claude/memory-trend.jsonl`** (local; never in the repo).
+This is the cheap signal for *is the write:read ratio falling*.
+
+### `com.claude-memory-audit.plist` — **monthly** (1st @ 10:00)
+
+Runs the full qualitative audit headlessly: `claude --print` on
+[`../../docs/memory-audit.md`](../../docs/memory-audit.md), writing a dated
+graded report to **`~/.claude/memory-reports/memory-report-<host>-<date>.{md,html}`**.
+(The same `claude --print` headless mechanism the poller uses for `/learn`.)
+
+### Deploy / reload
+
+```bash
+for p in com.claude-memory-trend com.claude-memory-audit; do
+  cp "claude-config/launchd/$p.plist" ~/Library/LaunchAgents/
+  launchctl unload "$HOME/Library/LaunchAgents/$p.plist" 2>/dev/null || true
+  launchctl load   "$HOME/Library/LaunchAgents/$p.plist"
+done
+```
+
+### Observe
+
+```bash
+launchctl list | grep claude-memory                 # loaded?
+cat ~/.claude/memory-trend.jsonl                     # the weekly trend (ratio over time)
+tail -f ~/Library/Logs/claude-learn/memory-trend.log # weekly run log
+ls ~/.claude/memory-reports/                         # monthly graded reports
+```
+
+Run once on demand:
+
+```bash
+python3 ~/agents/claude-config/scripts/memory_audit_metrics.py --days 7   # weekly metrics row
+claude --print "$(cat ~/agents/docs/memory-audit.md)"                      # full audit (writes a report)
 ```

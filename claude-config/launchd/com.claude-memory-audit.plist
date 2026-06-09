@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.claude-memory-audit</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-lc</string>
+        <string>
+          LOG="$HOME/Library/Logs/claude-learn/memory-audit.log"
+          mkdir -p "$(dirname "$LOG")" "$HOME/.claude/memory-reports"
+          echo "[$(date -Iseconds)] monthly memory audit" &gt;&gt;"$LOG"
+          cd "$HOME/agents" \
+          &amp;&amp; git pull --ff-only --quiet 2&gt;&gt;"$LOG" ;
+          claude --print "$(cat docs/memory-audit.md)" &gt;&gt;"$LOG" 2&gt;&amp;1
+        </string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/jasonjob/agents</string>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Day</key>
+        <integer>1</integer>
+        <key>Hour</key>
+        <integer>10</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/jasonjob/Library/Logs/claude-learn/memory-audit.out</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jasonjob/Library/Logs/claude-learn/memory-audit.err</string>
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
