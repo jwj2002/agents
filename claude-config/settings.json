@@ -86,7 +86,7 @@
           },
           {
             "type": "command",
-            "command": "python3 /Users/jasonjob/agents/claude-config/scripts/cost_telemetry_freshness.py --hook"
+            "command": "python3 ~/agents/claude-config/scripts/cost_telemetry_freshness.py --hook"
           }
         ]
       }
