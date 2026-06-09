@@ -74,6 +74,25 @@ telemetry paths) live in that project's memory, not here — e.g. buddy's
 clauses + `codex_review_gate` chokepoint:
 `~/.claude/projects/-Users-jasonjob-projects-buddy/memory/codex_review_gates_buddy.md`.
 
+## Review Surface Routing
+
+One table; pick the row that matches your situation. Surfaces are additive —
+`pr-fresh-reviewer` always runs in `/pr`/`/ship`; Codex is layered on top for
+higher tiers.
+
+| When | Surface | How invoked |
+|------|---------|-------------|
+| Any PR (always) | `pr-fresh-reviewer` | Automatic — `/pr` and `/ship` Step 5 |
+| After every change (continuous) | `pr-review-toolkit:code-reviewer` | Automatic — plugin auto-fires |
+| SIMPLE diff, optional spot check | `/codex:review` | Manual — user invokes |
+| MODERATE+ or risk-class (auth, payments, migrations, contracts) | `/codex:adversarial-review` | Manual — user invokes; `/ship` prompts |
+| Architectural / deep quality review of a path | `/deep-review <path>` | Manual — user invokes outside PR workflow |
+| Quick interactive inline review | `/code-review` (harness built-in) | Manual — outside PR workflow |
+
+**Risk-class overrides tier**: SIMPLE diffs that touch auth, payments,
+migrations, data loss, or secrets → treat as MODERATE+ for review surface
+selection.
+
 ## Step 2: Announce Routing Briefly
 
 Examples:
