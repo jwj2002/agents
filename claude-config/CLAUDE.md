@@ -21,18 +21,18 @@ surfaces. See `~/agents/docs/CLAUDE-CODEX-COLLABORATION.md`.
 
 ---
 
-## Three failure patterns to actively prevent
+## Failure patterns to actively prevent
 
-These three account for >50% of historical agent failures. Apply proactively.
+From the 2026 failure corpus (N=40, Jan–Jun 2026; regenerated 2026-06-09, #366):
 
-| Pattern | Trigger | Prevention |
-|---|---|---|
-| **VERIFICATION_GAP** | Any assumption about code structure | Read the actual file. Never assume. |
-| **ENUM_VALUE** (26%) | Fullstack work touching role/status/type fields | Use the backend enum **VALUE** string, not the Python NAME (`"CO-OWNER"` not `"CO_OWNER"`) |
-| **COMPONENT_API** (17%) | Reusing an existing React component or hook | Read the source / PropTypes before invoking |
+| Pattern | Share | Trigger | Prevention |
+|---|---|---|---|
+| **VERIFICATION_GAP** | 27.5% — the dominant cluster | Any assumption about code structure, spec content, or data shape | Read the actual file. "Resolved/unchanged" claims need a fresh read. New field → grep every consumer. |
+| **AMBIGUITY_UNRESOLVED** | 7.5% | Two valid interpretations; a contradiction you noticed | Pick ONE, document it, flag the alternative. Noticing without resolving is the failure. |
+| **ENUM_VALUE** / **COMPONENT_API** | 0 in 2026 (legacy headliners) | Fullstack enum/component work | Still apply: backend enum **VALUE** not NAME (`"CO-OWNER"` not `"CO_OWNER"`); read component source before reuse. Now mechanically gated (E01 evals runner, /quick gate). |
 
 Full pattern detail: `~/.claude/rules/core-patterns.md` and any auto-loaded
-`patterns-critical.md`.
+`patterns-critical.md` (which carries the corpus provenance).
 
 ---
 

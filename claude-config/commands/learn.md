@@ -482,6 +482,14 @@ re-read `_state.json` from the working tree after rebase. If new count drops bel
 threshold, commit only the watermark update (no pattern changes — gate was already
 satisfied by the first run).
 
+**Staleness fallback (#366)**: when NO cluster meets the ≥2-repeat threshold
+and zero patterns are extracted, still rewrite the **Provenance** header of
+`~/.claude/memory/patterns-critical.md` (generation date, N, date range,
+sources) and regenerate `patterns-full.md` from the full corpus. A run that
+extracts nothing must still make staleness visible — the 2026-01→2026-06 rot
+happened because runs that found no clusters refreshed nothing, so the file
+silently aged while its percentages kept being injected into every session.
+
 **`--dry-run` guard**: Step 6.6 is completely skipped when `--dry-run` is set.
 No watermark write, no commit, no PR.
 
