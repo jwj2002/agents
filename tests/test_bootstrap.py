@@ -69,7 +69,6 @@ def test_wsl_branch_runs_symlink_setup(tmp_path):
     r = _run("--noninteractive", "--host-name", "test", home=tmp_path, os_override="wsl")
     # WSL branch may fail to create /mnt/c/... on a non-WSL host, but the
     # block must at least RUN (visible in stdout/stderr).
-    output = r.stdout + r.stderr
     assert "WSL vault symlink" in r.stdout
 
 
@@ -126,7 +125,6 @@ def test_full_idempotency(tmp_path):
 
 def test_missing_required_tool_errors_clearly(tmp_path):
     """Restrict PATH to a dir that has bash but not jq/git/python3 → clean error."""
-    bash_dir = str(Path(shutil.which("bash")).parent)
     fake_path = tmp_path / "empty-path"
     fake_path.mkdir()
     # Link only bash into the fake path so the script can start but tool checks fail

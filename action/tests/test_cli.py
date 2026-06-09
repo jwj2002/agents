@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import sys
+
+import pytest
 from pathlib import Path
 
 # Ensure action package is importable without an action/__init__.py
@@ -21,6 +23,8 @@ def _args(**kwargs) -> argparse.Namespace:
 
 # ---------- list_known_projects ----------
 
+@pytest.mark.skipif(not (Path.home() / "agents").is_dir(),
+                    reason="machine-integration test: requires the real ~/agents layout")
 def test_list_known_projects():
     """Returns a sorted non-empty list filtered by subscriptions (or all if no subs)."""
     projects = cli.list_known_projects()
@@ -43,6 +47,8 @@ def test_list_known_projects_tmp(tmp_path, monkeypatch):
 
 # ---------- resolve_project (existing, unchanged) ----------
 
+@pytest.mark.skipif(not (Path.home() / "agents").is_dir(),
+                    reason="machine-integration test: requires the real ~/agents layout")
 def test_resolve_project_cwd_agents(monkeypatch):
     """cwd = ~/agents → resolves to 'agents' without touching the picker."""
     monkeypatch.chdir(cli.HOME / "agents")
@@ -424,7 +430,6 @@ def _patch_project(monkeypatch, tmp_path: Path):
 def test_new_calls_git_pull_commit_push(monkeypatch, tmp_path):
     """main() with --new calls subprocess for detect, pull, add, commit, push; exit 0."""
     actions_file = _patch_project(monkeypatch, tmp_path)
-    original_content = actions_file.read_text()
 
     # Outcomes in call order:
     # 1. rev-parse --show-toplevel (detect_repo → success)
@@ -492,7 +497,6 @@ def test_pull_conflict_aborts_write(monkeypatch, tmp_path, capsys):
     actions_file = _patch_project(monkeypatch, tmp_path)
     original_content = actions_file.read_text()
 
-    import subprocess as _subprocess
     outcomes = [
         (0, "", ""),           # rev-parse --show-toplevel (detect)
         (0, "main\n", ""),     # rev-parse --abbrev-ref HEAD (branch)
@@ -540,9 +544,8 @@ def test_pull_network_failure_warns_and_writes(monkeypatch, tmp_path, capsys):
 # T5: push rejected → abort with retry message, exit 1
 def test_push_rejected_aborts_with_retry_message(monkeypatch, tmp_path, capsys):
     """pull succeeds; commit succeeds; push rejected → stderr 'push rejected'; exit 1."""
-    actions_file = _patch_project(monkeypatch, tmp_path)
+    _patch_project(monkeypatch, tmp_path)
 
-    import subprocess as _subprocess
     outcomes = [
         (0, "", ""),           # detect
         (0, "main\n", ""),     # branch (pull)
@@ -566,7 +569,6 @@ def test_strict_network_failure_aborts(monkeypatch, tmp_path, capsys):
     actions_file = _patch_project(monkeypatch, tmp_path)
     original_content = actions_file.read_text()
 
-    import subprocess as _subprocess
     outcomes = [
         (0, "", ""),           # detect
         (0, "main\n", ""),     # branch
@@ -584,7 +586,7 @@ def test_strict_network_failure_aborts(monkeypatch, tmp_path, capsys):
 # T7: --list does NOT call subprocess
 def test_list_does_not_call_git(monkeypatch, tmp_path):
     """main() with --list: subprocess never called; exit 0."""
-    actions_file = _patch_project(monkeypatch, tmp_path)
+    _patch_project(monkeypatch, tmp_path)
 
     def no_git(*args, **kwargs):
         raise AssertionError(f"subprocess.run should not be called on --list, got: {args}")
@@ -597,7 +599,7 @@ def test_list_does_not_call_git(monkeypatch, tmp_path):
 # T8: show (A-001) does NOT call subprocess
 def test_show_does_not_call_git(monkeypatch, tmp_path):
     """main() with A-001 (show): subprocess never called; exit 0."""
-    actions_file = _patch_project(monkeypatch, tmp_path)
+    _patch_project(monkeypatch, tmp_path)
 
     def no_git(*args, **kwargs):
         raise AssertionError(f"subprocess.run should not be called on show, got: {args}")

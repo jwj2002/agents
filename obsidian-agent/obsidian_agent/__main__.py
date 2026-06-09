@@ -1,7 +1,6 @@
 """CLI entry point: python -m obsidian_agent"""
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -125,7 +124,7 @@ def _print_extract(extract):
     print(f"  Phase:       {extract.phase}")
     print(f"  Summary:     {extract.summary}")
     if extract.completed_groups:
-        print(f"  Completed Groups:")
+        print("  Completed Groups:")
         for g in extract.completed_groups:
             print(f"    {g.heading}:")
             for item in g.items:
@@ -133,11 +132,11 @@ def _print_extract(extract):
     else:
         print(f"  Completed:   {extract.completed}")
     if extract.issues:
-        print(f"  Issues:")
+        print("  Issues:")
         for i in extract.issues:
             print(f"    {i.number} {i.title} ({i.effort}) [{i.status}]")
     if extract.commits:
-        print(f"  Commits:")
+        print("  Commits:")
         for c in extract.commits:
             print(f"    {c.hash} {c.message}")
     print(f"  Next Steps:  {extract.next_steps}")

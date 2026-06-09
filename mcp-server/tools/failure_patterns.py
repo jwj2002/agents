@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from pathlib import Path
 
 from .vault_common import get_project_memory_dir
 

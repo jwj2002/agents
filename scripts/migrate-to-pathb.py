@@ -338,7 +338,7 @@ def ensure_vault_dir(
         except (EOFError, KeyboardInterrupt):
             ans = ""
         if ans not in ("y", "yes"):
-            print(f"  refused — skipping migration. (Re-run with --noninteractive to auto-create.)")
+            print("  refused — skipping migration. (Re-run with --noninteractive to auto-create.)")
             return False
     projects_dir.mkdir(parents=True, exist_ok=True)
     print(f"  created: {projects_dir}")
