@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import quality_kpis as KPI  # noqa: E402
 import usage_aggregator as A  # noqa: E402
 import usage_email as E  # noqa: E402
 import usage_report as R  # noqa: E402
@@ -62,6 +63,13 @@ def main() -> int:
     html_path = REPORTS_DIR / f"cost-report-{host}-{wk}.html"
     R.write_report(agg, html_path, records=records)          # writes .html + .md
     md = html_path.with_suffix(".md").read_text(encoding="utf-8")  # email body = the local .md
+    kpi_section = KPI.format_kpi_section(KPI.compute_kpis(
+        metrics_path=Path.home() / ".claude" / "memory" / "metrics.jsonl",
+        prove_log_path=Path.home() / ".claude" / "memory" / "prove-log.jsonl",
+        overrides_paths=[Path.home() / ".agents" / "outputs" / "prove-overrides.jsonl"],
+    ))
+    if kpi_section:
+        md = md + "\n\n" + kpi_section
     print(f"[{now.isoformat()}] local report: {html_path} ({len(records)} records)")
 
     state = _load_state()
