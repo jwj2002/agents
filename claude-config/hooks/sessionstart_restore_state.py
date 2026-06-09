@@ -188,6 +188,31 @@ def main() -> int:
         print("If the phase was completed, proceed to the next phase in the workflow.")
         print()
 
+    # 3.5 Project-memory recall CTA. Claude Code natively injects the MEMORY.md
+    #     index (titles), but nothing auto-loads the fact BODIES — where the
+    #     "why" lives. Point at the recall CLI so the index becomes an active
+    #     prompt rather than a passive list. Facts live under
+    #     ~/.claude/projects/<encoded-cwd>/memory/, not in the repo.
+    encoded = str(project_dir).replace("/", "-")
+    fact_dir = Path.home() / ".claude" / "projects" / encoded / "memory"
+    if fact_dir.is_dir():
+        facts = sorted(p for p in fact_dir.glob("*.md") if p.name != "MEMORY.md")
+        if facts:
+            topics = ", ".join(
+                p.stem.replace("_", " ").replace("-", " ") for p in facts[:6]
+            )
+            more = " …" if len(facts) > 6 else ""
+            print("### Project Memory\n")
+            print(
+                f"{len(facts)} memory fact(s) on file. The index above lists titles; "
+                "the *why* lives in the bodies, which are NOT auto-loaded."
+            )
+            print(f"Topics: {topics}{more}")
+            print(
+                "→ Run `~/agents/bin/memory recall <topic>` before non-trivial work "
+                "to pull the relevant fact bodies into context.\n"
+            )
+
     # 4. Hint about full patterns location — only if the file actually exists.
     #    patterns-full.md is produced by `/learn`; advertising it before that
     #    first run sends readers to a missing file (the audit's "dangling ref").

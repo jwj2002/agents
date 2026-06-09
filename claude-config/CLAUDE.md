@@ -184,6 +184,26 @@ that the M365 capability isn't configured on that machine.
 
 ---
 
+## Recalling project memory (active recall)
+
+Project facts live under `~/.claude/projects/<project>/memory/`. Claude Code
+auto-injects the `MEMORY.md` **index** (titles) at SessionStart, but the fact
+**bodies** — where the "why" and "how to apply" live — are NOT auto-loaded.
+The store is write-heavy / read-light by default; close that gap by reading:
+
+```bash
+~/agents/bin/memory recall "<topic or keywords>"   # search bodies, ranked by relevance + recency
+~/agents/bin/memory doctor                          # reconcile MEMORY.md indexes vs fact files
+```
+
+**Before non-trivial work in a project that has memory, run `memory recall`**
+on the task's keywords. Treat recalled bodies as background context — they
+reflect what was true when written, so verify against current code before
+acting (VERIFICATION_GAP). The SessionStart hook prints a one-line recall CTA
+listing how many facts the current project has.
+
+---
+
 ## Promoting project memory to global rules
 
 When a project-memory file under
