@@ -445,8 +445,11 @@ After all pattern updates are written in Steps 6.5.  This step uses the
 4. **Stage and commit** telemetry shard(s), watermark, and any agent file changes:
    ```bash
    git add telemetry/ claude-config/agents/ \
-       .claude/memory/patterns-full.md \
+       claude-config/memory/patterns-full.md \
+       claude-config/memory/patterns-critical.md \
        .claude/memory/pattern-events.jsonl 2>/dev/null || true
+   # Note: patterns-*.md live at claude-config/memory/ (repo path, symlinked to
+   # ~/.claude/memory/ by install.sh). Stage the repo path, not the symlink.
    git commit -m "learn: apply patterns + advance watermark to $CONSUMED_MAX"
    ```
 
