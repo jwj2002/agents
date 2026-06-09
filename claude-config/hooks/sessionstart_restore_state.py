@@ -74,6 +74,117 @@ def get_active_work(yaml_content: str) -> dict:
         return {}
 
 
+# ---------------------------------------------------------------- auto-recall
+
+# Injection budget (#365): keep the whole section ~1–1.5k tokens so sessions
+# don't bloat. Chars ≈ 4 × tokens.
+AUTORECALL_TOTAL_CHARS = 6000
+AUTORECALL_PER_FACT_CHARS = 1200
+_TYPE_PRIORITY = {"feedback": 0, "user": 1, "reference": 2, "project": 3}
+
+
+def _fact_meta(path: Path) -> dict | None:
+    """Parse name/type/expires/body from a fact file. None on unreadable.
+
+    Minimal line-based frontmatter parse — works without PyYAML and tolerates
+    the nested `metadata:`/flat variants in the wild.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    meta = {"name": path.stem, "type": "project", "expires": None, "body": text}
+    if text.startswith("---\n"):
+        end = text.find("\n---", 4)
+        if end != -1:
+            for line in text[4:end].splitlines():
+                stripped = line.strip()
+                for key in ("type", "expires", "name"):
+                    if stripped.startswith(f"{key}:"):
+                        meta[key] = stripped.split(":", 1)[1].strip().strip("'\"") or meta[key]
+            meta["body"] = text[end + 4:].lstrip("-").lstrip("\n")
+    return meta
+
+
+def _expired(expires: str | None, today: str) -> bool:
+    return bool(expires) and str(expires)[:10] < today
+
+
+def render_project_memory(fact_dir: Path, *, today: str | None = None) -> str:
+    """Build the auto-recalled Project Memory section (empty string if none).
+
+    Selection: non-expired facts ranked by type priority (feedback > user >
+    reference > project) then mtime (newest first), injected until the char
+    budget runs out. Remaining facts are listed as topics with the recall CTA.
+    """
+    from datetime import date
+    today = today or date.today().isoformat()
+
+    paths = [p for p in sorted(fact_dir.glob("*.md")) if p.name != "MEMORY.md"]
+    facts = []
+    for p in paths:
+        meta = _fact_meta(p)
+        if meta is None or _expired(meta["expires"], today):
+            continue
+        meta["path"] = p
+        facts.append(meta)
+    if not facts:
+        return ""
+
+    facts.sort(key=lambda f: (_TYPE_PRIORITY.get(f["type"], 9),
+                              -f["path"].stat().st_mtime))
+    injected, leftover, used = [], [], 0
+    for f in facts:
+        body = f["body"].strip()
+        if len(body) > AUTORECALL_PER_FACT_CHARS:
+            body = (body[:AUTORECALL_PER_FACT_CHARS]
+                    + f"\n… *(truncated — full fact: `{f['path']}`)*")
+        cost = len(body) + len(f["name"]) + 40
+        if used + cost > AUTORECALL_TOTAL_CHARS:
+            leftover.append(f)
+            continue
+        injected.append((f, body))
+        used += cost
+
+    lines = ["### Project Memory (auto-recalled)\n"]
+    lines.append(
+        f"{len(injected)} of {len(facts)} fact bodies injected "
+        "(highest-value first, budget-capped). Verify against current code "
+        "before acting — facts reflect what was true when written.\n"
+    )
+    for f, body in injected:
+        lines.append(f"**{f['name']}** ({f['type']}):\n{body}\n")
+    if leftover:
+        topics = ", ".join(f["name"].replace("_", " ").replace("-", " ")
+                           for f in leftover[:8])
+        lines.append(
+            f"Not injected ({len(leftover)}): {topics}. "
+            "→ `~/agents/bin/memory recall <topic>` to pull these.\n"
+        )
+
+    _log_autorecall(fact_dir, len(injected), len(facts), used)
+    return "\n".join(lines)
+
+
+def _log_autorecall(fact_dir: Path, injected: int, total: int, chars: int) -> None:
+    """Append an auto-injection record so memory_audit_metrics can report
+    auto-recall separately from manual recall. Best-effort."""
+    try:
+        from datetime import datetime, timezone
+        rec = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "project": fact_dir.parent.name,
+            "facts_injected": injected,
+            "facts_total": total,
+            "chars": chars,
+        }
+        log = Path.home() / ".claude" / "memory-autoinject.jsonl"
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec) + "\n")
+    except Exception:
+        logging.warning("autorecall metrics append failed", exc_info=True)
+
+
 def main() -> int:
     _hook_in = json.load(sys.stdin)
 
@@ -188,30 +299,17 @@ def main() -> int:
         print("If the phase was completed, proceed to the next phase in the workflow.")
         print()
 
-    # 3.5 Project-memory recall CTA. Claude Code natively injects the MEMORY.md
-    #     index (titles), but nothing auto-loads the fact BODIES — where the
-    #     "why" lives. Point at the recall CLI so the index becomes an active
-    #     prompt rather than a passive list. Facts live under
-    #     ~/.claude/projects/<encoded-cwd>/memory/, not in the repo.
+    # 3.5 Project-memory auto-recall (#365). The CTA-only approach measured
+    #     0.9% adoption (13 recalls / 328 sessions) — facts were written and
+    #     never read. Inject the high-value fact BODIES directly, within a
+    #     hard budget, instead of asking the session to go fetch them. Facts
+    #     live under ~/.claude/projects/<encoded-cwd>/memory/.
     encoded = str(project_dir).replace("/", "-")
     fact_dir = Path.home() / ".claude" / "projects" / encoded / "memory"
     if fact_dir.is_dir():
-        facts = sorted(p for p in fact_dir.glob("*.md") if p.name != "MEMORY.md")
-        if facts:
-            topics = ", ".join(
-                p.stem.replace("_", " ").replace("-", " ") for p in facts[:6]
-            )
-            more = " …" if len(facts) > 6 else ""
-            print("### Project Memory\n")
-            print(
-                f"{len(facts)} memory fact(s) on file. The index above lists titles; "
-                "the *why* lives in the bodies, which are NOT auto-loaded."
-            )
-            print(f"Topics: {topics}{more}")
-            print(
-                "→ Run `~/agents/bin/memory recall <topic>` before non-trivial work "
-                "to pull the relevant fact bodies into context.\n"
-            )
+        section = render_project_memory(fact_dir)
+        if section:
+            print(section)
 
     # 4. Hint about full patterns location — only if the file actually exists.
     #    patterns-full.md is produced by `/learn`; advertising it before that
