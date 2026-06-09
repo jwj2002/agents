@@ -63,7 +63,7 @@ def load_creds(creds_path: Path = CREDS_PATH) -> dict:
     required = {"tenant_id", "client_id", "client_secret", "sender_upn"}
     missing = required - creds.keys()
     if missing:
-        raise SendMailError(f"{CREDS_PATH} missing fields: {sorted(missing)}")
+        raise SendMailError(f"{creds_path} missing fields: {sorted(missing)}")
     return creds
 
 

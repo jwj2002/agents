@@ -31,12 +31,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 CONFIG_PATH = Path.home() / ".claude" / "cost-telemetry" / "email.json"
+SEND_TIMEOUT = 120  # seconds — a hung helper must never block the weekly cadence
 VENV_PY = Path.home() / "agents" / ".venv" / "bin" / "python"
 GMAIL_HELPER = Path.home() / "agents" / "google" / "send_mail.py"
 M365_HELPER = Path.home() / "agents" / "m365" / "send_mail.py"
@@ -76,37 +79,63 @@ def load_email_config(path: Path | None = None) -> dict:
     return cfg
 
 
-def _helper_argv(account: dict, *, recipient: str, subject: str, body: str, html_path) -> list[str] | None:
-    """Build the send-helper argv for the account type, or None if unsendable."""
+def _helper_argv(account: dict, *, recipient: str, subject: str, html_path, body_file=None) -> list[str] | None:
+    """Build the send-helper argv for the account type, or None if unsendable.
+
+    The report body is delivered out-of-band — gmail via stdin (`--body -`),
+    m365 via `--body-file` — so the cost report never appears in process argv
+    (visible to `ps`). Recipient/subject are non-sensitive metadata.
+    """
     atype = (account or {}).get("type", "none")
     creds = (account or {}).get("creds")
     creds = str(Path(creds).expanduser()) if creds else None
     if atype == "gmail":
-        cmd = [_python_bin(), str(GMAIL_HELPER), "--to", recipient, "--subject", subject, "--body", body]
+        cmd = [_python_bin(), str(GMAIL_HELPER), "--to", recipient, "--subject", subject, "--body", "-"]
         if creds:
             cmd += ["--token", creds]
-        if html_path:
-            cmd += ["--attach", str(html_path)]
-        return cmd
-    if atype == "m365":
-        cmd = [_python_bin(), str(M365_HELPER), "--to", recipient, "--subject", subject, "--body", body]
+    elif atype == "m365":
+        cmd = [_python_bin(), str(M365_HELPER), "--to", recipient, "--subject", subject,
+               "--body-file", body_file or "-"]
         if creds:
             cmd += ["--creds", creds]
-        if html_path:
-            cmd += ["--attach", str(html_path)]
-        return cmd
-    return None  # 'none' / unknown
+    else:
+        return None  # 'none' / unknown
+    if html_path:
+        cmd += ["--attach", str(html_path)]
+    return cmd
+
+
+def _run(cmd: list[str], *, input_text: str | None = None) -> None:
+    """Run a send helper with a timeout; raise on non-zero (type+code only, no stdout)."""
+    r = subprocess.run(cmd, capture_output=True, text=True, input=input_text, timeout=SEND_TIMEOUT)
+    if r.returncode != 0:
+        raise RuntimeError(f"send helper failed (exit {r.returncode})")
 
 
 def _default_send(*, account: dict, recipient: str, subject: str, body: str, html_path) -> None:
-    """Real send via the configured transport helper. Raises on failure."""
-    cmd = _helper_argv(account, recipient=recipient, subject=subject, body=body, html_path=html_path)
-    if cmd is None:
-        raise RuntimeError(f"no transport for account type {account.get('type')!r}")
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0:
-        # Do not echo the helper's stdout (may contain addresses); type + code only.
-        raise RuntimeError(f"send helper failed (exit {r.returncode})")
+    """Real send via the configured transport. Body goes via stdin (gmail) or a
+    chmod-600 temp file (m365) — never argv. Raises on failure/timeout."""
+    atype = (account or {}).get("type", "none")
+    if atype == "gmail":
+        cmd = _helper_argv(account, recipient=recipient, subject=subject, html_path=html_path)
+        _run(cmd, input_text=body)
+        return
+    if atype == "m365":
+        fd, body_file = tempfile.mkstemp(suffix=".md")
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(body)
+            cmd = _helper_argv(account, recipient=recipient, subject=subject,
+                               html_path=html_path, body_file=body_file)
+            _run(cmd)
+        finally:
+            try:
+                os.unlink(body_file)
+            except OSError:
+                pass
+        return
+    raise RuntimeError(f"no transport for account type {atype!r}")
 
 
 def send_weekly(

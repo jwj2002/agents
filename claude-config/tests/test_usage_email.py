@@ -114,26 +114,28 @@ def test_load_config_valid(tmp_path):
 
 # ---- transport argv resolution -------------------------------------------
 
-def test_helper_argv_gmail_uses_token_flag():
+def test_helper_argv_gmail_uses_token_and_stdin_body():
     cmd = E._helper_argv(
         {"type": "gmail", "creds": "~/agents/google/token.json"},
-        recipient="me@gmail.com", subject="s", body="b", html_path="/tmp/r.html",
+        recipient="me@gmail.com", subject="s", html_path="/tmp/r.html",
     )
     assert str(E.GMAIL_HELPER) in cmd
     assert "--token" in cmd and "--to" in cmd and "--attach" in cmd
     assert "--creds" not in cmd
+    assert cmd[cmd.index("--body") + 1] == "-"      # body via stdin, not argv
 
 
-def test_helper_argv_m365_uses_creds_flag():
+def test_helper_argv_m365_uses_creds_and_bodyfile():
     cmd = E._helper_argv(
         {"type": "m365", "creds": "~/.claude/m365/agent.json"},
-        recipient="x@vital.com", subject="s", body="b", html_path=None,
+        recipient="x@vital.com", subject="s", html_path=None, body_file="/tmp/body.md",
     )
     assert str(E.M365_HELPER) in cmd
     assert "--creds" in cmd and "--token" not in cmd
-    assert "--attach" not in cmd  # no html → no attach
+    assert "--attach" not in cmd                     # no html → no attach
+    assert cmd[cmd.index("--body-file") + 1] == "/tmp/body.md"  # body via file, not argv
 
 
 def test_helper_argv_none_is_unsendable():
-    assert E._helper_argv({"type": "none"}, recipient="x", subject="s", body="b", html_path=None) is None
-    assert E._helper_argv({}, recipient="x", subject="s", body="b", html_path=None) is None
+    assert E._helper_argv({"type": "none"}, recipient="x", subject="s", html_path=None) is None
+    assert E._helper_argv({}, recipient="x", subject="s", html_path=None) is None

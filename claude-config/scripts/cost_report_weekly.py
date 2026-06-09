@@ -69,7 +69,10 @@ def main() -> int:
         md_summary=md, html_path=str(html_path), state=state, host=host, now=now,
     )
     if code == E.SENT_OR_SKIP and new_state != state:
-        _save_state(new_state)
+        try:
+            _save_state(new_state)
+        except OSError as e:
+            print(f"[{now.isoformat()}] warn: could not persist email state: {e}")
     status = {
         E.SENT_OR_SKIP: "emailed (or already sent this week)",
         E.DISABLED: "email disabled — local report only",
