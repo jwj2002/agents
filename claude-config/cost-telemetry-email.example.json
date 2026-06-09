@@ -1,0 +1,12 @@
+{
+  "_comment": "Per-machine cost-telemetry email config. Copy to ~/.claude/cost-telemetry/email.json (chmod 600) and edit, OR run `usage_email.py --configure`. NOT committed — each machine has its own. Validate with `usage_email.py --check-config`; test with `--test-send`.",
+  "_account_types": "gmail (creds = a google token.json; sender = that account) | m365 (creds = a ~/.claude/m365/*.json; sender = its sender_upn) | none (no email — weekly job writes a local report only)",
+
+  "enabled": true,
+  "account": {
+    "type": "gmail",
+    "sender": "you@gmail.com",
+    "creds": "~/agents/google/token.json"
+  },
+  "recipient": "you@gmail.com"
+}

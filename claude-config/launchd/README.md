@@ -105,3 +105,50 @@ Run once on demand:
 python3 ~/agents/claude-config/scripts/memory_audit_metrics.py --days 7   # weekly metrics row
 claude --print "$(cat ~/agents/docs/memory-audit.md)"                      # full audit (writes a report)
 ```
+
+---
+
+## Cost-telemetry weekly report (`com.cost-telemetry-report-weekly`)
+
+**Weekly** (Mondays 09:05, aligned with the memory jobs). Builds the cost report
+locally (`~/.claude/cost-reports/cost-report-<host>-<week>.{html,md}`) via
+`scripts/cost_report_weekly.py`, then **emails it per this machine's config**.
+
+Email is **per-machine** — set the account to send from + recipient on each
+computer (the repo is shared, so this config is machine-local, never committed):
+
+```bash
+python3 ~/agents/claude-config/scripts/usage_email.py --configure      # guided: type + sender + recipient
+python3 ~/agents/claude-config/scripts/usage_email.py --check-config    # show resolved transport + creds
+python3 ~/agents/claude-config/scripts/usage_email.py --test-send       # send a one-off test now
+```
+
+Config lives at `~/.claude/cost-telemetry/email.json` (chmod 600; template:
+`claude-config/cost-telemetry-email.example.json`). Account types:
+
+| type | sends as | creds (default) |
+|---|---|---|
+| `gmail` | the token's Google account (e.g. `jasonwadejob@gmail.com`) | `~/agents/google/token.json` |
+| `m365` | the creds' `sender_upn` (e.g. `jjob@vital-enterprises.com`) | `~/.claude/m365/agent.json` |
+| `none` | — (no email; **local report still written**) | — |
+
+If email is `none`/disabled/unconfigured, the weekly job still writes the local
+report and exits 0 — it never blocks.
+
+### Deploy / reload
+
+```bash
+p=com.cost-telemetry-report-weekly
+cp "claude-config/launchd/$p.plist" ~/Library/LaunchAgents/
+launchctl unload "$HOME/Library/LaunchAgents/$p.plist" 2>/dev/null || true
+launchctl load   "$HOME/Library/LaunchAgents/$p.plist"
+```
+
+### Observe
+
+```bash
+launchctl list | grep cost-telemetry-report
+tail -f ~/Library/Logs/claude-learn/cost-report.log
+ls ~/.claude/cost-reports/                     # the local report archive
+python3 ~/agents/claude-config/scripts/cost_report_weekly.py   # run once on demand
+```

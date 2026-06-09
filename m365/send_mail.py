@@ -46,18 +46,19 @@ class SendMailError(Exception):
     """Raised when Graph rejects the send."""
 
 
-def load_creds() -> dict:
-    if not CREDS_PATH.exists():
+def load_creds(creds_path: Path = CREDS_PATH) -> dict:
+    creds_path = Path(creds_path).expanduser()
+    if not creds_path.exists():
         raise SendMailError(
-            f"Missing credentials at {CREDS_PATH}. Drop the JSON with "
+            f"Missing credentials at {creds_path}. Drop the JSON with "
             "tenant_id / client_id / client_secret / sender_upn fields "
             "and chmod 600. See ~/.claude/CLAUDE.md for the M365 section."
         )
-    if (CREDS_PATH.stat().st_mode & 0o077) != 0:
+    if (creds_path.stat().st_mode & 0o077) != 0:
         raise SendMailError(
-            f"{CREDS_PATH} has loose permissions; run `chmod 600 {CREDS_PATH}`."
+            f"{creds_path} has loose permissions; run `chmod 600 {creds_path}`."
         )
-    with CREDS_PATH.open() as f:
+    with creds_path.open() as f:
         creds = json.load(f)
     required = {"tenant_id", "client_id", "client_secret", "sender_upn"}
     missing = required - creds.keys()
@@ -162,9 +163,10 @@ def send_mail(
     content_type: str = "Text",
     attach: list[Path] | None = None,
     unblock_recipient: list[str] | None = None,
+    creds_path: Path = CREDS_PATH,
 ) -> None:
     check_blocked_recipients(to=to, cc=cc or [], unblocked=unblock_recipient or [])
-    creds = load_creds()
+    creds = load_creds(creds_path)
     token = get_token(creds)
     attachments = build_attachments(attach or [])
     payload = build_message(
@@ -192,6 +194,10 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--to", required=True, help="Comma-separated recipients")
     p.add_argument("--cc", default="", help="Comma-separated cc addresses")
+    p.add_argument(
+        "--creds",
+        help=f"path to M365 creds JSON (default: {CREDS_PATH}) — selects the send account",
+    )
     p.add_argument("--subject", required=True)
     body_group = p.add_mutually_exclusive_group(required=True)
     body_group.add_argument("--body", help="Inline body text")
@@ -236,6 +242,7 @@ def main() -> int:
             content_type=args.content_type,
             attach=attach,
             unblock_recipient=args.unblock_recipient,
+            creds_path=Path(args.creds) if args.creds else CREDS_PATH,
         )
     except SendMailError as e:
         print(f"send_mail: {e}", file=sys.stderr)
