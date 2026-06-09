@@ -20,9 +20,12 @@ Task(
 ```
 
 Claude Code auto-loads the agent body, applies its `tools:` restriction, and
-honours its `model:` (Haiku for MAP / PLAN-CHECK / DISCUSS; Sonnet
-otherwise). The prompt should contain context only — never repeat the
-agent's own instructions.
+honours its `model:` frontmatter (haiku only for PLAN-CHECK; sonnet
+otherwise) unless the dispatch overrides it — COMPLEX/FULLSTACK dispatches
+override PLAN/PATCH/PROVE (+CONTRACT when fullstack) to the opus-class
+model per the Model Routing table in `commands/orchestrate.md` Step 3
+(#387). The prompt should contain context only — never repeat the agent's
+own instructions.
 
 For per-invocation prompt content, see `templates/agent-prompt.md`.
 
