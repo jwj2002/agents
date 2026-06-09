@@ -193,7 +193,8 @@ The store is write-heavy / read-light by default; close that gap by reading:
 
 ```bash
 ~/agents/bin/memory recall "<topic or keywords>"   # search bodies, ranked by relevance + recency
-~/agents/bin/memory doctor                          # reconcile MEMORY.md indexes vs fact files
+~/agents/bin/memory doctor                          # index drift + TTL candidates
+~/agents/bin/memory archive [--apply]               # move expired/stale facts → memory/archive/
 ```
 
 **Before non-trivial work in a project that has memory, run `memory recall`**
@@ -201,6 +202,25 @@ on the task's keywords. Treat recalled bodies as background context — they
 reflect what was true when written, so verify against current code before
 acting (VERIFICATION_GAP). The SessionStart hook prints a one-line recall CTA
 listing how many facts the current project has.
+
+**TTL — keep perishable facts from rotting the store.** When you write a
+*session-state* fact (a resume/handoff doc, a milestone marker like
+shipped/complete/cancelled, or an in-flight plan), add an `expires:` date so it
+self-retires once it's dead:
+
+```yaml
+---
+name: ...
+type: project
+expires: 2026-08-01   # absent = durable forever (feedback/user/reference never expire)
+---
+```
+
+`recall` hides expired facts by default (`--all` to include); `doctor` flags
+them plus a heuristic for the legacy backlog (old `type: project` files whose
+names look like session-state); `memory archive --apply` moves both into
+`memory/archive/` (preserved, never deleted, skipped by recall). Run a cleanup
+pass with `memory archive --stale-days 30 --apply` when a store gets cluttered.
 
 ---
 
