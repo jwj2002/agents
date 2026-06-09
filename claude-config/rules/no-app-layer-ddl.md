@@ -39,17 +39,11 @@ Even if the pattern looks defensive and idempotent, **remove it**. The migration
 
 ## Why this is a distinct failure class
 
-This rule generalizes a 2026-06-05 buddy incident (#1766). Person Consolidation V1 (5-PR migration wave 2026-05-22 → 2026-05-25) correctly dropped `contact_notes.relationship_id` via migration `20260524180200_pr8_drop_relationship_id_columns.sql`. But `src/buddy/knowledge/postgres_store.py:_ensure_schema()` ran:
-
-```python
-# (in application code, on every pool acquire)
-CREATE TABLE IF NOT EXISTS contact_notes (... relationship_id TEXT ...)
-DO $$ BEGIN ALTER TABLE contact_notes ADD COLUMN relationship_id TEXT;
-     EXCEPTION WHEN duplicate_column THEN NULL; END $$
-CREATE INDEX IF NOT EXISTS idx_contact_notes_rel ON contact_notes(relationship_id)
-```
-
-Result: migration dropped the column at 2026-05-24; every subsequent server boot (every pool acquire, really) immediately re-created it as TEXT, no FK. A schema audit on 2026-06-05 found the column "still there" — leading initially to a (wrong) hypothesis that the migration audit missed the table. Closer investigation showed the migration WAS complete; the in-code DDL was the resurrection vector.
+This rule generalizes a 2026-06-05 buddy incident (#1766): a migration
+correctly dropped a column, but an `_ensure_schema()` block in application
+code re-created it on every pool acquire — the subsequent schema audit
+"found" the dropped column and wrongly blamed the migration. Incident
+detail lives in buddy's project memory, not here.
 
 This failure class is **invisible to schema-audit tooling**:
 - `grep` for the dropped column in migration files — finds the DROP migration. Pattern looks complete.
@@ -100,14 +94,6 @@ The existing `~/.claude/rules/spec-schema-collision-check.md` Part 1 (SQL-site g
 - `CREATE INDEX IF NOT EXISTS` outside migrations
 - `DROP TABLE/COLUMN/INDEX` from application code
 - "Idempotent migration shims" embedded in service code (e.g., `_ensure_schema()` methods)
-
----
-
-## When the rule was born
-
-**2026-06-05 buddy #1766 (smoke sweep #1758).** Person Consolidation V1 migration correctly dropped `contact_notes.relationship_id` on 2026-05-24. `src/buddy/knowledge/postgres_store.py:_ensure_schema()` resurrected it on every pool acquire. Discovered during a smoke audit that looked like the migration had failed but actually the application was undoing it.
-
-The fix (PR #1774) removed the in-code DDL block and added a comment pointing future developers at the migration as the source of truth. This rule was promoted to global because the failure pattern is generic — any project with both a migration system and "defensive" application-layer DDL will eventually hit it.
 
 ---
 

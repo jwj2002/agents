@@ -17,9 +17,14 @@ pausing to ask for merge approval.** The terminal state of a task is a merged
 PR, not an open one. The full default path:
 
 ```text
-commit → push → PR → validate/review → squash-merge → prune branch
-       → sync main → post-merge verify → close/update the issue
+commit → push → PR → validate/review → squash-merge → sync main
+       → post-merge verify → prune branch → close/update the issue
 ```
+
+Ordering matters (#367): post-merge verification runs BEFORE pruning. If
+verification fails, do NOT prune — the branch is your recovery path; create
+`fix/hotfix-<description>` from origin/main instead (see
+`post-merge-verification.md`, which this sequence now matches).
 
 **Stop before merge ONLY when:**
 

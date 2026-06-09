@@ -76,7 +76,7 @@ For every claim in the spec of the form "operation X happens via path Y":
 
 - [ ] I read 50+ lines around Y in the actual source.
 - [ ] I confirmed that no pre-write guard / early return / conditional branch can prevent X from reaching the cited line.
-- [ ] If guards exist, the spec either (a) explicitly notes they apply, or (b) explains why the spec's call path bypasses them.
+- [ ] If guards exist, the spec either (a) explicitly notes they apply, or (b) demonstrates — by tracing the actual call path in source, not by assertion — that the spec's path exercises the bypass branch. "The spec's path bypasses the guard" without a traced line-level path is exactly the claim shape that produced the V1.7 round-8 finding (#367).
 
 This is the discipline that would have caught the V1.6 `add_edge() SUPERSESSION` claim: the function exists, the SUPERSESSION code at `:1211` exists, but `find_relationship_conflict()` at `:1090` returns None first for the romantic conflict group.
 
