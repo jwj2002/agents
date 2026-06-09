@@ -165,7 +165,7 @@ def main() -> int:
             print("2. **ENUM_VALUE**: Use VALUES not Python names (CO-OWNER not CO_OWNER)")
             print("3. **COMPONENT_API**: Read PropTypes before using components")
             print()
-            print("Full patterns: `.claude/memory/patterns-full.md`\n")
+            print("Full patterns: `~/.claude/rules/core-patterns.md`\n")
 
     # 3. Check for active orchestrate workflow and provide continue instructions
     issue = active_work.get("issue")
@@ -188,9 +188,14 @@ def main() -> int:
         print("If the phase was completed, proceed to the next phase in the workflow.")
         print()
 
-    # 4. Hint about full patterns location
-    print("---")
-    print("*Full patterns available at `.claude/memory/patterns-full.md` if needed.*\n")
+    # 4. Hint about full patterns location — only if the file actually exists.
+    #    patterns-full.md is produced by `/learn`; advertising it before that
+    #    first run sends readers to a missing file (the audit's "dangling ref").
+    if (project_memory_dir / "patterns-full.md").exists() or (
+        global_memory_dir / "patterns-full.md"
+    ).exists():
+        print("---")
+        print("*Full patterns available at `.claude/memory/patterns-full.md` if needed.*\n")
 
     return 0
 
