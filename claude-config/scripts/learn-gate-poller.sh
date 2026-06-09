@@ -6,13 +6,14 @@
 # testable (`bash -n`), and editable without re-deploying the plist.
 #
 # Responsibilities (each best-effort, none aborts the others):
-#   1. Sync the agents repo — ff-only pull of other machines' telemetry shards.
+#   1. Sync the agents repo — ff-only pull of code/config updates.
 #   2. Run the learn gate; if it trips, apply cross-project patterns via /learn.
 #
-# Win C (fixing the perpetually-dirty tree caused by telemetry/<host>/*.jsonl shards)
-# is tracked under issue #220 / REC 0.1 and is intentionally NOT handled here.
-# Do not stash or commit shards unilaterally — see rules/git-workflow.md,
-# "Working tree hygiene in ~/agents".
+# Win C (the perpetually-dirty tree caused by telemetry/<host>/*.jsonl shards)
+# is RESOLVED: shards are gitignored and local-only (REC 0.1's OTEL hub, the
+# intended cross-machine transport, is deferred indefinitely, so telemetry stays
+# off the code repo). Nothing here commits or pushes shards — they never enter
+# git. See rules/git-workflow.md, "Working tree hygiene in ~/agents".
 
 set -uo pipefail   # deliberately NOT `-e`: every step is independently fault-tolerant
 
