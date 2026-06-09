@@ -172,6 +172,7 @@ that the M365 capability isn't configured on that machine.
 | `git-workflow.md` | Any commit/branch/PR work |
 | `github-accounts.md` / `gitlab-access.md` | Before any push or auth-sensitive op |
 | `behavioral-evals.md` + `eval-file-mapping.md` | PROVE phase, code review |
+| `code-quality-standards.md` | Auto-loads on code paths — quantified, command-checkable standards (coverage delta, lint, LR-001, evals) |
 | `fastapi-layered-pattern.md` (in `templates/`, not `rules/`) | Read by `/scaffold-project` and `/scaffold-module` |
 | `rbac-pattern.md` | Auth/permissions code |
 | `orchestrate-workflow.md` | `/orchestrate` runs |
