@@ -3,13 +3,7 @@ target-version = "py310"
 
 extend-exclude = [
     "_archived",          # frozen migration artifacts — never lint
-    "site",               # mkdocs build output
-    # Dead projects pending removal in #368 — excluded so CI is green now;
-    # these lines go away when the directories do.
-    "youtube-summarizer",
-    "doc-reader",
-    "daily-standup",
-    "pr-changelog",
+    "site",               # mkdocs build output (untracked; regenerate on demand)
 ]
 
 [lint]
