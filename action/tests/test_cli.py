@@ -424,7 +424,6 @@ def _patch_project(monkeypatch, tmp_path: Path):
 def test_new_calls_git_pull_commit_push(monkeypatch, tmp_path):
     """main() with --new calls subprocess for detect, pull, add, commit, push; exit 0."""
     actions_file = _patch_project(monkeypatch, tmp_path)
-    original_content = actions_file.read_text()
 
     # Outcomes in call order:
     # 1. rev-parse --show-toplevel (detect_repo → success)
@@ -492,7 +491,6 @@ def test_pull_conflict_aborts_write(monkeypatch, tmp_path, capsys):
     actions_file = _patch_project(monkeypatch, tmp_path)
     original_content = actions_file.read_text()
 
-    import subprocess as _subprocess
     outcomes = [
         (0, "", ""),           # rev-parse --show-toplevel (detect)
         (0, "main\n", ""),     # rev-parse --abbrev-ref HEAD (branch)
@@ -540,9 +538,8 @@ def test_pull_network_failure_warns_and_writes(monkeypatch, tmp_path, capsys):
 # T5: push rejected → abort with retry message, exit 1
 def test_push_rejected_aborts_with_retry_message(monkeypatch, tmp_path, capsys):
     """pull succeeds; commit succeeds; push rejected → stderr 'push rejected'; exit 1."""
-    actions_file = _patch_project(monkeypatch, tmp_path)
+    _patch_project(monkeypatch, tmp_path)
 
-    import subprocess as _subprocess
     outcomes = [
         (0, "", ""),           # detect
         (0, "main\n", ""),     # branch (pull)
@@ -566,7 +563,6 @@ def test_strict_network_failure_aborts(monkeypatch, tmp_path, capsys):
     actions_file = _patch_project(monkeypatch, tmp_path)
     original_content = actions_file.read_text()
 
-    import subprocess as _subprocess
     outcomes = [
         (0, "", ""),           # detect
         (0, "main\n", ""),     # branch
@@ -584,7 +580,7 @@ def test_strict_network_failure_aborts(monkeypatch, tmp_path, capsys):
 # T7: --list does NOT call subprocess
 def test_list_does_not_call_git(monkeypatch, tmp_path):
     """main() with --list: subprocess never called; exit 0."""
-    actions_file = _patch_project(monkeypatch, tmp_path)
+    _patch_project(monkeypatch, tmp_path)
 
     def no_git(*args, **kwargs):
         raise AssertionError(f"subprocess.run should not be called on --list, got: {args}")
@@ -597,7 +593,7 @@ def test_list_does_not_call_git(monkeypatch, tmp_path):
 # T8: show (A-001) does NOT call subprocess
 def test_show_does_not_call_git(monkeypatch, tmp_path):
     """main() with A-001 (show): subprocess never called; exit 0."""
-    actions_file = _patch_project(monkeypatch, tmp_path)
+    _patch_project(monkeypatch, tmp_path)
 
     def no_git(*args, **kwargs):
         raise AssertionError(f"subprocess.run should not be called on show, got: {args}")

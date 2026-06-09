@@ -1,15 +1,9 @@
 name: Validate config
+# No paths filter (#362): lint + tests must run on EVERY PR — the old filter
+# meant code changes under lib/, bin/, action/, tests/, etc. shipped with
+# zero CI. The job is fast (<2 min); filtering is not worth the blind spot.
 on:
   pull_request:
-    paths:
-      - '.github/workflows/validate.yml'
-      - 'claude-config/**'
-      - 'knowledge/**'
-      - 'codex-config/**'
-      - 'docs/**'
-      - 'project-template/**'
-      - 'new-project-agents.sh'
-      - 'install*.sh'
   workflow_dispatch: {}
 
 jobs:
@@ -32,8 +26,20 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pyyaml
+          pip install pyyaml pytest ruff
           npm install -g @openai/codex
+
+      - name: Lint (ruff — includes LR-001 blind-except enforcement)
+        run: ruff check .
+
+      - name: Tests
+        # Three invocations: claude-config/tests + lib/tests share a conftest
+        # package; root tests/ and the tool-CLI suites are separate roots
+        # (collecting all at once trips a tests.conftest name collision).
+        run: |
+          python3 -m pytest claude-config/tests lib/tests -q
+          python3 -m pytest tests -q
+          python3 -m pytest action/tests decision/tests project/tests pulse/tests email-digest/tests -q
 
       - name: Validate settings.json is valid JSON
         run: python3 -c "import json; json.load(open('claude-config/settings.json'))"

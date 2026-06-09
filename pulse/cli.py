@@ -228,7 +228,7 @@ def refresh_all(
     """Refresh every subscribed (vault, project) pair on this device."""
     subs = pr.read_subscriptions_dict()
     local_host = pr.get_host_name()
-    print(f"=== pulse refresh ===")
+    print("=== pulse refresh ===")
     print(f"local host: {local_host}")
     print(f"vaults base: {vaults_base or _vaults_base()}")
     print()

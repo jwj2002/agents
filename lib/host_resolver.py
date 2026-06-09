@@ -270,9 +270,12 @@ def _read_actions_state(actions_path: Path) -> dict:
     if not actions_path.is_file():
         return {"open": -1, "closed_24h": 0}
     try:
-        from lib.actions_md import parse_file  # local import; lazy load
+        from lib.actions_md import MarkdownParseError, parse_file  # local import; lazy load
+    except ImportError:
+        return {"open": -1, "closed_24h": 0}
+    try:
         model = parse_file(actions_path)
-    except Exception:
+    except (OSError, MarkdownParseError, ValueError):
         return {"open": -1, "closed_24h": 0}
     open_count = len(model.open_rows())
     cutoff = (date.today() - timedelta(days=1)).isoformat()

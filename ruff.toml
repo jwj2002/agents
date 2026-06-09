@@ -1,0 +1,38 @@
+# Ruff config for ~/agents (#362). Enforced in CI (.github/workflows/validate.yml).
+target-version = "py310"
+
+extend-exclude = [
+    "_archived",          # frozen migration artifacts — never lint
+    "site",               # mkdocs build output
+    # Dead projects pending removal in #368 — excluded so CI is green now;
+    # these lines go away when the directories do.
+    "youtube-summarizer",
+    "doc-reader",
+    "daily-standup",
+    "pr-changelog",
+]
+
+[lint]
+# Defaults (E4/E7/E9/F) + the LR-001 enforcement pair:
+#   E722  bare `except:`
+#   BLE001 blind `except Exception` (LR-001: custom exception classes per
+#          module, never bare Exception)
+extend-select = ["E722", "BLE"]
+
+[lint.per-file-ignores]
+# Tests use the sys.path.insert(...) ; import pattern — E402 is inherent to it.
+"**/tests/*" = ["E402"]
+# CLI modules deliberately re-export lib names (tests monkeypatch via
+# cli.<name>; shell users import the CLI as the single surface). F401 would
+# strip the re-exports — it already broke 26 tests once (#362).
+"action/cli.py" = ["F401"]
+"project/cli.py" = ["F401"]
+# Fail-open by design: hooks, statusline, and session sidecars run inside
+# Claude Code sessions or launchd and must NEVER crash the host process —
+# broad catches at their top level are policy, not sloppiness (LR-001 still
+# applies to lib/, bin/, and the tool CLIs, where it is enforced).
+"claude-config/hooks/*" = ["BLE001"]
+"claude-config/scripts/*" = ["BLE001"]
+"claude-config/statusline.py" = ["BLE001"]
+"obsidian-agent/**" = ["BLE001"]
+"code-review/**" = ["BLE001"]

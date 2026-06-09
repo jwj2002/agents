@@ -11,7 +11,6 @@ import json
 import os
 import sys
 from datetime import datetime
-from pathlib import Path
 
 DEBOUNCE_INTERVAL = 10
 WARN_THRESHOLD = 35  # percent remaining
