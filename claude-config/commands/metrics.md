@@ -192,6 +192,42 @@ for WEEK in 1 2 3 4; do
 done
 ```
 
+### Step 5.5: Quality KPIs
+
+Display the 8-week first-pass-correct rate and gates-caught trend table.
+The module reads `~/.claude/memory/metrics.jsonl` and `~/.claude/memory/prove-log.jsonl`
+directly and degrades gracefully when either file is absent.
+
+```bash
+python3 ~/.claude/scripts/quality_kpis.py \
+  --metrics ~/.claude/memory/metrics.jsonl \
+  --prove-log ~/.claude/memory/prove-log.jsonl \
+  --overrides ~/.agents/outputs/prove-overrides.jsonl
+```
+
+Example output:
+
+```
+## Quality KPIs (8-week trend)
+
+_Data sparse while first_pass_correct field matures; n/a = no qualifying records that week._
+
+| Week    | First-pass rate | n  | Gates caught |
+| ------- | --------------- | -- | ------------ |
+| 2026-W17 | n/a            | 0  | 0            |
+| 2026-W18 | n/a            | 0  | 0            |
+| 2026-W19 | n/a            | 0  | 0            |
+| 2026-W20 | 100%           | 2  | 1            |
+| 2026-W21 | n/a            | 0  | 0            |
+| 2026-W22 | 67%            | 3  | 0            |
+| 2026-W23 | 100%           | 4  | 0            |
+| 2026-W24 | 100%           | 3  | 1            |
+| **Total** | **89%**       | **12** | **2**    |
+```
+
+The `first_pass_correct` field was added mid-stream; only records that explicitly
+carry the field count toward the denominator (n). Older records are silently excluded.
+
 ---
 
 ## JSON Output Mode
