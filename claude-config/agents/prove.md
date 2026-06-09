@@ -145,6 +145,13 @@ git log --oneline origin/main..HEAD
 | Backend tests | `pytest -q` | All pass |
 | Frontend lint | `npm run lint` | No errors |
 | Frontend build | `npm run build` | Success |
+| Coverage delta (#364) | read `coverage_before/after` from the PATCH artifact | `after >= before`, OR a non-empty `coverage_note` explains the decrease, OR `before: null` (no infra) |
+
+An unexplained coverage decrease is an Issues Found entry and an
+`ac_audit`-level problem — it makes the verdict FAIL-able (see
+`rules/code-quality-standards.md`). If PATCH recorded no coverage fields at
+all in a repo that HAS coverage infra, run the before/after comparison
+yourself (`git stash` ↔ working tree) or flag the omission.
 
 ### 2. Verification Levels
 

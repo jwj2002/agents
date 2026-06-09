@@ -156,6 +156,31 @@ fi
 
 See `~/.claude/snippets/verify-commands.md` (referenced from `_base.md`) for the canonical backend/frontend verification commands.
 
+### Coverage Delta (#364)
+
+When the repo has pytest + coverage infra (a `--cov` run works), capture a
+baseline BEFORE the first change:
+
+```bash
+pytest --cov --cov-report=json:/tmp/cov-before-${ISSUE}.json -q 2>/dev/null \
+  && python3 -c "import json; print(json.load(open('/tmp/cov-before-${ISSUE}.json'))['totals']['percent_covered'])"
+```
+
+At Pre-Submission Gates, re-run with `cov-after` and record both numbers in
+the artifact frontmatter:
+
+```yaml
+coverage_before: 84.2   # null when no coverage infra
+coverage_after: 84.9
+coverage_note: ""       # REQUIRED explanation when after < before
+```
+
+Rules (`rules/code-quality-standards.md`): coverage must not decrease;
+a decrease needs an explicit `coverage_note` explaining why (e.g. removed
+dead tested code) or PROVE will flag it. No coverage infra in the repo →
+record `coverage_before: null` and move on — do NOT bolt coverage tooling
+onto the repo as a side effect.
+
 ---
 
 ## Atomic Commits (MANDATORY)
