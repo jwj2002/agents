@@ -22,7 +22,11 @@ def make_repo(tmp_path: Path) -> Path:
     remote = tmp_path / "remote.git"
     work = tmp_path / "work"
 
-    git(["init", "--bare", str(remote)], tmp_path)
+    # --initial-branch=main: without it the bare repo's HEAD points at the
+    # host git's default branch (master on CI), which dangles after we push
+    # main — and `remote set-head -a` then fails with "Cannot determine
+    # remote HEAD". Locally-configured init.defaultBranch=main masked this.
+    git(["init", "--bare", "--initial-branch=main", str(remote)], tmp_path)
     git(["clone", str(remote), str(work)], tmp_path)
     git(["config", "user.email", "agent@example.com"], work)
     git(["config", "user.name", "Agent"], work)
