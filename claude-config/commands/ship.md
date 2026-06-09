@@ -93,16 +93,18 @@ the push if the remote has diverged beyond our rebase base.
 
 ### Step 5 — PR + Review Gates
 
-If no open PR exists for this branch, create one per `pr.md §Create PR`. Then:
+If no open PR exists for this branch, create one per `pr.md §Create PR`. Then
+run the review gates per `implementation-routing.md §Review Surface Routing`:
 
-1. **Fresh-context review**: Run `pr-fresh-reviewer` per `pr.md §Pre-PR Fresh-Context Review`.
+1. **Fresh-context review** (`pr-fresh-reviewer`) fires automatically via
+   `pr.md §Pre-PR Fresh-Context Review`.
    - **Gate**: CRITICAL findings → STOP. Do NOT proceed until fixed.
    - WARNING findings: include in PR body; continue.
 
-2. **COMPLEX-signal check**: Run the signal detection block per `pr.md §Pre-merge Codex review for COMPLEX changes`.
-   - If COMPLEX signals fire, recommend `/codex:adversarial-review` before proceeding.
-   - This is advisory — the user decides whether to run it. `/ship` pauses and
-     prompts: "COMPLEX signals detected. Run /codex:adversarial-review? [y/N to skip]"
+2. **Tier/risk-class escalation**: consult the routing table in
+   `implementation-routing.md §Review Surface Routing` to determine whether
+   `/codex:adversarial-review` applies. `/ship` prompts when COMPLEX signals
+   fire (see `pr.md §Pre-merge Codex review for COMPLEX changes`).
 
 ### Step 6 — CI Watch
 

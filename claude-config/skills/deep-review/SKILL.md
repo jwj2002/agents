@@ -7,6 +7,8 @@ argument-hint: [path-or-scope]
 
 # Deep Code Review (v1.0)
 
+**Use when**: architectural or quality deep-dive on a path/scope outside the PR gate workflow. Not a PR pre-commit check — use `pr-fresh-reviewer` (automatic) or `/codex:adversarial-review` (MODERATE+) for PR gating instead.
+
 Comprehensive, critical code review. Not a pre-commit check — a thorough architectural and quality review.
 
 ## Usage
