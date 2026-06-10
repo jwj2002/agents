@@ -186,6 +186,28 @@ bypass silently; never bypass without a reason the user gave.
 
 No issue number in the branch name → the gate is skipped (nothing to gate).
 
+### Step 7.6 — Regression Set Gate (agent/command prompt changes)
+
+If the diff touches any file under `claude-config/agents/` or
+`claude-config/commands/`, run the regression set before merging:
+
+```bash
+bash claude-config/scripts/run_regression_set.sh
+```
+
+If the script exits non-zero (prompt files changed), complete a regression
+run, save a dated result file to `claude-config/regression-set/results/`,
+and verify CRITICAL recall has not regressed vs. the baseline:
+
+```bash
+python3 claude-config/regression-set/score.py \
+  claude-config/regression-set/results/2026-06-09-baseline.md \
+  claude-config/regression-set/results/<new-run>.md
+```
+
+A "REGRESSED" verdict from score.py blocks the merge — fix the prompt
+change until CRITICAL recall is at least as good as baseline.
+
 ### Step 8 — Merge
 
 ```bash
