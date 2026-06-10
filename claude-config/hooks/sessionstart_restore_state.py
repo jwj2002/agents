@@ -14,6 +14,7 @@ import logging
 import os
 import subprocess
 import sys
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 # File-based error logging
@@ -185,45 +186,82 @@ def _log_autorecall(fact_dir: Path, injected: int, total: int, chars: int) -> No
         logging.warning("autorecall metrics append failed", exc_info=True)
 
 
-def main() -> int:
-    _hook_in = json.load(sys.stdin)
+def _maybe_pull_agents(
+    agents_root: Path,
+    stamp_path: Path,
+    today_str: str,
+    git_fn=None,
+) -> bool:
+    """Pull the agents repo at most once per calendar day (UTC).
 
-    # 0. Pull latest agent shards (fail-open — divergence warns but does not abort session).
-    _agents_root = Path.home() / "agents"
-    if _agents_root.is_dir():
-        try:
-            _pull = subprocess.run(
-                ["git", "-C", str(_agents_root), "pull", "--ff-only", "--quiet"],
+    Stamp file: stamp_path stores the last-pull date via mtime.
+    Written only on successful pull so failures are retried next session.
+    Returns True if a pull was attempted, False if skipped (already pulled today).
+    Fail-open: any exception is logged but never propagates.
+    """
+    if git_fn is None:
+        def git_fn():
+            return subprocess.run(
+                ["git", "-C", str(agents_root), "pull", "--ff-only", "--quiet"],
                 capture_output=True,
                 timeout=10,
             )
-            if _pull.returncode != 0:
-                logging.warning(
-                    "git pull --ff-only failed on agents repo — shards may be stale. "
-                    "Resolve with: git -C ~/agents pull --ff-only"
-                )
-                print(
-                    "**Advisory**: agents repo diverged from origin — "
-                    "run `git -C ~/agents pull --ff-only` to sync latest shards.\n"
-                )
-            else:
-                # Pull succeeded — check whether the telemetry gate is tripped.
-                _gate_script = _agents_root / "claude-config" / "scripts" / "telemetry_gate.py"
-                if _gate_script.exists():
-                    try:
-                        _gate = subprocess.run(
-                            ["python3", str(_gate_script), "--verbose"],
-                            capture_output=True,
-                            text=True,
-                            timeout=5,
-                        )
-                        if _gate.returncode == 0:  # gate tripped
-                            _gate_msg = _gate.stdout.strip() or "gate tripped"
-                            print(f"**Advisory**: /learn gate tripped — {_gate_msg}\n")
-                    except Exception as _gate_exc:
-                        logging.warning(f"telemetry_gate check failed (non-fatal): {_gate_exc}")
-        except (subprocess.TimeoutExpired, OSError, Exception) as _pull_exc:
-            logging.warning(f"git pull --ff-only failed (non-fatal): {_pull_exc}")
+
+    # Skip if already pulled today.
+    if stamp_path.exists():
+        stamp_date = datetime.fromtimestamp(
+            stamp_path.stat().st_mtime, tz=timezone.utc
+        ).date().isoformat()
+        if stamp_date == today_str:
+            return False  # already pulled today
+
+    try:
+        result = git_fn()
+        if result.returncode != 0:
+            logging.warning(
+                "git pull --ff-only failed on agents repo — config may be behind origin. "
+                "Resolve with: git -C ~/agents pull --ff-only"
+            )
+            print(
+                "**Advisory**: agents repo diverged from origin — "
+                "run `git -C ~/agents pull --ff-only` to sync latest config.\n"
+            )
+            # Do NOT write stamp: next session should retry.
+        else:
+            # Pull succeeded — write/touch stamp.
+            stamp_path.parent.mkdir(parents=True, exist_ok=True)
+            stamp_path.touch()
+
+            # Check whether the telemetry gate is tripped.
+            _gate_script = agents_root / "claude-config" / "scripts" / "telemetry_gate.py"
+            if _gate_script.exists():
+                try:
+                    _gate = subprocess.run(
+                        ["python3", str(_gate_script), "--verbose"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    if _gate.returncode == 0:  # gate tripped
+                        _gate_msg = _gate.stdout.strip() or "gate tripped"
+                        print(f"**Advisory**: /learn gate tripped — {_gate_msg}\n")
+                except Exception as _gate_exc:
+                    logging.warning(f"telemetry_gate check failed (non-fatal): {_gate_exc}")
+    except (subprocess.TimeoutExpired, OSError, Exception) as _pull_exc:
+        logging.warning(f"git pull --ff-only failed (non-fatal): {_pull_exc}")
+
+    return True
+
+
+def main() -> int:
+    _hook_in = json.load(sys.stdin)
+
+    # 0. Pull latest agents config at most once per day (stamp-guarded, fail-open).
+    _agents_root = Path.home() / "agents"
+    _stamp_path = Path.home() / ".claude" / ".agents-pull-stamp"
+    _today_str = date.today().isoformat()
+    if _agents_root.is_dir():
+        _maybe_pull_agents(_agents_root, _stamp_path, _today_str)
 
     project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
     global_claude_dir = Path.home() / ".claude"
