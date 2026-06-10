@@ -929,7 +929,7 @@ git init
 | **doc-reader/** | Document reader with TTS | Python, Edge TTS/macOS TTS | Standalone, reads markdown/PDF/summaries |
 | **pr-changelog/** | PR changelog automation | Python, GitHub CLI | Post-merge hook, writes to CHANGELOG.md + vault |
 | **youtube-summarizer/** | YouTube summarizer | Python, yt-dlp, Whisper, Claude | Offline transcription (mlx-whisper on Apple Silicon) |
-| **orchestrate-workflow/** | Legacy orchestrate (superseded) | Markdown agents | Replaced by claude-config agents |
+| **_archived/orchestrate-workflow-legacy/** | Legacy orchestrate (archived #408) | Markdown agents | Replaced by claude-config agents |
 | **codex-config/** | Codex configuration | Bash installer | Symlinks to ~/.codex/ |
 
 ### Data Flow Between Projects
