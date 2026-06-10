@@ -484,11 +484,49 @@ def render_project_memory(fact_dir: Path, *, today: str | None = None) -> str:
 
     project = fact_dir.parent.name
 
+    # ---- Honest budget accounting (#430) ----
+    # Every character that ends up in the final rendered string is charged
+    # against AUTORECALL_TOTAL_CHARS, so the TOTAL rendered block length is
+    # <= the budget strictly. The render joins `lines` with "\n", so each line
+    # also costs one joining newline; `_cost` folds that in. We over-count the
+    # join by at most 1 char total (the final line has no trailing join), which
+    # only ever keeps us *under* budget — never over.
+    def _cost(text: str) -> int:
+        return len(text) + 1  # +1 for the "\n" inserted by "\n".join
+
+    # Fixed preamble that always renders, even with zero facts admitted: the
+    # section header and the "N summaries injected ..." line. The preamble
+    # embeds integer counts whose final widths aren't known until selection
+    # finishes, so reserve width for up to 4-digit counts up front and render
+    # the exact line later; the reserve is an upper bound on the real line.
+    header_line = "### Project Memory (auto-recalled)\n"
+    _preamble_tmpl = (
+        "{ns} summaries injected ({nb} of {ns2} with full body). "
+        "Verify against current code before acting — facts reflect what was "
+        "true when written.\n"
+    )
+    preamble_reserve = _cost(_preamble_tmpl.format(ns="0000", nb="0000", ns2="0000"))
+
+    # Full-body section header `\n#### Full bodies (top-NN)\n` — charged once,
+    # lazily, the first time a body is admitted (it only renders if non-empty).
+    def _full_body_header(n: int) -> str:
+        return f"\n#### Full bodies (top-{n})\n"
+
+    full_body_header_reserve = _cost(_full_body_header(9999))
+
+    # Trailing "Not injected (...)" CTA. It only renders when >=1 fact is
+    # omitted; the exact topic list isn't known up front, so reserve a fixed
+    # upper bound and render a line guaranteed not to exceed it at the end. We
+    # reserve this unconditionally during selection: if no fact ends up omitted
+    # the unused reserve just leaves the block under budget (still correct).
+    # The rendered CTA is truncated to `cta_reserve` so the reserve is a true
+    # upper bound regardless of fact-name length.
+    cta_reserve = 360
+
+    # Running total of charged characters.
+    used = _cost(header_line.rstrip("\n")) + preamble_reserve + cta_reserve
+
     # ---- Pass 1: summary injection ----
-    # Budget slice for summaries: up to half the total budget so full bodies
-    # can always fill the second half.
-    summary_budget = AUTORECALL_TOTAL_CHARS // 2
-    summary_used = 0
     summary_entries = []  # (safe_name, ftype, summary_text, fact_dict, verdict)
     leftover = []
 
@@ -501,13 +539,10 @@ def render_project_memory(fact_dir: Path, *, today: str | None = None) -> str:
         # Derive summary — safety-filtered inside _extract_summary.
         summary = _extract_summary(f, f["body"].strip())
 
-        # Summary line cost.
-        cost = len(summary) + len(safe_name) + 30
-        if summary_used + cost > summary_budget:
-            leftover.append(f)
-            continue
-
-        # Also classify the raw body for the body-pass safety check.
+        # Classify the raw body for the body-pass safety check. A suppressed
+        # body is replaced by the sentinel in the summary too, so charge the
+        # budget for the ACTUAL emitted summary text, not the pre-suppression
+        # candidate (#430 NIT).
         try:
             verdict, excerpt = _classify_body(f["body"].strip())
         except Exception:  # noqa: BLE001 — fail-open: filter errors must not crash hook
@@ -520,13 +555,19 @@ def render_project_memory(fact_dir: Path, *, today: str | None = None) -> str:
             # Suppressed body must not leak via its summary (PLAN: fail-safe).
             summary = _SUPPRESSED_BODY
 
+        # Exact emitted summary line: `**{name}** ({ftype}): {summary}`.
+        summary_line = f"**{safe_name}** ({f['type']}): {summary}"
+        cost = _cost(summary_line)
+        if used + cost > AUTORECALL_TOTAL_CHARS:
+            leftover.append(f)
+            continue
+
         summary_entries.append((safe_name, f["type"], summary, f, verdict))
-        summary_used += cost
+        used += cost
 
     # ---- Pass 2: full-body injection ----
-    body_budget = AUTORECALL_TOTAL_CHARS - summary_used
-    body_used = 0
     body_entries = []  # (safe_name, ftype, body_text)
+    body_header_charged = False
 
     for safe_name, ftype, _summary, f, verdict in summary_entries:
         # session/temporary facts are summary-only by declaration.
@@ -543,23 +584,27 @@ def render_project_memory(fact_dir: Path, *, today: str | None = None) -> str:
                 + f"\n… *(truncated — full fact: `{f['path']}`)*"
             )
 
-        cost = len(body) + len(safe_name) + 20
-        if body_used + cost > body_budget:
+        # Exact emitted body block: `**{name}** ({ftype}):\n{body}\n`.
+        body_block = f"**{safe_name}** ({ftype}):\n{body}\n"
+        cost = _cost(body_block)
+        # Charge the body-section header once, the first body admitted.
+        header_cost = 0 if body_header_charged else full_body_header_reserve
+        if used + header_cost + cost > AUTORECALL_TOTAL_CHARS:
             continue
+        if not body_header_charged:
+            used += header_cost
+            body_header_charged = True
         body_entries.append((safe_name, ftype, body))
-        body_used += cost
+        used += cost
 
     # Count only body-pass (non-suppressed) facts for the metrics record.
     real_injected = len(body_entries)
 
     # ---- Render ----
-    lines = ["### Project Memory (auto-recalled)\n"]
     n_summaries = len(summary_entries)
     n_bodies = len(body_entries)
-    lines.append(
-        f"{n_summaries} summaries injected ({n_bodies} of {n_summaries} with full body). "
-        "Verify against current code before acting — facts reflect what was true when written.\n"
-    )
+    lines = [header_line]
+    lines.append(_preamble_tmpl.format(ns=n_summaries, nb=n_bodies, ns2=n_summaries))
 
     # Summary section.
     for safe_name, ftype, summary, _f, _verdict in summary_entries:
@@ -567,7 +612,7 @@ def render_project_memory(fact_dir: Path, *, today: str | None = None) -> str:
 
     # Full-body section (omitted when empty).
     if body_entries:
-        lines.append(f"\n#### Full bodies (top-{n_bodies})\n")
+        lines.append(_full_body_header(n_bodies))
         for safe_name, ftype, body in body_entries:
             lines.append(f"**{safe_name}** ({ftype}):\n{body}\n")
 
@@ -576,13 +621,17 @@ def render_project_memory(fact_dir: Path, *, today: str | None = None) -> str:
             _redact_secret_name(f["name"]).replace("_", " ").replace("-", " ")
             for f in leftover[:8]
         )
-        lines.append(
+        cta_line = (
             f"\nNot injected ({len(leftover)}): {topics}. "
             "→ `~/agents/bin/memory recall <topic>` to pull these.\n"
         )
+        # Keep the rendered CTA within its reserved budget (true upper bound,
+        # independent of fact-name length). _cost adds 1 for the join newline.
+        if _cost(cta_line) > cta_reserve:
+            cta_line = cta_line[: cta_reserve - 1]
+        lines.append(cta_line)
 
-    total_used = summary_used + body_used
-    _log_autorecall(fact_dir, real_injected, len(facts), total_used)
+    _log_autorecall(fact_dir, real_injected, len(facts), used)
     return "\n".join(lines)
 
 

@@ -93,15 +93,17 @@ def test_feedback_outranks_project(tmp_path, monkeypatch):
 def test_budget_caps_injection_and_lists_leftovers(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     d = _memdir(tmp_path)
-    # Use 20 facts with 1100-char bodies so the summary budget (3000 chars) is
-    # exhausted before all can be summarised; this guarantees a "Not injected" line.
-    for i in range(20):
+    # Many facts with large bodies: under honest accounting (#430) every emitted
+    # char (summary lines + body blocks + headers + CTA) is charged against the
+    # single 6000 budget. With 40 facts whose ~200-char summaries alone exceed
+    # the budget, some are left out → a "Not injected" CTA must render.
+    for i in range(40):
         _fact(d, f"fact-{i:02d}", ftype="feedback", body="B" * 1100, mtime=1000 + i)
     out = H.render_project_memory(d, today=TODAY)
     assert "Not injected" in out
     assert "memory recall" in out
-    # In the new two-pass format, full bodies (in body section) are budget-capped.
-    # With ~1120-char body cost and 3000-char body budget, at most ~2 get bodies.
+    # Full bodies (in body section) remain budget-capped: with ~1120-char body
+    # cost competing against summaries in one 6000 budget, only a few fit.
     # Count lines of the form "**name** (feedback):\n" (body section entries).
     body_section_entries = out.count("(feedback):\n")
     assert body_section_entries <= 3
@@ -737,7 +739,9 @@ def test_suppressed_body_not_summarized(tmp_path, monkeypatch):
     out = H.render_project_memory(d, today=TODAY)
     assert "secret-fact" in out
     # Secret must not appear anywhere.
-    assert "sk-ant-api03-abc1234567890abcdef" not in out  # eval-ok: E15 — fabricated test fixture for safety-filter verification
+    assert (
+        "sk-ant-api03-abc1234567890abcdef" not in out
+    )  # eval-ok: E15 — fabricated test fixture for safety-filter verification
     # The suppressed sentinel must appear in the summary line.
     assert "[body suppressed" in out
 
@@ -825,9 +829,9 @@ def test_durability_session_summaries_only(tmp_path, monkeypatch):
 
 
 def test_budget_not_exceeded(tmp_path, monkeypatch):
-    """AC-c: with 20 facts of varying sizes, total rendered output stays within
-    the budget (with reasonable header overhead), and no single body exceeds
-    AUTORECALL_PER_FACT_CHARS."""
+    """AC-c: with 20 facts of varying sizes, the TOTAL rendered block length is
+    <= AUTORECALL_TOTAL_CHARS EXACTLY (no slack — #430 honest accounting), and
+    no single body exceeds AUTORECALL_PER_FACT_CHARS."""
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     d = _memdir(tmp_path)
     import random
@@ -843,14 +847,35 @@ def test_budget_not_exceeded(tmp_path, monkeypatch):
             body="X" * body_len,
         )
     out = H.render_project_memory(d, today=TODAY)
-    # Total output should not drastically exceed the budget (allow 500 chars for headers).
-    assert len(out) <= H.AUTORECALL_TOTAL_CHARS + 500
+    # Strict: every emitted character is charged against the budget.
+    assert len(out) <= H.AUTORECALL_TOTAL_CHARS
     # No single body block should exceed the per-fact cap.
     for line in out.split("\n"):
         if line.startswith("X"):
             assert (
                 len(line) <= H.AUTORECALL_PER_FACT_CHARS + 10
             )  # small fudge for trailing pointer
+
+
+def test_budget_strict_even_with_not_injected_cta(tmp_path, monkeypatch):
+    """#430: drive enough large facts to overflow the budget — which forces the
+    'Not injected (...)' CTA to render — and assert the TOTAL block length still
+    stays within AUTORECALL_TOTAL_CHARS exactly (CTA + headers + labels all
+    charged honestly)."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    # 40 large facts with long names guarantee leftovers (CTA renders) and
+    # exercise the per-entry label + CTA-truncation accounting.
+    for i in range(40):
+        _fact(
+            d,
+            f"a-very-long-feedback-fact-name-number-{i:03d}",
+            ftype="feedback",
+            body="Y" * 2500,
+        )
+    out = H.render_project_memory(d, today=TODAY)
+    assert "Not injected" in out  # CTA must render
+    assert len(out) <= H.AUTORECALL_TOTAL_CHARS
 
 
 # N9: fresh feedback outranks stale project in output order

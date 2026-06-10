@@ -73,6 +73,13 @@ def _split_frontmatter(text: str):
 
     Captures name/description/type; `type` may be top-level or nested under a
     `metadata:` block (both shapes exist in the store).
+
+    Surrounding single/double quotes are stripped from every parsed value so
+    that valid-YAML quoted forms like ``durability: "durable"`` are honored
+    identically by this CLI and by the SessionStart hook's `_fact_meta`
+    (which does ``.strip().strip("'\\"")``). Without this, the hook treats
+    ``durability: "durable"`` as durable while `memory doctor`/`archive` saw
+    the literal ``"durable"`` and could still flag the fact stale (#430).
     """
     meta = {
         "name": "",
@@ -94,7 +101,9 @@ def _split_frontmatter(text: str):
         for key in ("name", "description", "type", "expires", "summary", "durability"):
             # match `key:` whether top-level or indented (metadata.type)
             if s.startswith(key + ":") and not meta[key]:
-                meta[key] = s[len(key) + 1 :].strip()
+                # Mirror the hook's stripping exactly: trim whitespace then
+                # strip surrounding ' or " quotes.
+                meta[key] = s[len(key) + 1 :].strip().strip("'\"")
     return meta, body
 
 
