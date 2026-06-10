@@ -81,11 +81,7 @@ To list all app repos:
 ssh jbox06 'ls ~/app-repos/'
 ```
 
-## Rules for Remote Development
-
-One source of truth: the repo on jbox06 (no local clones). All file writes,
-reads (`ssh jbox06 'cat ...'`), git ops, and tests run on jbox06. GitLab push
-goes jbox06 → GitLab over the local network.
+One source of truth: the repo on jbox06. All file writes, reads, git ops, and tests run on jbox06.
 
 ## Mode 3: Local Copy of a jbox06 Repo (Hybrid) — rare
 
@@ -98,4 +94,3 @@ explicitly asks for a local copy.
 
 - Try to reach GitLab (172.16.20.50) directly from the laptop — it won't work
 - Maintain two copies without syncing — creates drift
-- Assume a local clone is up to date — always fetch from jbox06 first
