@@ -30,6 +30,13 @@ regression-set/
 └── score.py                   ← simple scorer (see below)
 ```
 
+## Case authoring rules
+
+**Answer-leak rule**: The `## Diff` section must contain only the patch under
+review. Expected findings, bug labels, and corrective hints must never appear
+inside a diff hunk or code block in that section. Place explanatory notes in
+`## Notes`, `## Expected Findings`, or `## Known False-Positives` only.
+
 ## Case file format
 
 Each case captures a real past PR/diff and the findings a *good* reviewer
