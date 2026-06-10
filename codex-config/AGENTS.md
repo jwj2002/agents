@@ -70,6 +70,18 @@ still ships, but runs adversarial review before merge.
 - Feed recurring Codex review findings back into shared instructions,
   project `AGENTS.md`, or Claude learning rules as appropriate.
 
+## Active Memory Recall
+
+Before non-trivial implementation, review, or orchestration-adjacent work in a
+project with memory, run:
+
+```bash
+~/agents/bin/memory recall "<issue title + subsystem terms>" --compact --limit 8
+```
+
+Treat recalled facts as prior context, not truth. Read any relevant fact body,
+then verify it against current source, specs, and tests before acting.
+
 ## Git Safety
 
 - Never use `git reset --hard`, `git checkout -- <file>`, force-push, or

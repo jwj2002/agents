@@ -12,6 +12,7 @@ different runtime surfaces.
 - Shared project artifacts: `.agents/outputs/`
 - CLI-backed workflows: `action`, `project`, `decision`, `pulse`,
   `email-digest`, and related Python CLIs
+- Parity drift report: `bin/agent-parity check`
 - Validation scripts and CI in `.github/workflows/validate.yml`
 
 Shared rules belong in `AGENTS.md` or shared skills. Do not duplicate shared
@@ -116,6 +117,7 @@ bash -n claude-config/new-project-claude.sh
 python3 -c "import json; json.load(open('claude-config/settings.json'))"
 SETTINGS_PATH=$PWD/claude-config/settings.json python3 claude-config/scripts/validate-hooks.py
 codex execpolicy check --pretty --rules codex-config/rules/shared.rules -- git status
+bin/agent-parity check
 ```
 
 Installer smoke:
