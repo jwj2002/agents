@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 from datetime import date, datetime, timezone
@@ -51,6 +52,7 @@ logging.basicConfig(
 
 try:
     import yaml
+
     HAS_YAML = True
 except ImportError:
     HAS_YAML = False
@@ -58,9 +60,256 @@ except ImportError:
 # Try to import centralized state manager
 try:
     from state_manager import get_active_work as _sm_get_active_work
+
     HAS_STATE_MANAGER = True
 except ImportError:
     HAS_STATE_MANAGER = False
+
+
+# ---------------------------------------------------------------- safety-filter
+
+
+class BodyClassificationError(Exception):
+    """Internal: classification logic failed (caught immediately, never propagates)."""
+
+
+class InjectionSkipLogError(Exception):
+    """Internal: skip-log write failed (caught immediately, never propagates)."""
+
+
+_SUPPRESSED_BODY = "[body suppressed — safety filter]"
+
+# Secret-shaped patterns — any match suppresses the body.
+# The key=value branch (last alternative) captures the value portion in group 1
+# so the whitelist guard can inspect it without re-running the full pattern.
+# Note: re.IGNORECASE applied globally to cover the key=value branch.
+#
+# The sk- alternative allows up to 3 short hyphenated prefix segments
+# (sk-ant-api03-…, sk-proj-…) before a HIGH-ENTROPY run of 12+ alnum chars.
+# Two guards stop ordinary hyphenated words (entertask-project-pointer,
+# task-project, EnterTask-Code-Review-2026-05-12) from matching: (1) the \b
+# anchor — in those words "sk" sits mid-token with no word boundary before it;
+# (2) the 12-char entropy floor on the final run — those words have no 12+ char
+# alnum segment. The floor is 12 (not 16) to keep real-shaped short keys like
+# sk-ant-abc1234567890 (13-char run) suppressed; 16 would let them slip through.
+_SECRET_RE = re.compile(
+    r"""
+    \bsk-(?:[A-Za-z0-9]+-){0,3}[A-Za-z0-9_]{12,}\b  # OpenAI/Anthropic sk- keys (hyphenated prefixes; _ allowed in base64url tails)
+    | \bgithub_pat_[A-Za-z0-9_]{20,}   # GitHub fine-grained PATs
+    | \bgh[pousr]_[A-Za-z0-9]{10,}     # GitHub tokens (ghp_/gho_/ghu_/ghs_/ghr_)
+    | \bglpat-[A-Za-z0-9]{5,}          # GitLab PATs
+    | \bxox[bpoas]-[A-Za-z0-9\-]{10,}  # Slack tokens
+    | \bAKIA[A-Z0-9]{16}\b             # AWS access key IDs ([A-Z0-9]{16} per AWS spec)
+    | \beyJ[A-Za-z0-9_\-]{10,}         # JWT header prefix
+    | -----BEGIN\ (?:RSA\ |EC\ |OPENSSH\ )?PRIVATE\ KEY-----  # PEM private keys
+    | (?:password|secret|api_key)\s*[:=]\s*([^\s\$\{`][^\s]{4,})  # key=value credentials
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+# Pointer-style value guard. A value portion (captured group 1 of the key=value
+# pattern) is exempt ONLY when it is unambiguously a pointer/placeholder, not a
+# smuggled literal credential (FIX C). The simple prefix list below covers the
+# shapes that carry no inline value:
+#   $FOO / ${FOO}   -- shell/template expansion
+#   `...`           -- code-span literal (markdown)
+#   from ...        -- prose pointer ("from $ENV", "from the vault")
+_WHITELIST_PREFIX_RE = re.compile(r"^\s*(?:\$|\$\{|`|from )")
+
+# An env: pointer is only a pointer when it names an env var in UPPER_SNAKE
+# convention (env:DB_PASSWORD). env:hunter2supersecret is a smuggled literal.
+_ENV_POINTER_RE = re.compile(r"^\s*env:[A-Z_][A-Z0-9_]*\s*$")
+
+# A <...> placeholder is only exempt when the inner content looks like a real
+# placeholder: no whitespace, no embedded secret shape, and no long unbroken
+# alphanumeric run (which would look like a credential rather than a label).
+_ANGLE_PLACEHOLDER_RE = re.compile(r"^\s*<([^>]*)>\s*$")
+_LONG_TOKEN_RE = re.compile(r"[A-Za-z0-9]{16,}")
+
+
+def _is_whitelisted_value(value: str) -> bool:
+    """True when a captured key=value value portion is a pointer/placeholder.
+
+    Tightened (FIX C): `env:` and `<...>` no longer blanket-exempt. `env:` must
+    name an UPPER_SNAKE env var; `<...>` must be a placeholder with no embedded
+    secret, no whitespace, and no long unbroken token. Anything else falls
+    through to the literal-credential branch and is suppressed.
+    """
+    if _WHITELIST_PREFIX_RE.match(value):
+        return True
+    if _ENV_POINTER_RE.match(value):
+        return True
+    m = _ANGLE_PLACEHOLDER_RE.match(value)
+    if m:
+        inner = m.group(1)
+        if (
+            inner
+            and not _SECRET_RE.search(inner)
+            and not re.search(r"\s", inner)
+            and not _LONG_TOKEN_RE.search(inner)
+        ):
+            return True
+    return False
+
+
+# Instruction-injection patterns (case-insensitive applied globally).
+_INJECTION_RE = re.compile(
+    r"""
+    ignore\s+(?:all\s+)?(?:prior|previous|above|earlier)\s+(?:instructions?|context)
+    | you\s+are\s+now\s+(?:a\s+)?\w+(?:\s+\w+){2,}(?:$|\.)
+    | disregard\s+(?:all\s+)?(?:prior|previous|above|earlier)\s+(?:instructions?|context)
+    | system\s*prompt\s*:
+    | \[INST\]|\[\/INST\]|<\|im_start\|>
+    """,
+    re.VERBOSE | re.MULTILINE | re.IGNORECASE,
+)
+
+
+def _scrub_secrets(text: str) -> str:
+    """Replace every secret-shaped match in `text` with a redacted token.
+
+    FIX A: redaction is UNCONDITIONAL — it does not depend on how the body was
+    classified. Any excerpt that leaves this module (log records AND rendered
+    output) must pass through here so a secret embedded inside an
+    injection-classified or error excerpt can never be written verbatim. Each
+    match is replaced by its first 3 chars + "***" (token prefix preserved for
+    triage, credential body removed). Whitelisted pointer values are left intact
+    so harmless pointers in an excerpt are not mangled.
+    """
+    if not text:
+        return text
+
+    def _repl(m: "re.Match[str]") -> str:
+        value_capture = m.group(1) if m.lastindex else None
+        if value_capture is not None and _is_whitelisted_value(value_capture):
+            return m.group(0)
+        matched = m.group(0)
+        return matched[:3] + "***"
+
+    try:
+        return _SECRET_RE.sub(_repl, text)
+    except Exception:  # noqa: BLE001 — fail-closed on redaction: never emit raw
+        # If substitution somehow fails, drop the excerpt entirely rather than
+        # risk leaking it.
+        return "[redacted — safety filter]"
+
+
+def _scan_secret_line(line: str) -> str | None:
+    """Return a redactable excerpt if a single line contains a literal secret.
+
+    The whitelist guard exempts ONLY a pointer-style key=value match on THIS
+    line. Because every key=value match is re-checked here per line, scanning
+    continues past a whitelisted match in the body (see _classify_body): a
+    whitelisted pointer on one line never grants the rest of the body a pass.
+    """
+    for m in _SECRET_RE.finditer(line):
+        value_capture = m.group(1) if m.lastindex else None
+        if value_capture is not None and _is_whitelisted_value(value_capture):
+            # Pointer-style reference on this match — not a literal credential.
+            # Keep scanning later matches on the same line.
+            continue
+        return m.group(0)[:60]
+    return None
+
+
+def _classify_body(body: str) -> tuple[str, str | None]:
+    """Classify a fact body (or fact name) for injection safety.
+
+    Returns:
+        ("ok", None)              -- safe to inject verbatim
+        ("secret", excerpt)       -- secret-shaped pattern found
+        ("injection", excerpt)    -- instruction-injection phrase found
+
+    Never raises. On internal error returns ("ok", None) (fail-open) and the
+    caller is expected to emit a `classify_error` diagnostic via the boolean
+    returned by _classify_body_raised — kept simple here by logging directly.
+    """
+    try:  # noqa: BLE001 — fail-open surface: classification errors must never crash SessionStart
+        # Check injection patterns first (no whitelist needed).
+        m = _INJECTION_RE.search(body)
+        if m:
+            return ("injection", m.group(0)[:60])
+
+        # Scan for secrets line-by-line so a whitelisted pointer on one line
+        # never short-circuits scanning of the remaining lines (BLOCKING 2).
+        for line in body.splitlines() or [body]:
+            excerpt = _scan_secret_line(line)
+            if excerpt is not None:
+                return ("secret", excerpt)
+
+        return ("ok", None)
+    except Exception:  # noqa: BLE001 — fail-open: swallow all errors, log nothing sensitive
+        # Signal the failure with a sentinel verdict so the caller can emit a
+        # classify_error diagnostic. "error" is treated as fail-open (inject).
+        return ("error", None)
+
+
+def _log_injection_skip(
+    fact_name: str,
+    reason: str,
+    excerpt: str,
+    project: str,
+) -> None:
+    """Append a skip record to memory-autoinject.jsonl. Best-effort.
+
+    NEVER writes a raw secret. FIX A: the excerpt is scrubbed UNCONDITIONALLY
+    (regardless of `reason`) so a secret embedded inside an injection or error
+    excerpt is also redacted before it is written.
+    """
+    try:  # noqa: BLE001 — fail-open: logging errors must never crash SessionStart
+        # Scrub every secret-shaped match out of the excerpt, no matter the
+        # classification reason — an injection-classified excerpt can still
+        # contain a credential.
+        safe_excerpt = _scrub_secrets(excerpt) if excerpt else excerpt
+
+        rec = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "event": "injection_skip",
+            "project": project,
+            "fact": fact_name,
+            "reason": reason,
+            "excerpt": safe_excerpt,
+        }
+        log = Path.home() / ".claude" / "memory-autoinject.jsonl"
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec) + "\n")
+    except Exception:  # noqa: BLE001 — fail-open: do not let log write crash the hook
+        logging.warning("injection_skip log append failed", exc_info=True)
+
+
+def _log_classify_error(fact_name: str, project: str) -> None:
+    """Append a `classify_error` diagnostic to memory-autoinject.jsonl.
+
+    Emitted when the classifier hit its exception path (fail-open). NEVER
+    includes the body or any secret — only the (possibly redacted) fact name.
+    """
+    try:  # noqa: BLE001 — fail-open: logging errors must never crash SessionStart
+        rec = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "event": "classify_error",
+            "project": project,
+            "fact": fact_name,
+        }
+        log = Path.home() / ".claude" / "memory-autoinject.jsonl"
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec) + "\n")
+    except Exception:  # noqa: BLE001 — fail-open: do not let log write crash the hook
+        logging.warning("classify_error log append failed", exc_info=True)
+
+
+def _redact_secret_name(name: str) -> str:
+    """Redact a fact name that itself classifies as secret/injection (BLOCKING 3).
+
+    Returns a safe placeholder that never echoes the raw name. Pure function;
+    never raises (fail-open via _classify_body's internal try/except).
+    """
+    verdict, _ = _classify_body(name)
+    if verdict in ("secret", "injection"):
+        return "[name redacted — safety filter]"
+    return name
+
+
+# ---------------------------------------------------------------- active-work
 
 
 def get_active_work(yaml_content: str) -> dict:
@@ -102,8 +351,10 @@ def _fact_meta(path: Path) -> dict | None:
                 stripped = line.strip()
                 for key in ("type", "expires", "name"):
                     if stripped.startswith(f"{key}:"):
-                        meta[key] = stripped.split(":", 1)[1].strip().strip("'\"") or meta[key]
-            meta["body"] = text[end + 4:].lstrip("-").lstrip("\n")
+                        meta[key] = (
+                            stripped.split(":", 1)[1].strip().strip("'\"") or meta[key]
+                        )
+            meta["body"] = text[end + 4 :].lstrip("-").lstrip("\n")
     return meta
 
 
@@ -119,6 +370,7 @@ def render_project_memory(fact_dir: Path, *, today: str | None = None) -> str:
     budget runs out. Remaining facts are listed as topics with the recall CTA.
     """
     from datetime import date
+
     today = today or date.today().isoformat()
 
     paths = [p for p in sorted(fact_dir.glob("*.md")) if p.name != "MEMORY.md"]
@@ -132,38 +384,73 @@ def render_project_memory(fact_dir: Path, *, today: str | None = None) -> str:
     if not facts:
         return ""
 
-    facts.sort(key=lambda f: (_TYPE_PRIORITY.get(f["type"], 9),
-                              -f["path"].stat().st_mtime))
+    facts.sort(
+        key=lambda f: (_TYPE_PRIORITY.get(f["type"], 9), -f["path"].stat().st_mtime)
+    )
     injected, leftover, used = [], [], 0
     for f in facts:
         body = f["body"].strip()
         if len(body) > AUTORECALL_PER_FACT_CHARS:
-            body = (body[:AUTORECALL_PER_FACT_CHARS]
-                    + f"\n… *(truncated — full fact: `{f['path']}`)*")
-        cost = len(body) + len(f["name"]) + 40
+            body = (
+                body[:AUTORECALL_PER_FACT_CHARS]
+                + f"\n… *(truncated — full fact: `{f['path']}`)*"
+            )
+
+        project = fact_dir.parent.name
+
+        # BLOCKING 3: the fact NAME is rendered to context and written to the
+        # log verbatim — run it through the same classifier and redact it in
+        # BOTH surfaces if it is secret/injection-shaped. Never emit raw name.
+        try:
+            safe_name = _redact_secret_name(f["name"])
+        except Exception:  # noqa: BLE001 — fail-open: redaction must not crash hook
+            safe_name = f["name"]
+
+        # Safety filter: check for secret-shaped or injection-phrase content.
+        try:
+            verdict, excerpt = _classify_body(body)
+        except Exception:  # noqa: BLE001 — fail-open: filter errors must not crash hook
+            verdict, excerpt = "error", None
+
+        if verdict == "error":
+            # NIT 1: classifier failed. Fail-open (inject the body) but emit a
+            # diagnostic so the failure is observable. Never logs the body.
+            _log_classify_error(safe_name, project)
+        elif verdict != "ok":
+            _log_injection_skip(safe_name, verdict, excerpt or "", project)
+            # Replace body with sentinel — fact name (redacted if needed) still
+            # appears in output but raw content is not injected.
+            body = _SUPPRESSED_BODY
+
+        cost = len(body) + len(safe_name) + 40
         if used + cost > AUTORECALL_TOTAL_CHARS:
             leftover.append(f)
             continue
-        injected.append((f, body))
+        injected.append((safe_name, f["type"], body))
         used += cost
+
+    # Count only non-suppressed facts for the metrics record.
+    real_injected = sum(1 for _, _, b in injected if b != _SUPPRESSED_BODY)
 
     lines = ["### Project Memory (auto-recalled)\n"]
     lines.append(
-        f"{len(injected)} of {len(facts)} fact bodies injected "
+        f"{real_injected} of {len(facts)} fact bodies injected "
         "(highest-value first, budget-capped). Verify against current code "
         "before acting — facts reflect what was true when written.\n"
     )
-    for f, body in injected:
-        lines.append(f"**{f['name']}** ({f['type']}):\n{body}\n")
+    for name, ftype, body in injected:
+        lines.append(f"**{name}** ({ftype}):\n{body}\n")
     if leftover:
-        topics = ", ".join(f["name"].replace("_", " ").replace("-", " ")
-                           for f in leftover[:8])
+        topics = ", ".join(
+            _redact_secret_name(f["name"]).replace("_", " ").replace("-", " ")
+            for f in leftover[:8]
+        )
         lines.append(
             f"Not injected ({len(leftover)}): {topics}. "
             "→ `~/agents/bin/memory recall <topic>` to pull these.\n"
         )
 
-    _log_autorecall(fact_dir, len(injected), len(facts), used)
+    _log_autorecall(fact_dir, real_injected, len(facts), used)
     return "\n".join(lines)
 
 
@@ -172,6 +459,7 @@ def _log_autorecall(fact_dir: Path, injected: int, total: int, chars: int) -> No
     auto-recall separately from manual recall. Best-effort."""
     try:
         from datetime import datetime, timezone
+
         rec = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "project": fact_dir.parent.name,
@@ -200,6 +488,7 @@ def _maybe_pull_agents(
     Fail-open: any exception is logged but never propagates.
     """
     if git_fn is None:
+
         def git_fn():
             return subprocess.run(
                 ["git", "-C", str(agents_root), "pull", "--ff-only", "--quiet"],
@@ -209,9 +498,11 @@ def _maybe_pull_agents(
 
     # Skip if already pulled today.
     if stamp_path.exists():
-        stamp_date = datetime.fromtimestamp(
-            stamp_path.stat().st_mtime, tz=timezone.utc
-        ).date().isoformat()
+        stamp_date = (
+            datetime.fromtimestamp(stamp_path.stat().st_mtime, tz=timezone.utc)
+            .date()
+            .isoformat()
+        )
         if stamp_date == today_str:
             return False  # already pulled today
 
@@ -233,7 +524,9 @@ def _maybe_pull_agents(
             stamp_path.touch()
 
             # Check whether the telemetry gate is tripped.
-            _gate_script = agents_root / "claude-config" / "scripts" / "telemetry_gate.py"
+            _gate_script = (
+                agents_root / "claude-config" / "scripts" / "telemetry_gate.py"
+            )
             if _gate_script.exists():
                 try:
                     _gate = subprocess.run(
@@ -246,7 +539,9 @@ def _maybe_pull_agents(
                         _gate_msg = _gate.stdout.strip() or "gate tripped"
                         print(f"**Advisory**: /learn gate tripped — {_gate_msg}\n")
                 except Exception as _gate_exc:
-                    logging.warning(f"telemetry_gate check failed (non-fatal): {_gate_exc}")
+                    logging.warning(
+                        f"telemetry_gate check failed (non-fatal): {_gate_exc}"
+                    )
     except (subprocess.TimeoutExpired, OSError, Exception) as _pull_exc:
         logging.warning(f"git pull --ff-only failed (non-fatal): {_pull_exc}")
 
@@ -311,7 +606,9 @@ def main() -> int:
             # Last resort: minimal inline reminder
             print("### Critical Patterns\n")
             print("1. **VERIFICATION_GAP**: Read spec/code before assuming")
-            print("2. **ENUM_VALUE**: Use VALUES not Python names (CO-OWNER not CO_OWNER)")
+            print(
+                "2. **ENUM_VALUE**: Use VALUES not Python names (CO-OWNER not CO_OWNER)"
+            )
             print("3. **COMPONENT_API**: Read PropTypes before using components")
             print()
             print("Full patterns: `~/.claude/rules/core-patterns.md`\n")
@@ -356,9 +653,12 @@ def main() -> int:
         global_memory_dir / "patterns-full.md"
     ).exists():
         print("---")
-        print("*Full patterns available at `.claude/memory/patterns-full.md` if needed.*\n")
+        print(
+            "*Full patterns available at `.claude/memory/patterns-full.md` if needed.*\n"
+        )
 
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
