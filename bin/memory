@@ -27,9 +27,11 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import json
 import re
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 PROJECTS_ROOT = Path.home() / ".claude" / "projects"
@@ -45,6 +47,9 @@ PERISHABLE_PAT = re.compile(
     re.I,
 )
 STALE_DAYS = 90
+# Observability threshold for doctor's cold% metric: facts untouched >30d.
+# Distinct from STALE_DAYS (90d archive/perishable cutoff) — do not conflate.
+COLD_DAYS = 30
 
 
 def _memory_dirs():
@@ -323,6 +328,38 @@ def cmd_doctor(args) -> int:
         f"checked {total_projects} project(s): {total_dead} dead pointer(s), "
         f"{total_unindexed} unindexed file(s), {total_ttl} TTL candidate(s)"
     )
+
+    # --- Injection metrics (from memory-autoinject.jsonl) ---
+    log_path = getattr(args, "log", None)
+    _log_path = Path(log_path).expanduser() if log_path else AUTOINJECT_LOG
+    log_records = _load_autoinject_log(_log_path)
+    autorecall_recs = [r for r in log_records if "event" not in r]
+    print()
+    print("--- Injection metrics (from memory-autoinject.jsonl) ---")
+
+    cold_count, total_fact_files = _cold_pct_from_store()
+    if total_fact_files:
+        cold_pct = cold_count / total_fact_files * 100
+        print(
+            f"cold (>{COLD_DAYS}d):     {cold_pct:.0f}%  "
+            f"({cold_count} of {total_fact_files} fact files)"
+        )
+    else:
+        print(f"cold (>{COLD_DAYS}d):     no data yet (no fact files found)")
+
+    if autorecall_recs:
+        active = sum(1 for r in autorecall_recs if r.get("facts_injected", 0) > 0)
+        total_s = len(autorecall_recs)
+        ar_pct = active / total_s * 100
+        print(
+            f"active-recall%: {ar_pct:.0f}%  "
+            f"({active} of {total_s} sessions had >=1 fact injected)"
+        )
+    else:
+        print("active-recall%: no data yet (memory-autoinject.jsonl empty or missing)")
+
+    print("write:read:     deferred (see `memory readout` for available metrics)")
+
     if args.strict and (total_dead or total_unindexed or total_ttl):
         return 1
     return 0
@@ -366,6 +403,138 @@ def cmd_archive(args) -> int:
         print(
             f"{total} TTL candidate(s) across the store — re-run with --apply to archive"
         )
+    return 0
+
+
+# ---------------------------------------------------------------- readout
+
+
+AUTOINJECT_LOG = Path.home() / ".claude" / "memory-autoinject.jsonl"
+
+
+def _load_autoinject_log(log_path: Path) -> list[dict]:
+    """Parse memory-autoinject.jsonl; return list of record dicts.
+
+    Returns [] if the file is missing or empty. Malformed lines are skipped
+    silently (never crash on a partially-written log).
+    """
+    records: list[dict] = []
+    try:
+        text = log_path.read_text(encoding="utf-8")
+    except OSError:
+        return records
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return records
+
+
+def _cold_pct_from_store(days: int = COLD_DAYS) -> tuple[int, int]:
+    """Return (cold_count, total_count) of fact files across all projects.
+
+    A fact file is "cold" when its mtime is older than *days* days.
+    Defaults to COLD_DAYS (30d) — the audit definition; not the 90d
+    archive/perishable threshold (STALE_DAYS).
+    """
+    now = time.time()
+    threshold = days * 86400
+    total = cold = 0
+    for mem in _memory_dirs():
+        for path in _fact_files(mem):
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            total += 1
+            if (now - mtime) > threshold:
+                cold += 1
+    return cold, total
+
+
+def cmd_readout(args) -> int:
+    log_path = Path(args.log).expanduser() if args.log else AUTOINJECT_LOG
+    records = _load_autoinject_log(log_path)
+
+    # Separate record kinds: no "event" key → autorecall; keyed → skip/error
+    autorecall = [r for r in records if "event" not in r]
+    skips = [r for r in records if r.get("event") == "injection_skip"]
+
+    print("memory readout")
+    print("==============")
+    print(f"log: {log_path}  ({len(records)} record(s))")
+    print()
+
+    if not autorecall and not skips:
+        print("no data yet — memory-autoinject.jsonl is empty or has no records")
+        return 0
+
+    total_sessions = len(autorecall)
+    total_injected = sum(r.get("facts_injected", 0) for r in autorecall)
+    total_chars = sum(r.get("chars", 0) for r in autorecall)
+    total_facts_budget = sum(r.get("facts_total", 0) for r in autorecall)
+    total_not_injected = sum(
+        max(0, r.get("facts_total", 0) - r.get("facts_injected", 0)) for r in autorecall
+    )
+    active_sessions = sum(1 for r in autorecall if r.get("facts_injected", 0) > 0)
+
+    avg_injected = total_injected / total_sessions if total_sessions else 0.0
+    avg_chars = total_chars / total_sessions if total_sessions else 0.0
+    avg_not_injected = total_not_injected / total_sessions if total_sessions else 0.0
+    avg_coverage = (
+        (total_injected / total_facts_budget * 100) if total_facts_budget else 0.0
+    )
+    active_recall_pct = (
+        (active_sessions / total_sessions * 100) if total_sessions else 0.0
+    )
+
+    print(f"Injection sessions:     {total_sessions}")
+    print(
+        f"Facts injected:         {total_injected} total  "
+        f"(avg {avg_injected:.1f} / session)"
+    )
+    print(
+        f"Chars used:             {total_chars} total  (avg {avg_chars:.0f} / session)"
+    )
+    print(f"Facts skipped:          {len(skips)}  (injection_skip events)")
+    print(
+        f"Facts not injected:     {total_not_injected}  "
+        f"(budget/rank — avg {avg_not_injected:.1f} / session)"
+    )
+    print(
+        f"Injection coverage:     {avg_coverage:.0f}%  "
+        f"(avg facts_injected / facts_total per session)"
+    )
+    print()
+
+    if skips:
+        print("Top skipped facts (by frequency):")
+        fact_counter: Counter = Counter()
+        reason_by_fact: dict[str, Counter] = {}
+        for r in skips:
+            fact = r.get("fact", "(unknown)")
+            reason = r.get("reason", "")
+            fact_counter[fact] += 1
+            if fact not in reason_by_fact:
+                reason_by_fact[fact] = Counter()
+            if reason:
+                reason_by_fact[fact][reason] += 1
+        for fact, count in fact_counter.most_common(10):
+            top_reason = ""
+            if reason_by_fact.get(fact):
+                top_reason = f", reason: {reason_by_fact[fact].most_common(1)[0][0]}"
+            print(f"  {fact}  ({count}x{top_reason})")
+        print()
+
+    print(
+        f"active-recall%:  {active_recall_pct:.0f}%  "
+        f"({active_sessions} of {total_sessions} sessions had >=1 fact injected)"
+    )
+    print("write:read:      deferred  (transcript scan needed — not yet implemented)")
     return 0
 
 
@@ -431,6 +600,15 @@ def main(argv=None) -> int:
         help=f"perishable-staleness threshold in days (default {STALE_DAYS})",
     )
     p_archive.set_defaults(func=cmd_archive)
+
+    p_readout = sub.add_parser(
+        "readout", help="summarise memory-autoinject.jsonl telemetry"
+    )
+    p_readout.add_argument(
+        "--log",
+        help="path to autoinject log (default: ~/.claude/memory-autoinject.jsonl)",
+    )
+    p_readout.set_defaults(func=cmd_readout)
 
     args = parser.parse_args(argv)
     return args.func(args)
