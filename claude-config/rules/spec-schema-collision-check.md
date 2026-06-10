@@ -202,5 +202,5 @@ This rule has TWO origin incidents:
 The promotion happened because the buddy-local memory was invisible
 to other projects, so the lesson was at risk of being relearned
 elsewhere. Documented promotion path lives in
-`~/agents/claude-config/CLAUDE.md` (the global orientation) per
-Proposal 5 of the 2026-06-03 corrective-proposals doc.
+`~/.claude/rules/memory-promotion.md` per Proposal 5 of the
+2026-06-03 corrective-proposals doc.
