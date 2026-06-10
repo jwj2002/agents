@@ -64,7 +64,7 @@ def _project_label(memory_dir: Path) -> str:
     if name == prefix:
         return "(home)"
     if name.startswith(prefix + "-"):
-        return name[len(prefix) + 1:]
+        return name[len(prefix) + 1 :]
     return name.lstrip("-")
 
 
@@ -73,21 +73,37 @@ def _split_frontmatter(text: str):
 
     Captures name/description/type; `type` may be top-level or nested under a
     `metadata:` block (both shapes exist in the store).
+
+    Surrounding single/double quotes are stripped from every parsed value so
+    that valid-YAML quoted forms like ``durability: "durable"`` are honored
+    identically by this CLI and by the SessionStart hook's `_fact_meta`
+    (which does ``.strip().strip("'\\"")``). Without this, the hook treats
+    ``durability: "durable"`` as durable while `memory doctor`/`archive` saw
+    the literal ``"durable"`` and could still flag the fact stale (#430).
     """
-    meta = {"name": "", "description": "", "type": "", "expires": ""}
+    meta = {
+        "name": "",
+        "description": "",
+        "type": "",
+        "expires": "",
+        "summary": "",
+        "durability": "",
+    }
     if not text.startswith("---"):
         return meta, text
     end = text.find("\n---", 3)
     if end == -1:
         return meta, text
     fm = text[3:end]
-    body = text[end + 4:].lstrip("\n")
+    body = text[end + 4 :].lstrip("\n")
     for line in fm.splitlines():
         s = line.strip()
-        for key in ("name", "description", "type", "expires"):
+        for key in ("name", "description", "type", "expires", "summary", "durability"):
             # match `key:` whether top-level or indented (metadata.type)
             if s.startswith(key + ":") and not meta[key]:
-                meta[key] = s[len(key) + 1:].strip()
+                # Mirror the hook's stripping exactly: trim whitespace then
+                # strip surrounding ' or " quotes.
+                meta[key] = s[len(key) + 1 :].strip().strip("'\"")
     return meta, body
 
 
@@ -107,13 +123,17 @@ def _is_expired(meta: dict, today: datetime.date) -> bool:
         return False
 
 
-def _is_stale_perishable(path: Path, meta: dict, mtime: float, now: float, stale_days: int) -> bool:
+def _is_stale_perishable(
+    path: Path, meta: dict, mtime: float, now: float, stale_days: int
+) -> bool:
     """Heuristic for the legacy backlog (no explicit `expires:`).
 
     Durable types (feedback/user/reference) never go stale. A `type: project`
     fact whose filename looks like session-state and is untouched > stale_days
-    is a TTL candidate.
+    is a TTL candidate. `durability: durable` overrides all type/filename checks.
     """
+    if meta.get("durability", "") == "durable":
+        return False
     if meta.get("type", "") != "project":
         return False
     if not PERISHABLE_PAT.search(path.name):
@@ -121,7 +141,14 @@ def _is_stale_perishable(path: Path, meta: dict, mtime: float, now: float, stale
     return (now - mtime) > stale_days * 86400
 
 
-def _ttl_reason(path: Path, meta: dict, mtime: float, today: datetime.date, now: float, stale_days: int):
+def _ttl_reason(
+    path: Path,
+    meta: dict,
+    mtime: float,
+    today: datetime.date,
+    now: float,
+    stale_days: int,
+):
     """Return a human reason string if the fact is a TTL candidate, else None."""
     if _is_expired(meta, today):
         return f"expired {meta['expires']}"
@@ -146,6 +173,7 @@ def _deindex(index_path: Path, filename: str) -> None:
 
 
 # ---------------------------------------------------------------- recall
+
 
 def cmd_recall(args) -> int:
     terms = [t.lower() for t in args.query.split() if t.strip()]
@@ -199,6 +227,8 @@ def cmd_recall(args) -> int:
             name = meta["name"] or path.stem
             desc = (" — " + meta["description"]) if meta["description"] else ""
             print(f"- {path}  [{label}{typ}] {name}{desc}")
+            if meta.get("summary"):
+                print(f"  ↳ {meta['summary']}")
         return 0
 
     print(f"# {len(hits)} fact(s) match {args.query!r} — showing {len(shown)}\n")
@@ -220,6 +250,7 @@ def cmd_recall(args) -> int:
 
 
 # ---------------------------------------------------------------- doctor
+
 
 def _ttl_candidates(mem: Path, today: datetime.date, now: float, stale_days: int):
     """List (filename, reason) for expired / stale-perishable facts in a store."""
@@ -259,7 +290,9 @@ def cmd_doctor(args) -> int:
         ttl = _ttl_candidates(mem, today, now, args.stale_days)
 
         if dead or unindexed or ttl or not index.is_file():
-            print(f"## {label}  ({len(files)} fact file(s), {len(targets)} index entr(ies))")
+            print(
+                f"## {label}  ({len(files)} fact file(s), {len(targets)} index entr(ies))"
+            )
             if not index.is_file():
                 print("  ! no MEMORY.md index")
             for d in dead:
@@ -267,7 +300,20 @@ def cmd_doctor(args) -> int:
             for u in unindexed:
                 print(f"  ⚠ unindexed:   {u} (file not in MEMORY.md)")
             for name, reason in ttl:
-                print(f"  ⏳ ttl:        {name}  ({reason}) → `memory archive`")
+                # _is_stale_perishable already returns False for durable facts;
+                # this [durable] tag is belt-and-suspenders for any future heuristic drift.
+                try:
+                    _meta, _ = _split_frontmatter(
+                        (mem / name).read_text(encoding="utf-8")
+                    )
+                    durable_tag = (
+                        " [durable]" if _meta.get("durability") == "durable" else ""
+                    )
+                except OSError:
+                    durable_tag = ""
+                print(
+                    f"  ⏳ ttl:        {name}  ({reason}){durable_tag} → `memory archive`"
+                )
             print()
         total_dead += len(dead)
         total_unindexed += len(unindexed)
@@ -283,6 +329,7 @@ def cmd_doctor(args) -> int:
 
 
 # ---------------------------------------------------------------- archive
+
 
 def cmd_archive(args) -> int:
     today = datetime.date.today()
@@ -312,13 +359,18 @@ def cmd_archive(args) -> int:
         print()
 
     if args.apply:
-        print(f"archived {moved} fact(s) → <project>/memory/{ARCHIVE_DIR}/ (recall skips them)")
+        print(
+            f"archived {moved} fact(s) → <project>/memory/{ARCHIVE_DIR}/ (recall skips them)"
+        )
     else:
-        print(f"{total} TTL candidate(s) across the store — re-run with --apply to archive")
+        print(
+            f"{total} TTL candidate(s) across the store — re-run with --apply to archive"
+        )
     return 0
 
 
 # ---------------------------------------------------------------- cli
+
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="memory", description=__doc__.splitlines()[0])
@@ -326,22 +378,58 @@ def main(argv=None) -> int:
 
     p_recall = sub.add_parser("recall", help="search fact bodies and print matches")
     p_recall.add_argument("query", help="search terms (space-separated)")
-    p_recall.add_argument("--project", help="limit to projects whose label contains this substring")
-    p_recall.add_argument("--limit", type=int, default=5, help="max facts to print (default 5)")
-    p_recall.add_argument("--compact", action="store_true", help="one-line index per hit (path + name + description), no bodies")
-    p_recall.add_argument("--all", action="store_true", help="include explicitly-expired facts (hidden by default)")
+    p_recall.add_argument(
+        "--project", help="limit to projects whose label contains this substring"
+    )
+    p_recall.add_argument(
+        "--limit", type=int, default=5, help="max facts to print (default 5)"
+    )
+    p_recall.add_argument(
+        "--compact",
+        action="store_true",
+        help="one-line index per hit (path + name + description), no bodies",
+    )
+    p_recall.add_argument(
+        "--all",
+        action="store_true",
+        help="include explicitly-expired facts (hidden by default)",
+    )
     p_recall.set_defaults(func=cmd_recall)
 
-    p_doctor = sub.add_parser("doctor", help="reconcile indexes + report TTL candidates")
-    p_doctor.add_argument("--project", help="limit to projects whose label contains this substring")
-    p_doctor.add_argument("--strict", action="store_true", help="exit 1 if any drift or TTL candidate is found")
-    p_doctor.add_argument("--stale-days", type=int, default=STALE_DAYS, help=f"perishable-staleness threshold in days (default {STALE_DAYS})")
+    p_doctor = sub.add_parser(
+        "doctor", help="reconcile indexes + report TTL candidates"
+    )
+    p_doctor.add_argument(
+        "--project", help="limit to projects whose label contains this substring"
+    )
+    p_doctor.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit 1 if any drift or TTL candidate is found",
+    )
+    p_doctor.add_argument(
+        "--stale-days",
+        type=int,
+        default=STALE_DAYS,
+        help=f"perishable-staleness threshold in days (default {STALE_DAYS})",
+    )
     p_doctor.set_defaults(func=cmd_doctor)
 
-    p_archive = sub.add_parser("archive", help="move expired/stale-perishable facts to memory/archive/")
-    p_archive.add_argument("--project", help="limit to projects whose label contains this substring")
-    p_archive.add_argument("--apply", action="store_true", help="perform the moves (default: dry-run)")
-    p_archive.add_argument("--stale-days", type=int, default=STALE_DAYS, help=f"perishable-staleness threshold in days (default {STALE_DAYS})")
+    p_archive = sub.add_parser(
+        "archive", help="move expired/stale-perishable facts to memory/archive/"
+    )
+    p_archive.add_argument(
+        "--project", help="limit to projects whose label contains this substring"
+    )
+    p_archive.add_argument(
+        "--apply", action="store_true", help="perform the moves (default: dry-run)"
+    )
+    p_archive.add_argument(
+        "--stale-days",
+        type=int,
+        default=STALE_DAYS,
+        help=f"perishable-staleness threshold in days (default {STALE_DAYS})",
+    )
     p_archive.set_defaults(func=cmd_archive)
 
     args = parser.parse_args(argv)

@@ -11,11 +11,23 @@ TODAY = "2026-06-09"
 
 
 def _fact(
-    d, name, *, ftype="project", expires=None, body="the why lives here", mtime=None
+    d,
+    name,
+    *,
+    ftype="project",
+    expires=None,
+    body="the why lives here",
+    mtime=None,
+    summary=None,
+    durability=None,
 ):
     fm = f"---\nname: {name}\ntype: {ftype}\n"
     if expires:
         fm += f"expires: {expires}\n"
+    if summary is not None:
+        fm += f"summary: {summary}\n"
+    if durability is not None:
+        fm += f"durability: {durability}\n"
     fm += "---\n\n"
     p = d / f"{name}.md"
     p.write_text(fm + body, encoding="utf-8")
@@ -81,13 +93,20 @@ def test_feedback_outranks_project(tmp_path, monkeypatch):
 def test_budget_caps_injection_and_lists_leftovers(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     d = _memdir(tmp_path)
-    for i in range(12):
+    # Many facts with large bodies: under honest accounting (#430) every emitted
+    # char (summary lines + body blocks + headers + CTA) is charged against the
+    # single 6000 budget. With 40 facts whose ~200-char summaries alone exceed
+    # the budget, some are left out → a "Not injected" CTA must render.
+    for i in range(40):
         _fact(d, f"fact-{i:02d}", ftype="feedback", body="B" * 1100, mtime=1000 + i)
     out = H.render_project_memory(d, today=TODAY)
     assert "Not injected" in out
     assert "memory recall" in out
-    # budget 6000 chars with ~1140-char facts → at most 5 injected
-    assert out.count("(feedback):") <= 5
+    # Full bodies (in body section) remain budget-capped: with ~1120-char body
+    # cost competing against summaries in one 6000 budget, only a few fit.
+    # Count lines of the form "**name** (feedback):\n" (body section entries).
+    body_section_entries = out.count("(feedback):\n")
+    assert body_section_entries <= 3
 
 
 def test_long_body_truncated_with_pointer(tmp_path, monkeypatch):
@@ -633,3 +652,245 @@ def test_sk_proj_underscore_tail_suppressed(tmp_path, monkeypatch):
     out = H.render_project_memory(d, today=TODAY)
     assert raw not in out
     assert "[body suppressed" in out
+
+
+# ---------------------------------------------------------------- #430 tests
+
+# N1: explicit summary field is honored
+
+
+def test_summary_field_injected_before_body(tmp_path, monkeypatch):
+    """AC-a: explicit summary: field is rendered in the summary line before the
+    full-body section."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    _fact(
+        d,
+        "my-lesson",
+        ftype="feedback",
+        summary="Short summary.",
+        body="Long detailed body content that explains everything in detail.",
+    )
+    out = H.render_project_memory(d, today=TODAY)
+    # Summary line appears before the Full bodies header.
+    summary_pos = out.find("Short summary.")
+    bodies_pos = out.find("#### Full bodies")
+    assert summary_pos != -1, "explicit summary not found in output"
+    assert bodies_pos != -1, "Full bodies section not found"
+    assert summary_pos < bodies_pos, "summary should appear before full-body section"
+
+
+# N2: fallback summary from first sentence
+
+
+def test_summary_fallback_first_sentence(tmp_path, monkeypatch):
+    """AC-a: when summary: is absent, first sentence of body is used as summary."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    _fact(
+        d,
+        "no-summary",
+        ftype="feedback",
+        body="First sentence of the body. Second sentence with more detail.",
+    )
+    out = H.render_project_memory(d, today=TODAY)
+    # First sentence appears in summary section (before bodies section or as only line).
+    assert "First sentence of the body" in out
+
+
+# N3: fallback skips header lines
+
+
+def test_summary_fallback_skips_headers(tmp_path, monkeypatch):
+    """AC-a: fallback summary derivation skips header/list lines at the top."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    _fact(
+        d,
+        "header-body",
+        ftype="feedback",
+        body="# Main Header\n- list item\nActual content sentence.",
+    )
+    out = H.render_project_memory(d, today=TODAY)
+    # Header and list item are skipped; actual content is the summary.
+    assert "Actual content sentence" in out
+    # Header text should not appear as the summary prefix.
+    assert (
+        "# Main Header" not in out.split("#### Full bodies")[0]
+        if "#### Full bodies" in out
+        else True
+    )
+
+
+# N4: suppressed body → summary shows sentinel, not the secret
+
+
+def test_suppressed_body_not_summarized(tmp_path, monkeypatch):
+    """AC-a + #429: a fact with a secret body shows _SUPPRESSED_BODY in the summary
+    line and NEVER leaks the secret content via its summary."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    _fact(
+        d,
+        "secret-fact",
+        ftype="user",
+        body="My credentials: sk-ant-api03-abc1234567890abcdef is the key.",  # eval-ok: E15 — fabricated test fixture for safety-filter verification
+    )
+    out = H.render_project_memory(d, today=TODAY)
+    assert "secret-fact" in out
+    # Secret must not appear anywhere.
+    assert (
+        "sk-ant-api03-abc1234567890abcdef" not in out
+    )  # eval-ok: E15 — fabricated test fixture for safety-filter verification
+    # The suppressed sentinel must appear in the summary line.
+    assert "[body suppressed" in out
+
+
+# N5: oversized stale project fact ranks after fresh small feedback fact
+
+
+def test_ranking_penalizes_oversized_stale_project(tmp_path, monkeypatch):
+    """AC-b: a large stale project fact scores worse than a small fresh feedback fact."""
+    import time
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    now = time.time()
+    # Fresh small feedback fact (1 day ago).
+    _fact(d, "fresh-feedback", ftype="feedback", body="F" * 100, mtime=now - 86400)
+    # Stale large project fact (60 days ago).
+    _fact(d, "stale-project", ftype="project", body="P" * 2000, mtime=now - 60 * 86400)
+    out = H.render_project_memory(d, today=TODAY)
+    # fresh-feedback should appear before stale-project in output.
+    assert out.index("fresh-feedback") < out.index("stale-project")
+
+
+# N6: durability: durable resists staleness penalty
+
+
+def test_durability_durable_resists_staleness(tmp_path, monkeypatch):
+    """AC-b: a durable project fact ranks before a same-type non-durable fact
+    that was written at the same time.  The -1.0 durability bonus lowers the
+    score and lets the durable fact beat the non-durable one when both are
+    equally stale (60 days old, same body size = no size penalty).
+    Without the bonus the scores are equal; with it the durable fact wins."""
+    import time
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    now = time.time()
+    # Both facts: 60 days old (1.0 freshness penalty), body=500 (no size penalty).
+    # Durable gets -1.0 bonus → score 3.0; non-durable stays at 4.0.
+    _fact(
+        d,
+        "aa-durable",
+        ftype="project",
+        durability="durable",
+        body="D" * 500,
+        mtime=now - 60 * 86400,
+    )
+    _fact(
+        d,
+        "bb-nondurable",
+        ftype="project",
+        body="N" * 500,
+        mtime=now - 60 * 86400,
+    )
+    out = H.render_project_memory(d, today=TODAY)
+    # Durable fact should appear first because its score is lower.
+    assert out.index("aa-durable") < out.index("bb-nondurable")
+
+
+# N7: durability: session → appears in summary, NOT in full-body section
+
+
+def test_durability_session_summaries_only(tmp_path, monkeypatch):
+    """AC-b: a session-durability fact appears in the summary pass only; it must
+    NOT appear in the full-body section."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    _fact(
+        d,
+        "ephemeral",
+        ftype="project",
+        durability="session",
+        body="Session-scoped content that should not be in bodies.",
+    )
+    out = H.render_project_memory(d, today=TODAY)
+    # Name appears somewhere (summary pass).
+    assert "ephemeral" in out
+    # If there's a full-body section, 'ephemeral' must NOT be in it.
+    if "#### Full bodies" in out:
+        bodies_section = out.split("#### Full bodies")[1]
+        assert "ephemeral" not in bodies_section
+
+
+# N8: budget is never exceeded
+
+
+def test_budget_not_exceeded(tmp_path, monkeypatch):
+    """AC-c: with 20 facts of varying sizes, the TOTAL rendered block length is
+    <= AUTORECALL_TOTAL_CHARS EXACTLY (no slack — #430 honest accounting), and
+    no single body exceeds AUTORECALL_PER_FACT_CHARS."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    import random
+
+    random.seed(42)
+    types = ["feedback", "user", "reference", "project"]
+    for i in range(20):
+        body_len = random.randint(50, 3000)
+        _fact(
+            d,
+            f"fact-{i:02d}",
+            ftype=types[i % len(types)],
+            body="X" * body_len,
+        )
+    out = H.render_project_memory(d, today=TODAY)
+    # Strict: every emitted character is charged against the budget.
+    assert len(out) <= H.AUTORECALL_TOTAL_CHARS
+    # No single body block should exceed the per-fact cap.
+    for line in out.split("\n"):
+        if line.startswith("X"):
+            assert (
+                len(line) <= H.AUTORECALL_PER_FACT_CHARS + 10
+            )  # small fudge for trailing pointer
+
+
+def test_budget_strict_even_with_not_injected_cta(tmp_path, monkeypatch):
+    """#430: drive enough large facts to overflow the budget — which forces the
+    'Not injected (...)' CTA to render — and assert the TOTAL block length still
+    stays within AUTORECALL_TOTAL_CHARS exactly (CTA + headers + labels all
+    charged honestly)."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    # 40 large facts with long names guarantee leftovers (CTA renders) and
+    # exercise the per-entry label + CTA-truncation accounting.
+    for i in range(40):
+        _fact(
+            d,
+            f"a-very-long-feedback-fact-name-number-{i:03d}",
+            ftype="feedback",
+            body="Y" * 2500,
+        )
+    out = H.render_project_memory(d, today=TODAY)
+    assert "Not injected" in out  # CTA must render
+    assert len(out) <= H.AUTORECALL_TOTAL_CHARS
+
+
+# N9: fresh feedback outranks stale project in output order
+
+
+def test_ranking_fresh_feedback_beats_stale_project(tmp_path, monkeypatch):
+    """AC-b: fresh feedback fact outranks stale project fact in output."""
+    import time
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    now = time.time()
+    # Stale project (100 days ago).
+    _fact(d, "old-project", ftype="project", body="P" * 500, mtime=now - 100 * 86400)
+    # Fresh feedback (5 minutes ago).
+    _fact(d, "new-feedback", ftype="feedback", body="F" * 500, mtime=now - 300)
+    out = H.render_project_memory(d, today=TODAY)
+    assert out.index("new-feedback") < out.index("old-project")

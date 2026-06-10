@@ -156,44 +156,41 @@ configured here.
 ## Recalling project memory (active recall)
 
 Project facts live under `~/.claude/projects/<project>/memory/`. SessionStart
-auto-injects fact bodies directly (highest-value first, 6000-char budget,
-per-fact truncation, TTL-respected). Remaining facts are listed with a recall
-CTA. For manual recall of lower-ranked facts: `~/agents/bin/memory recall
-"<keywords>"`. Also: `memory doctor` (index drift + TTL) and
-`memory archive [--apply]`. Full workflow: `~/agents/docs/memory-review.md`.
+auto-injects summaries for all facts + full bodies for top-N (two-pass, 6000-char
+budget). Manual recall: `~/agents/bin/memory recall "<keywords>"`. Also:
+`memory doctor` (index drift + TTL) and `memory archive [--apply]`.
 
----
+### Memory Frontmatter Convention (on-touch only)
+
+Canonical fields: `name`, `type` (feedback|user|reference|project), `expires` (YYYY-MM-DD),
+`summary` (1-3 sentences; auto-recall uses verbatim, falls back to first sentence),
+`durability` (durable|session|handoff|temporary).
+
+`durability` effects: `durable` → resists freshness/size rank penalties, never flagged
+stale. `session`/`temporary` → summary-only injection, TTL candidate at 30d. Normalize
+on-touch only — no mass migration.
 
 ## Promoting project memory to global rules
 
-When a `~/.claude/projects/<project>/memory/feedback-*.md` lesson is
-**generally applicable** (workflow discipline, cross-stack mistakes, tool
-quirks — not domain-specific patterns), promote it to a global rule so every
-project inherits it. Full 6-step procedure + the "generally applicable vs
-project-local" test: `~/.claude/rules/memory-promotion.md` (on-demand).
+When a `feedback-*.md` lesson is **generally applicable**, promote it to a
+global rule. Full procedure: `~/.claude/rules/memory-promotion.md` (on-demand).
 
 ## Anti-patterns to avoid
 
-- Long CLAUDE.md (target <200 lines; enforced by
-  `claude-config/scripts/check-context-budgets.py` in CI).
-- Reaching for a subagent before exhausting CLAUDE.md and skills (Anthropic's recommended order).
+- Long CLAUDE.md (target <200 lines; `claude-config/scripts/check-context-budgets.py`).
+- Reaching for a subagent before exhausting CLAUDE.md and skills.
 - Editing `~/.claude/` directly. Always go through `~/agents/claude-config/`.
 - Putting secrets, ephemeral state, or large code patterns in CLAUDE.md.
-- Bypassing safety with `--no-verify`, `--force`, or `bypassPermissions` without explicit user approval.
-- **Letting project-local lessons stay project-local indefinitely.**
-  If a `feedback-*.md` file would help another project, promote it
-  per the procedure above.
+- Bypassing safety with `--no-verify`, `--force`, or `bypassPermissions`.
+- **Letting project-local lessons stay project-local.** Promote per the procedure above.
 
 ---
 
 ## ~/agents — personal velocity rules
 
-`~/agents` is personal tooling, not a product. Preserve fast iteration:
+`~/agents` is personal tooling. Preserve fast iteration:
 
-- **TRIVIAL/SIMPLE changes**: no manifest, no spec, no adversarial review.
-- **Major refactors (4+ files, new protocol, new command)**: produce a *lightweight*
-  code-reality manifest (`specs/<name>.code-reality.md`) before drafting; aim for
-  ≤2 review rounds, not the full spec-review-workflow ceremony.
-- Route substantive ~/agents work through `/orchestrate`; ad-hoc fixes via `/quick`.
-- All telemetry routes through the same `state_manager` hooks as `~/projects/` — no
-  separate recording path needed.
+- **TRIVIAL/SIMPLE**: no manifest, no spec, no adversarial review.
+- **Major refactors (4+ files)**: lightweight code-reality manifest before drafting.
+- Route substantive work through `/orchestrate`; ad-hoc fixes via `/quick`.
+- Telemetry routes through `state_manager` hooks — no separate recording path.
