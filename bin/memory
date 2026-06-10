@@ -47,6 +47,9 @@ PERISHABLE_PAT = re.compile(
     re.I,
 )
 STALE_DAYS = 90
+# Observability threshold for doctor's cold% metric: facts untouched >30d.
+# Distinct from STALE_DAYS (90d archive/perishable cutoff) — do not conflate.
+COLD_DAYS = 30
 
 
 def _memory_dirs():
@@ -338,11 +341,11 @@ def cmd_doctor(args) -> int:
     if total_fact_files:
         cold_pct = cold_count / total_fact_files * 100
         print(
-            f"cold%:          {cold_pct:.0f}%  "
-            f"({cold_count} of {total_fact_files} fact files with mtime >{STALE_DAYS}d)"
+            f"cold (>{COLD_DAYS}d):     {cold_pct:.0f}%  "
+            f"({cold_count} of {total_fact_files} fact files)"
         )
     else:
-        print("cold%:          no data yet (no fact files found)")
+        print(f"cold (>{COLD_DAYS}d):     no data yet (no fact files found)")
 
     if autorecall_recs:
         active = sum(1 for r in autorecall_recs if r.get("facts_injected", 0) > 0)
@@ -431,14 +434,15 @@ def _load_autoinject_log(log_path: Path) -> list[dict]:
     return records
 
 
-def _cold_pct_from_store() -> tuple[int, int]:
+def _cold_pct_from_store(days: int = COLD_DAYS) -> tuple[int, int]:
     """Return (cold_count, total_count) of fact files across all projects.
 
-    A fact file is "cold" when its mtime is older than STALE_DAYS days.
-    This matches the audit definition: mtime-based, not log-derived.
+    A fact file is "cold" when its mtime is older than *days* days.
+    Defaults to COLD_DAYS (30d) — the audit definition; not the 90d
+    archive/perishable threshold (STALE_DAYS).
     """
     now = time.time()
-    threshold = STALE_DAYS * 86400
+    threshold = days * 86400
     total = cold = 0
     for mem in _memory_dirs():
         for path in _fact_files(mem):
