@@ -119,6 +119,9 @@ jobs:
           done
           [ "$fail" = "0" ] || exit 1
 
+      - name: Validate Claude/Codex parity report
+        run: bin/agent-parity check
+
       - name: Smoke test Codex install in temp HOME
         run: |
           set -e
@@ -126,8 +129,45 @@ jobs:
           HOME="$tmp" ./codex-config/install.sh
           test -L "$tmp/.codex/AGENTS.md"
           test -L "$tmp/.codex/rules/shared.rules"
-          test -L "$tmp/.codex/skills/technical-spec-review"
-          test -L "$tmp/.agents/skills/technical-spec-review"
+
+          assert_skill_link() {
+            name="$1"
+            expected="$2"
+            for root in "$tmp/.codex/skills" "$tmp/.agents/skills"; do
+              link="$root/$name"
+              if [ ! -L "$link" ]; then
+                echo "::error::missing skill symlink: $link"
+                exit 1
+              fi
+              actual="$(readlink "$link")"
+              if [ "$actual" != "$expected" ]; then
+                echo "::error::wrong skill symlink target: $link -> $actual (expected $expected)"
+                exit 1
+              fi
+            done
+          }
+
+          for skill_md in codex-config/skills/*/SKILL.md; do
+            [ -f "$skill_md" ] || continue
+            name="$(basename "$(dirname "$skill_md")")"
+            assert_skill_link "$name" "$PWD/codex-config/skills/$name"
+          done
+
+          for skill_md in claude-config/skills/*/SKILL.md; do
+            [ -f "$skill_md" ] || continue
+            name="$(basename "$(dirname "$skill_md")")"
+            if claude-config/scripts/check-skill-portability.sh "$skill_md" >/dev/null; then
+              assert_skill_link "$name" "$PWD/claude-config/skills/$name"
+            else
+              rc=$?
+              if [ "$rc" = "2" ]; then
+                echo "::error::invalid skill portability check for $name"
+                exit 1
+              fi
+            fi
+          done
+
+          bin/agent-parity check --home "$tmp"
 
       - name: Smoke test project bootstrap idempotency
         run: |
