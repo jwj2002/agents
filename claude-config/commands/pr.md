@@ -295,7 +295,18 @@ cd frontend && npm run build
 1. Read the failing check output: `gh pr checks $PR_NUMBER`
 2. Fix issues on the feature branch
 3. Push fixes: `git push`
-4. Re-run checks: `gh pr checks $PR_NUMBER --watch`
+4. Wait for checks to be registered after the push, then watch:
+   ```bash
+   # Wait for CI checks to be registered (prevents race: push before workflow run exists)
+   echo "Waiting for CI checks to appear..."
+   for i in $(seq 1 24); do
+     N=$(gh pr checks $PR_NUMBER 2>/dev/null | grep -c '.')
+     [ "$N" -ge 1 ] && break
+     [ "$i" -eq 24 ] && { echo "BLOCKED: no CI checks appeared after 120s — investigate before merging"; exit 1; }
+     sleep 5
+   done
+   gh pr checks $PR_NUMBER --watch
+   ```
 
 ---
 
