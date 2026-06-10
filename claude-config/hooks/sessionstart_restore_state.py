@@ -95,7 +95,8 @@ _SUPPRESSED_BODY = "[body suppressed — safety filter]"
 _SECRET_RE = re.compile(
     r"""
     \bsk-(?:[A-Za-z0-9]+-){0,3}[A-Za-z0-9]{12,}\b  # OpenAI/Anthropic sk- keys (hyphenated prefixes)
-    | \bghp_[A-Za-z0-9]{10,}           # GitHub PATs
+    | \bgithub_pat_[A-Za-z0-9_]{20,}   # GitHub fine-grained PATs
+    | \bgh[pousr]_[A-Za-z0-9]{10,}     # GitHub tokens (ghp_/gho_/ghu_/ghs_/ghr_)
     | \bglpat-[A-Za-z0-9]{5,}          # GitLab PATs
     | \bxox[bpoas]-[A-Za-z0-9\-]{10,}  # Slack tokens
     | \bAKIA[A-Z2-7]{16}\b             # AWS access key IDs
@@ -113,9 +114,9 @@ _WHITELIST_VALUE_RE = re.compile(r"^\s*(?:\$|\$\{|from |env:|<|`)")
 # Instruction-injection patterns (case-insensitive applied globally).
 _INJECTION_RE = re.compile(
     r"""
-    ignore\s+(?:all\s+)?previous\s+instructions?
+    ignore\s+(?:all\s+)?(?:prior|previous|above|earlier)\s+(?:instructions?|context)
     | you\s+are\s+now\s+(?:a\s+)?\w+(?:\s+\w+){2,}(?:$|\.)
-    | disregard\s+(?:all\s+)?(?:prior|previous)\s+(?:instructions?|context)
+    | disregard\s+(?:all\s+)?(?:prior|previous|above|earlier)\s+(?:instructions?|context)
     | system\s*prompt\s*:
     | \[INST\]|\[\/INST\]|<\|im_start\|>
     """,
