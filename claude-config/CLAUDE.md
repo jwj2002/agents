@@ -154,12 +154,11 @@ Graph. Helpers, credential paths, and the "always send as" rule:
 ## Recalling project memory (active recall)
 
 Project facts live under `~/.claude/projects/<project>/memory/`. SessionStart
-auto-injects the `MEMORY.md` index (titles) but NOT fact bodies. Before
-non-trivial work in a project with memory, run `~/agents/bin/memory recall
-"<keywords>"` to read the bodies (verify against current code — VERIFICATION_GAP).
-Also: `memory doctor` (index drift + TTL) and `memory archive [--apply]`.
-TTL discipline (add `expires:` to session-state facts) + the full recall/doctor/
-archive workflow: `~/agents/docs/memory-review.md`.
+auto-injects fact bodies directly (highest-value first, 6000-char budget,
+per-fact truncation, TTL-respected). Remaining facts are listed with a recall
+CTA. For manual recall of lower-ranked facts: `~/agents/bin/memory recall
+"<keywords>"`. Also: `memory doctor` (index drift + TTL) and
+`memory archive [--apply]`. Full workflow: `~/agents/docs/memory-review.md`.
 
 ---
 
