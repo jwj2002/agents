@@ -78,6 +78,8 @@ agent_metrics/failure_patterns), `knowledge/`, `lib/`, `machines/`,
 Dormant (keep until a decision forces it): `code-review/`, `ui-testing/`,
 `project-template/`.
 
+Archived 2026-06-10 (#408): `orchestrate-workflow/` → `_archived/orchestrate-workflow-legacy/` (superseded by claude-config orchestrate).
+
 Removed 2026-06-09 (#368, recoverable at commit `9b236c3` and earlier):
 `youtube-summarizer/`, `doc-reader/`, `daily-standup/` (superseded by
 `/pulse digest`), `pr-changelog/` — none were referenced by any live config,

@@ -27,7 +27,6 @@
 ├── pr-changelog/                   ← PR merge → changelog update
 ├── doc-reader/                     ← TTS for documents
 ├── youtube-summarizer/             ← Video → transcript → summary
-├── orchestrate-workflow/           ← Workflow framework (source for agents)
 └── docs/                           ← This file
 
 Per-project overrides:
@@ -183,7 +182,6 @@ Issue → MAP/MAP-PLAN → [TEST-PLANNER] → CONTRACT* → PATCH → PROVE
 | **pr-changelog** | PR merge → CHANGELOG.md + vault | Working | gh CLI, git hooks |
 | **doc-reader** | TTS for documents | Working | Edge TTS, ffmpeg |
 | **youtube-summarizer** | Video → local Whisper → Claude summary | Working | yt-dlp, Whisper, Claude |
-| **orchestrate-workflow** | Workflow framework (source for agents) | WIP | Multi-agent orchestration |
 
 ---
 
