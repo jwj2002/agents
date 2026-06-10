@@ -82,6 +82,10 @@ jobs:
       - name: Enforce context budgets (CLAUDE.md ≤200, always-load rules ≤450)
         run: python3 claude-config/scripts/check-context-budgets.py
 
+      - name: Payload report (hook-injected context — report only, never fails)
+        continue-on-error: true
+        run: python3 claude-config/scripts/check-context-budgets.py --payload-report
+
       - name: Validate Codex command-policy rules
         run: |
           set -e

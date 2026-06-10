@@ -103,3 +103,79 @@ def test_real_tree_passes(tmp_path):
     # The actual repo tree must pass at the production budgets — the gate
     # proves itself (design constraint).
     assert cb.main([]) == 0
+
+
+# ---------------------------------------------------------------------------
+# payload_report() tests (issue #409)
+# ---------------------------------------------------------------------------
+
+
+def _make_memory(tmp_path: Path, critical_bytes: int = 50, full_bytes: int | None = 80) -> Path:
+    """Create a fake memory/ dir with controlled file sizes.
+
+    Returns the memory directory path. If full_bytes is None, patterns-full.md
+    is omitted entirely to test the missing-file path.
+    """
+    mem = tmp_path / "memory"
+    mem.mkdir()
+    (mem / "patterns-critical.md").write_bytes(b"x" * critical_bytes)
+    if full_bytes is not None:
+        (mem / "patterns-full.md").write_bytes(b"x" * full_bytes)
+    return mem
+
+
+def test_payload_report_no_hooks_no_memory(tmp_path, capsys):
+    # Empty repo dir — no hooks/, no memory/. Should complete without raising.
+    cb.payload_report(tmp_path)
+    out = capsys.readouterr().out
+    # Report header always printed.
+    assert "Payload report" in out
+    assert "TOTAL" in out
+
+
+def test_payload_report_measures_memory_files(tmp_path, capsys):
+    # Memory files present — their byte sizes must appear in the output.
+    _make_memory(tmp_path, critical_bytes=50, full_bytes=80)
+    cb.payload_report(tmp_path)
+    out = capsys.readouterr().out
+    assert "patterns-critical.md" in out
+    assert "patterns-full.md" in out
+    # The exact sizes appear somewhere in the output.
+    assert "50" in out
+    assert "80" in out
+
+
+def test_payload_report_token_estimate(tmp_path, capsys):
+    # Token estimate (~bytes//4) must be present in output.
+    _make_memory(tmp_path, critical_bytes=400, full_bytes=400)
+    cb.payload_report(tmp_path)
+    out = capsys.readouterr().out
+    # 400 bytes → 100 tokens; verify the token column header and a value.
+    assert "Tokens" in out or "tokens" in out
+    assert "100" in out
+
+
+def test_payload_report_missing_patterns_full(tmp_path, capsys):
+    # Only patterns-critical.md present — patterns-full.md absent.
+    # Report must run cleanly and show 0 for patterns-full.
+    _make_memory(tmp_path, critical_bytes=50, full_bytes=None)
+    cb.payload_report(tmp_path)
+    out = capsys.readouterr().out
+    assert "patterns-full.md" in out
+    # patterns-full row shows 0 bytes.
+    lines = [ln for ln in out.splitlines() if "patterns-full" in ln]
+    assert lines, "patterns-full.md row missing from output"
+    assert "0" in lines[0]
+
+
+def test_payload_report_never_raises(tmp_path):
+    # Even with a completely empty dir, payload_report must not raise.
+    try:
+        cb.payload_report(tmp_path)
+    except Exception as exc:
+        raise AssertionError(f"payload_report raised unexpectedly: {exc}") from exc
+
+
+def test_payload_report_exits_0_via_main(tmp_path):
+    # --payload-report flag always returns 0 from main().
+    assert cb.main(["--payload-report"]) == 0
