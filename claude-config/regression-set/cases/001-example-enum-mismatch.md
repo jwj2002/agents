@@ -39,7 +39,7 @@ class AccountMemberRole(StrEnum):
 # frontend/src/components/RolePicker.jsx
  const ROLE_OPTIONS = [
    { value: "OWNER", label: "Owner" },
-+  { value: "CO_OWNER", label: "Co-owner" },     // BUG: uses Python NAME
++  { value: "CO_OWNER", label: "Co-owner" },
    { value: "VIEWER", label: "Viewer" },
  ];
 ```

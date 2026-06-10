@@ -55,6 +55,8 @@ No file added under `backend/alembic/versions/`.
   - Why CRITICAL: dev works (auto_create_tables); staging/prod will fail because schema doesn't match
   - Where: `backend/backend/accounts/models.py` (column add); `backend/alembic/versions/` (missing file)
   - Fix: `alembic revision --autogenerate -m "add account archived_at"` and commit the resulting file
+- [ ] **None-check missing**: `repo.get(account_id)` returns `None` for unknown IDs; the next line dereferences unconditionally → `AttributeError` at runtime
+  - Where: `backend/backend/accounts/services.py` `archive()` line 3
 
 ### WARNING
 
@@ -62,6 +64,10 @@ No file added under `backend/alembic/versions/`.
   - Where: `backend/tests/accounts_tests/test_services.py`
 - [ ] `archive()` does not check whether account is already archived (idempotency)
   - Where: `backend/backend/accounts/services.py`
+- [ ] **E09 SERVICE_BYPASSES_REPO**: `self.repo.commit()` called directly from service layer — service should not own commit boundaries
+  - Where: `backend/backend/accounts/services.py` `archive()` line 4
+- [ ] **E12 AUDIT_LOG_MISSING**: `archive()` is a write operation but makes no AuditService call
+  - Where: `backend/backend/accounts/services.py` `archive()`
 
 ### SUGGESTION
 
