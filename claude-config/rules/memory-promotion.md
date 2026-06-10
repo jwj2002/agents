@@ -1,5 +1,6 @@
 ---
 description: "Procedure for promoting project-local memory lessons to global rules"
+paths: ["**/memory/**", "**/.agents/**"]
 ---
 
 # Promoting project memory to global rules

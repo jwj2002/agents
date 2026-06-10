@@ -56,8 +56,7 @@ Use the Codex plugin commands instead of inventing ad-hoc prompts:
 
 ### Per-AC audit + project review gates
 
-Two generic principles apply to every MODERATE+ Codex review (skip both on
-TRIVIAL):
+Two generic principles apply to every MODERATE+ Codex review (skip on TRIVIAL):
 
 1. **Per-AC audit**: extend the review prompt so the verdict must include an
    `ac_audit` array (`implemented|partial|missing|deferred|n/a` per AC) and a
@@ -69,10 +68,8 @@ TRIVIAL):
    bypass telemetry), route the review through it rather than calling
    `codex exec` directly.
 
-Project-specific mechanics (prompt fragments, wrapper CLIs, env vars,
-telemetry paths) live in that project's memory, not here — e.g. buddy's
-clauses + `codex_review_gate` chokepoint:
-`~/.claude/projects/-Users-jasonjob-projects-buddy/memory/codex_review_gates_buddy.md`.
+Project-specific mechanics (prompt fragments, wrapper CLIs, telemetry paths)
+live in that project's memory, not here — e.g. buddy's `codex_review_gates_buddy.md`.
 
 ## Review Surface Routing
 
@@ -95,15 +92,12 @@ selection.
 
 ## Step 2: Announce Routing Briefly
 
-Examples:
+One line stating tier + Codex plan. Examples:
 
 ```text
-Quick: one docs typo. No Codex.
-Simple: two backend files. I will implement and offer /codex:review only if risk appears.
-Moderate: shared service change. I will run /codex:adversarial-review after verification.
-Complex: migration + service + API. I will run /codex:adversarial-review after PATCH.
-Fullstack: backend endpoint + UI. /codex:adversarial-review with focus on contract and enum values.
-Prior fail: Claude PROVE blocked. I will /codex:rescue as a second-model attempt before retrying.
+Simple: two backend files. Implement; offer /codex:review only if risk appears.
+Complex: migration + service + API. Run /codex:adversarial-review after PATCH.
+Prior fail: Claude PROVE blocked. /codex:rescue as a second-model attempt first.
 ```
 
 ## Step 3: Apply Codex Findings

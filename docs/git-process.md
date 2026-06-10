@@ -331,3 +331,41 @@ Preview changes without writing files or labels:
 ```bash
 ~/agents/new-project-agents.sh --dry-run --labels-only --with-agent-workflow-labels /path/to/project
 ```
+
+## Large Features (500+ lines)
+
+Split into phased PRs, each leaving `main` in a working state:
+
+- Phase 1: Schema/model → merge
+- Phase 2: Service/logic → merge (branch from updated main)
+- Phase 3: API/integration → merge
+- Phase 4: Tests → merge
+
+## Emergency: Main Is Broken
+
+1. Stop all merges immediately.
+2. Create `fix/hotfix-<description>` from the last green commit.
+3. Make the minimal fix only.
+4. Fast-track PR → merge.
+5. Resume normal work.
+
+## Working Tree Hygiene (Autonomous Runs)
+
+If uncommitted changes block a `git pull --ff-only`, never stash anonymously —
+anonymous stashes silently bury real work. Commit the WIP to a throwaway branch
+first so it stays recoverable:
+
+```bash
+git checkout -b wip/$(date +%Y%m%d)-<context>
+git add -A && git commit -m "wip: save state before reset"
+git checkout -        # return to the original branch
+```
+
+Rationale: four orphaned stashes were found and cleaned up 2026-06-02 because
+unattended runs stashed to get a clean `pull --ff-only` and never restored.
+
+> Note: the perpetually-dirty-tree problem caused by telemetry shards
+> (`telemetry/<host>/*.jsonl`) is resolved (#220 Win C): all shards are
+> gitignored and local-only, so the tree stays clean and there is nothing to
+> stash or commit. The aggregate hook still writes shards locally; `/learn` +
+> `telemetry_gate` still read them locally.

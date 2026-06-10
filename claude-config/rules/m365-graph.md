@@ -1,5 +1,6 @@
 ---
 description: "M365 / Microsoft Graph credentials and helpers (this laptop's agent identity)"
+paths: ["**/m365/**", "**/email-digest/**"]
 ---
 
 # M365 / Microsoft Graph (this laptop)
