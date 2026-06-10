@@ -463,8 +463,16 @@ After all pattern updates are written in Steps 6.5.  This step uses the
    Gate: $NEW_COUNT new failures since $LAST_LEARN_AT.
    Watermark advanced to: $CONSUMED_MAX (max consumed recorded_at — not wall-clock now).
    Host: $HOST"
-   # Wait for CI, verify HEAD parity, squash merge (per ship.md §4-8)
-   gh pr checks --watch
+   # Wait for CI checks to be registered, then watch (per ship.md §6)
+   LEARN_PR=$(gh pr view --json number -q .number)
+   echo "Waiting for CI checks to appear..."
+   for i in $(seq 1 24); do
+     N=$(gh pr checks $LEARN_PR 2>/dev/null | grep -c '.')
+     [ "$N" -ge 1 ] && break
+     [ "$i" -eq 24 ] && { echo "BLOCKED: no CI checks appeared after 120s — investigate before merging"; exit 1; }
+     sleep 5
+   done
+   gh pr checks $LEARN_PR --watch
    gh pr merge --squash --delete-branch
    ```
 

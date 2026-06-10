@@ -109,7 +109,18 @@ run the review gates per `implementation-routing.md §Review Surface Routing`:
 ### Step 6 — CI Watch
 
 ```bash
-gh pr checks --watch
+PR_NUMBER=$(gh pr view --json number -q .number)
+
+# Wait for CI checks to be registered (prevents race: merge before workflow run exists)
+echo "Waiting for CI checks to appear..."
+for i in $(seq 1 24); do
+  N=$(gh pr checks $PR_NUMBER 2>/dev/null | grep -c '.')
+  [ "$N" -ge 1 ] && break
+  [ "$i" -eq 24 ] && { echo "BLOCKED: no CI checks appeared after 120s — investigate before merging"; exit 1; }
+  sleep 5
+done
+
+gh pr checks $PR_NUMBER --watch
 ```
 
 **Gate**: Any red or pending check → STOP. Print the failing check URL. Do NOT
@@ -122,7 +133,7 @@ a PR created before the last push can squash-merge an older snapshot, silently
 dropping commits.
 
 ```bash
-PR_NUMBER=$(gh pr view --json number -q .number)
+# PR_NUMBER derived in Step 6; reused here
 PR_HEAD=$(gh pr view --json headRefOid -q .headRefOid)
 LOCAL_HEAD=$(git rev-parse HEAD)
 
@@ -130,7 +141,15 @@ if [ "$PR_HEAD" != "$LOCAL_HEAD" ]; then
   echo "HEAD MISMATCH: PR HEAD $PR_HEAD != local HEAD $LOCAL_HEAD"
   echo "Pushing to sync and re-checking CI..."
   git push --force-with-lease origin HEAD
-  gh pr checks --watch
+  # Wait for CI checks to be registered after the new push
+  echo "Waiting for CI checks to appear..."
+  for i in $(seq 1 24); do
+    N=$(gh pr checks $PR_NUMBER 2>/dev/null | grep -c '.')
+    [ "$N" -ge 1 ] && break
+    [ "$i" -eq 24 ] && { echo "BLOCKED: no CI checks appeared after 120s — investigate before merging"; exit 1; }
+    sleep 5
+  done
+  gh pr checks $PR_NUMBER --watch
   PR_HEAD=$(gh pr view --json headRefOid -q .headRefOid)
   LOCAL_HEAD=$(git rev-parse HEAD)
   if [ "$PR_HEAD" != "$LOCAL_HEAD" ]; then
@@ -302,7 +321,8 @@ Shipped  PR #N  {pr_url}
 | Pre-commit hook | Step 2 | Always |
 | Rebase conflict | Step 3 | Always |
 | CRITICAL review | Step 5 | Always |
-| Red CI | Step 6 | Always |
+| Checks exist (≥1 check registered) | Step 6, Step 7 re-push | Always |
+| Red CI | Step 6, Step 7 re-push | Always |
 | HEAD parity | Step 7 | Always |
 | Kill switch (`y/N`) | Step 7 | Plain `/ship` only |
 | PROVE gate | Step 7.5 | Always (override only via `--override-prove`, recorded) |
