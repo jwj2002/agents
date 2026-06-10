@@ -43,18 +43,12 @@ Code lives on jbox06 (`172.16.20.58`). Claude Code on the laptop writes files vi
 - **Git operations:** `ssh jbox06 'cd ~/app-repos/<repo> && git add -A && git commit -m "msg" && git push origin <branch>'`
 - **Never** clone VitalAILabs app repos locally — laptop cannot reach GitLab directly
 
-**Issue tracking:** GitLab Issues via `glab` CLI on jbox06 (installed and authenticated):
+**Issue tracking:** GitLab Issues via `glab` CLI on jbox06 (installed and
+authenticated), run from inside an app repo:
 ```bash
-# List issues (run from inside an app repo on jbox06)
 ssh jbox06 'cd ~/app-repos/<repo> && glab issue list'
-
-# Create an issue
 ssh jbox06 'cd ~/app-repos/<repo> && glab issue create --title "..." --description "..." --label "P0,backend"'
-
-# View an issue
-ssh jbox06 'cd ~/app-repos/<repo> && glab issue view 3'
-
-# Create a merge request
+ssh jbox06 'cd ~/app-repos/<repo> && glab issue view <N>'
 ssh jbox06 'cd ~/app-repos/<repo> && glab mr create --title "..." --description "..."'
 ```
 
@@ -89,50 +83,16 @@ ssh jbox06 'ls ~/app-repos/'
 
 ## Rules for Remote Development
 
-- One source of truth: the repo on jbox06. No local clones.
-- All file writes go through SSH to jbox06.
-- All git operations (commit, push, branch) run on jbox06.
-- Read files via SSH before editing — same as local Read tool but through `ssh jbox06 'cat ...'`.
-- Test on jbox06 where the platform runtime is available.
-- GitLab push goes from jbox06 → GitLab (local network, instant).
+One source of truth: the repo on jbox06 (no local clones). All file writes,
+reads (`ssh jbox06 'cat ...'`), git ops, and tests run on jbox06. GitLab push
+goes jbox06 → GitLab over the local network.
 
-## Mode 3: Local Copy of a jbox06 Repo (Hybrid)
+## Mode 3: Local Copy of a jbox06 Repo (Hybrid) — rare
 
-Sometimes a VitalAILabs app repo needs a local copy on the laptop — for offline work, alternate tooling, or side experiments.
-
-**Indicators:**
-- User explicitly says "pull this to my laptop" or "I want a local copy"
-- Repo exists in both `~/projects/` on laptop AND `~/app-repos/` on jbox06
-
-**Setup:** Bundle from jbox06, clone locally:
-```bash
-ssh jbox06 'cd ~/app-repos/<repo> && git bundle create /tmp/<repo>.bundle --all'
-scp jbox06:/tmp/<repo>.bundle /tmp/
-cd ~/projects && git clone /tmp/<repo>.bundle <repo>
-```
-
-**Workflow:**
-- Develop locally using standard Claude Code tools (Write, Edit)
-- jbox06 remains the push path to GitLab — laptop cannot reach GitLab directly
-- To sync laptop → jbox06 → GitLab:
-  ```bash
-  cd ~/projects/<repo>
-  git bundle create /tmp/<repo>.bundle <branch>
-  scp /tmp/<repo>.bundle jbox06:/tmp/
-  ssh jbox06 'cd ~/app-repos/<repo> && git pull /tmp/<repo>.bundle <branch> && git push origin <branch>'
-  ```
-- To sync jbox06 → laptop:
-  ```bash
-  ssh jbox06 'cd ~/app-repos/<repo> && git bundle create /tmp/<repo>.bundle --all'
-  scp jbox06:/tmp/<repo>.bundle /tmp/
-  cd ~/projects/<repo> && git pull /tmp/<repo>.bundle <branch>
-  ```
-
-**Rules for hybrid mode:**
-- jbox06 is still the authority for pushing to GitLab
-- Always sync before and after local work sessions to avoid drift
-- If both copies diverge, jbox06 wins (it's closer to GitLab)
-- Mark in project memory which mode the repo is in
+A VitalAILabs app repo can have a local laptop copy for offline/side work, with
+jbox06 still the GitLab push path. This is rare; the full bundle-sync setup and
+rules live in `~/agents/docs/dev-hybrid-mode.md`. Use it only when the user
+explicitly asks for a local copy.
 
 ## Do NOT
 

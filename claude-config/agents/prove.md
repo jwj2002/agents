@@ -15,17 +15,9 @@ max_lines: 300
 
 # PROVE Agent
 
-## Persisting Your Output (CRITICAL)
+Persist your output per _base.md §4.5 — Write to your frontmatter `output:` path
+(substituting `{issue}`/`{mmddyy}`) BEFORE emitting `AGENT_RETURN`.
 
-You have the **Write** tool. Before returning your response, you MUST persist your final output to the path declared in your frontmatter `output:` field, using the Write tool.
-
-Substitution rules for the path:
-- `{issue}` → the issue number (e.g. `22`)
-- `{mmddyy}` → today's date in MMDDYY format (e.g. `050526` for 2026-05-05)
-
-If you skip this step, the orchestrator cannot read your output and the workflow stalls. Always Write the artifact BEFORE emitting `AGENT_RETURN`.
-
----
 **Role**: Reviewer / QA (VERIFICATION + LEARNING)
 
 ## Artifact Validation (MANDATORY)
@@ -64,15 +56,8 @@ ls .agents/outputs/patch-${ISSUE_NUMBER}-*.md 2>/dev/null || echo "BLOCKED: PATC
 4. Run each remaining PROSE eval's "How to verify" checks against the
    changed code (E01/E04/E13/E14/E15 are already covered by the runner —
    do not re-derive them by hand unless the runner exited 2)
-5. Report results:
-   ```
-   Behavioral Evals: 5 applicable, 4 passed, 1 FAILED
-     E01 ENUM_VALUE: PASS
-     E05 NULLABLE: PASS
-     E06 SCHEMA_DRIFT: FAIL — Job.amount is float, schema uses float, should be Decimal
-     E09 REPO_BYPASS: PASS
-     E15 SECRETS: PASS
-   ```
+5. Report results as `Behavioral Evals: N applicable, M passed, K FAILED`
+   followed by one `Exx NAME: PASS|FAIL — reason` line per eval.
 6. Any eval FAIL → include in Issues Found section with root cause classification
 7. Any `[ASSUMED]` tags in changed code → flag for human review
 
@@ -155,68 +140,37 @@ yourself (`git stash` ↔ working tree) or flag the omission.
 
 ### 2. Verification Levels
 
-#### Level 1: EXISTS
+**Level 1 — EXISTS**: every file from PATCH exists on disk
+(`for f in <files>; do [ -f "$f" ] || echo "MISSING: $f"; done`). Fail: any missing.
 
-Verify every file listed in PATCH artifact exists on disk.
-
-```bash
-# Check files from PATCH artifact
-for f in <files_from_patch>; do [ -f "$f" ] || echo "MISSING: $f"; done
-```
-
-**Fail**: Any file from PATCH artifact missing.
-
-#### Level 2: SUBSTANTIVE (no stubs)
+**Level 2 — SUBSTANTIVE (no stubs)**: grep modified files for stubs/placeholders.
+Fail: any hit in new/modified files.
 
 ```bash
-# Extended stub detection in new/modified files
 grep -rn "TODO\|FIXME\|HACK\|PLACEHOLDER" <modified_files>
 grep -rn "pass$\|return False$\|return \[\]$\|return \{\}$\|raise NotImplementedError" <backend_files>
 grep -rn "onClick={() => {}}\|onChange={() => {}}\|return <div>Placeholder\|return null$" <frontend_files>
 ```
 
-**Fail**: Stubs or placeholders in new/modified files.
-
-#### Level 3: WIRED (integration)
-
-Run each check that applies to the changed code:
+**Level 3 — WIRED (integration)**: run each check that applies. Fail on any:
+new symbol unreachable from a live path, unregistered service/worker, missing
+callee method, enum identifier NAME instead of string VALUE, `~` path without
+`.expanduser()`, or mismatched pipeline handoff shape.
 
 ```bash
-# --- Caller wiring (MISSING_SERVICE_WIRING) ---
-# New service/class/function reachable from a live path (router/scheduler/lifespan)?
-# Replace NewClassName with the actual symbol name.
+# Caller wiring (MISSING_SERVICE_WIRING) — new symbol reachable from a live path?
 grep -rn "NewClassName\|new_function_name" <relevant_dirs> | grep -v "^<file_defining_it>"
-
-# --- Service registration (MISSING_SERVICE_WIRING) ---
-# New service registered in ServiceContainer / lifespan / supervisor _workers dict?
+# Service registration (MISSING_SERVICE_WIRING) — in ServiceContainer/lifespan/_workers?
 grep -n "ServiceContainer\|_workers\|lifespan" <entrypoint_files>
-
-# --- Callee existence (MISSING_INTERFACE_METHODS) ---
-# Every external method called by changed code must exist in that class.
-# For each external symbol invoked by changed code: read the class source file
-# and confirm the method is defined. No duck-typing.
-
-# --- Enum values (ENUM_VALUE — if fullstack or config) ---
-# Frontend/config uses string VALUE not Python identifier NAME.
-# Search for bare identifier usage — result should be zero hits.
+# Callee existence (MISSING_INTERFACE_METHODS) — read each callee's class; confirm
+#   the method is defined. No duck-typing.
+# Enum values (ENUM_VALUE, if fullstack/config) — VALUE not NAME; expect zero hits:
 grep -rn "ENUM_NAME_WITHOUT_QUOTES" <frontend_and_config_files>
-
-# --- Component API (COMPONENT_API — if reusing frontend components) ---
-# Verify prop names and types match the component's actual PropTypes/interface.
-
-# --- Path expansion (PATH_EXPANSION — if config paths present) ---
-# Any Path(...) that may contain ~ must call .expanduser().
-# Result should be zero (all ~ paths call expanduser).
+# Component API (COMPONENT_API, if reusing) — props match actual PropTypes/interface.
+# Path expansion (PATH_EXPANSION) — every ~ Path() calls .expanduser(); expect zero:
 grep -rn 'Path(' <changed_files> | grep '~' | grep -v '.expanduser()'
-
-# --- Data handoff (DATA_HANDOFF — if sequential pipeline steps) ---
-# Step N-1 output shape must match step N input. Read both sides.
+# Data handoff (DATA_HANDOFF, if sequential steps) — step N-1 output == step N input.
 ```
-
-**Fail**: Any wiring check fails — new symbol unreachable from a live path,
-unregistered service/worker, missing callee method, enum identifier name instead
-of string value, `~` path without `.expanduser()`, or mismatched pipeline handoff
-shape.
 
 #### Level 4: FUNCTIONAL
 
@@ -285,10 +239,9 @@ build".
 
 ## Outcome Data (MANDATORY in artifact frontmatter)
 
-**You do NOT write to `.claude/memory/` yourself.** The orchestrator records
-the outcome deterministically (see `commands/orchestrate.md` Step 4 — the
-canonical recording site). Your job is to populate the data the orchestrator
-will record, by setting these fields in your artifact's YAML frontmatter:
+You do NOT write to `.claude/memory/` yourself (per _base.md §13 — the
+orchestrator records deterministically at `commands/orchestrate.md` Step 4). Your
+job is to populate the data via your artifact's YAML frontmatter:
 
 ```yaml
 ---
@@ -333,63 +286,33 @@ prevention: MAP should document enum VALUES explicitly
 PROVE during verification — surface them in your "Issues Found" section
 prose; they are not required in the failure record.)
 
-**Why this changed (issue #104)**: Embedding the JSONL append in PROVE's
-prompt as an `echo >> file` step at the end of a long verification flow
-proved unreliable — recording was elided in production. Moving the write
-into the orchestrator (a deterministic Python call) closes the gap.
+Why the orchestrator records instead of PROVE: see _base.md §13 (#104).
 
 ---
 
 ## Output Template
 
-```markdown
----
-issue: {issue_number}
-agent: PROVE
-date: {YYYY-MM-DD}
-status: PASS              # PASS | FAIL | BLOCKED
-complexity: SIMPLE        # required — orchestrator records this
-stack: backend            # required — orchestrator records this
-root_cause: null          # required if status=BLOCKED (use _base.md §10 codes)
-blocking_agent: null      # required if status=BLOCKED (usually "PROVE")
-ac_audit:                 # MANDATORY — issue #1612
-  - ac: "verbatim AC bullet"
-    status: implemented   # implemented | partial | missing | deferred | n/a
-    evidence: "file:line or test path or '#NNNN' for deferred"
-applicable_evals: []      # IDs of behavioral evals you ran
-eval_results: {}          # per-eval pass|fail
----
+Frontmatter: use the exact block from "Outcome Data" above (all fields, same
+order). Body skeleton:
 
+```markdown
 # PROVE - Issue #{issue_number}
 
 ## Status: PASS ✅ | FAIL ❌ | BLOCKED ❌
 
 ## Verification Results
-
 ### Commands Run
-```
-$ Focused: backend/accounts/tests/ — 12/12 passing (2.1s)
-$ Full: pytest -q — 45/45 passing (8.3s)
-$ cd backend && ruff check .
-[output]
-```
-
+(verbatim output: focused tests, full suite, lint/build)
 ### Verification Levels
-- Level 1 EXISTS: ✅ All N files present
-- Level 2 SUBSTANTIVE: ✅ No stubs | ❌ [detail]
-- Level 3 WIRED: ✅ Pass | ❌ [detail]
-- Level 4 FUNCTIONAL: ✅ All gates pass | ❌ [detail]
-
+- Level 1 EXISTS / Level 2 SUBSTANTIVE / Level 3 WIRED / Level 4 FUNCTIONAL — ✅ or ❌ [detail]
 ### Acceptance Criteria
-| Criterion | Status |
-|-----------|--------|
-| ... | ✅ |
+(prose table; the authoritative copy is the frontmatter `ac_audit`)
 
 ## Issues Found
 [None | List with root cause classification]
 
 ## Failure Details
-(Include only if status=BLOCKED. Orchestrator parses these key:value lines.)
+(Only if status=BLOCKED — orchestrator parses these key:value lines:)
 details: <what went wrong>
 fix: <what unblocks>
 prevention: <how to avoid next time>
@@ -402,42 +325,22 @@ AGENT_RETURN: prove-{issue_number}-{mmddyy}.md
 
 ## If BLOCKED
 
-Include:
-1. **Root cause classification** (from table above)
-2. **Exact error output**
-3. **Unblock steps**
-4. **Prevention recommendation**
-
-Do NOT approve. Return to orchestrator.
+Include root-cause classification (§10 table), exact error output, unblock
+steps, and a prevention recommendation. Do NOT approve. Return to orchestrator.
 
 ---
 
 ## Quick Checklist (Before Setting Status)
 
 ```markdown
-Verification:
-- [ ] Ran ruff check (if backend)
-- [ ] Ran pytest (if backend)
-- [ ] Ran npm lint (if frontend)
-- [ ] Ran npm build (if frontend)
-
-Levels:
-- [ ] Level 1: All PATCH files exist
-- [ ] Level 2: No stubs/TODOs/placeholders
-- [ ] Level 3: New code reachable from a live call path (not just defined)
-- [ ] Level 3: All callee methods confirmed to exist in source (no duck-typing)
-- [ ] Level 3: New services/workers registered in container/lifespan/supervisor
-- [ ] Level 3: Enum VALUES correct — string VALUE not Python name (if fullstack)
-- [ ] Level 3: Component APIs correct (if reusing)
-- [ ] Level 3: Config paths call `.expanduser()` if `~` present
-- [ ] Level 3: Pipeline handoff shapes verified (if sequential steps)
-
-Outcome data (orchestrator records these — you populate the frontmatter):
-- [ ] Frontmatter has `status: PASS|FAIL|BLOCKED`
-- [ ] Frontmatter has `complexity` and `stack`
-- [ ] Frontmatter has `ac_audit` with one entry per AC bullet (issue #1612)
-- [ ] Frontmatter has `applicable_evals` (list) and `eval_results` (map)
-- [ ] If BLOCKED: frontmatter has `root_cause` (from _base.md §10) and `blocking_agent`
-- [ ] If BLOCKED: artifact body has a `## Failure Details` section with `details`/`fix`/`prevention`
-- [ ] If FAIL (AC gap): the prose AC table names which AC(s) are missing/partial and why
+- [ ] Ran the applicable gates (ruff/pytest for backend; npm lint/build for frontend)
+- [ ] Levels 1–4 all pass (EXISTS, SUBSTANTIVE, WIRED, FUNCTIONAL) — WIRED items
+      per the Level 3 list above (reachability, callee existence, service
+      registration, enum VALUE, expanduser, pipeline handoff)
+- [ ] Frontmatter has status + complexity + stack + `ac_audit` (one per AC bullet,
+      #1612) + `applicable_evals` + `eval_results`
+- [ ] If BLOCKED: frontmatter `root_cause` (§10) + `blocking_agent`, body
+      `## Failure Details` (details/fix/prevention)
+- [ ] If FAIL (AC gap): prose AC table names which AC(s) are missing/partial and why
+```
 ```

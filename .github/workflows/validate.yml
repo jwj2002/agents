@@ -79,6 +79,9 @@ jobs:
           fi
           echo "OK: post-merge hook is non-interactive (--skip-profile present)"
 
+      - name: Enforce context budgets (CLAUDE.md ≤200, always-load rules ≤450)
+        run: python3 claude-config/scripts/check-context-budgets.py
+
       - name: Validate Codex command-policy rules
         run: |
           set -e

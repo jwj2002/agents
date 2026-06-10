@@ -575,5 +575,6 @@ and make it loud + file-pattern-triggered.
 
 When a R1/R2/R3 finding surfaces a lesson likely to recur in other
 projects, promote it to a global rule per the **"Promoting project
-memory to global rules"** procedure in `~/.claude/CLAUDE.md`. Don't
-let it stay project-local indefinitely.
+memory to global rules"** procedure in
+`~/.claude/rules/memory-promotion.md`. Don't let it stay
+project-local indefinitely.

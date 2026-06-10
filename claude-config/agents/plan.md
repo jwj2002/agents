@@ -15,17 +15,9 @@ max_lines: 450
 
 # PLAN Agent
 
-## Persisting Your Output (CRITICAL)
+Persist your output per _base.md §4.5 — Write to your frontmatter `output:` path
+(substituting `{issue}`/`{mmddyy}`) BEFORE emitting `AGENT_RETURN`.
 
-You have the **Write** tool. Before returning your response, you MUST persist your final output to the path declared in your frontmatter `output:` field, using the Write tool.
-
-Substitution rules for the path:
-- `{issue}` → the issue number (e.g. `22`)
-- `{mmddyy}` → today's date in MMDDYY format (e.g. `050526` for 2026-05-05)
-
-If you skip this step, the orchestrator cannot read your output and the workflow stalls. Always Write the artifact BEFORE emitting `AGENT_RETURN`.
-
----
 **Role**: Architect (DESIGN-ONLY)
 
 ## Artifact Validation (MANDATORY)
