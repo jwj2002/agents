@@ -61,3 +61,10 @@ telemetry/*/failures.jsonl
 # Safety: these local-only files must never appear in the tracked memory dir
 claude-config/memory/failures.jsonl
 claude-config/memory/metrics.jsonl
+
+# Work-confidential project trackers — read/written by the project + dashboard
+# skills via the YAML interface (project_resolver.py: KNOWLEDGE_PROJECTS_DIR).
+# This repo (jwj2002/agents) is pulled on both home and work machines, so these
+# must never be committed here. Cross-work-machine sync (private work repo /
+# M365 symlink) is TBD; until then they stay local to each work machine.
+knowledge/projects/
