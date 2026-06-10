@@ -44,6 +44,9 @@ jobs:
       - name: Validate settings.json is valid JSON
         run: python3 -c "import json; json.load(open('claude-config/settings.json'))"
 
+      - name: Validate Codex hooks.json is valid JSON
+        run: python3 -m json.tool codex-config/hooks.json >/dev/null
+
       - name: Validate shell script syntax
         run: |
           bash -n install-all.sh
@@ -128,6 +131,8 @@ jobs:
           tmp="$(mktemp -d)"
           HOME="$tmp" ./codex-config/install.sh
           test -L "$tmp/.codex/AGENTS.md"
+          test -L "$tmp/.codex/hooks.json"
+          test -L "$tmp/.codex/hooks"
           test -L "$tmp/.codex/rules/shared.rules"
 
           assert_skill_link() {

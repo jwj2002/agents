@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install Codex configuration: shared guidance, rules, and user skills symlinks.
+# Install Codex configuration: shared guidance, rules, hooks, and user skills.
 #
 # Usage: ./install.sh
 #
@@ -54,6 +54,8 @@ echo "Phase 1: Symlinks"
 mkdir -p "$CODEX_DIR" "$CODEX_DIR/rules" "$CODEX_DIR/skills" "$AGENTS_SKILLS_DIR"
 
 link_item "$SCRIPT_DIR/AGENTS.md" "$CODEX_DIR/AGENTS.md" "AGENTS.md"
+link_item "$SCRIPT_DIR/hooks.json" "$CODEX_DIR/hooks.json" "hooks.json"
+link_item "$SCRIPT_DIR/hooks" "$CODEX_DIR/hooks" "hooks"
 link_item "$SCRIPT_DIR/rules/shared.rules" "$CODEX_DIR/rules/shared.rules" "rules/shared.rules"
 link_item "$SCRIPT_DIR/skills" "$CODEX_DIR/skills/user" "skills/user"
 
@@ -131,7 +133,13 @@ echo ""
 echo "Phase 3: Verify"
 ERRORS=0
 
-for target in "$CODEX_DIR/AGENTS.md" "$CODEX_DIR/rules/shared.rules" "$CODEX_DIR/skills/user"; do
+for target in \
+    "$CODEX_DIR/AGENTS.md" \
+    "$CODEX_DIR/hooks.json" \
+    "$CODEX_DIR/hooks" \
+    "$CODEX_DIR/rules/shared.rules" \
+    "$CODEX_DIR/skills/user"
+do
     if [ -L "$target" ] && [ -e "$target" ]; then
         :
     else
@@ -151,6 +159,7 @@ echo "  Claude→Codex: $SKILLS_PORTED skill(s) shared, $SKILLS_SKIPPED skipped 
 echo "  Notes:       ~/.codex/skills/.system remains local and untouched"
 echo "               ~/.codex/rules/default.rules remains local (machine approvals)"
 echo "               ~/.codex/AGENTS.md is shared Codex guidance"
+echo "               ~/.codex/hooks.json and ~/.codex/hooks require Codex /hooks trust review after changes"
 echo "               ~/.agents/skills contains documented Codex user skill links"
 
 if [ "$BACKUP_CREATED" = true ]; then
