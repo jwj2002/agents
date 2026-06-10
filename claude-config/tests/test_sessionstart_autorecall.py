@@ -616,3 +616,20 @@ def test_from_and_template_pointers_still_whitelisted(tmp_path, monkeypatch):
     assert "from $ENV" in out
     assert "${MY_KEY}" in out
     assert "[body suppressed" not in out
+
+
+# ----------------------------------------------- fix cycle 4 tests (issue #429)
+
+# ---- Fix cycle 4: sk- tail charset must include underscore (base64url) ----
+
+
+def test_sk_proj_underscore_tail_suppressed(tmp_path, monkeypatch):
+    """Fix cycle 4: sk-proj key whose tail contains underscore (base64url) must
+    be suppressed — previously the [A-Za-z0-9]{12,} tail bypassed _ chars."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    raw = "sk-proj-abcdefghijkl_mnopqrstuvwxyz123456"
+    _fact(d, "sk-underscore", ftype="user", body=f"api key: {raw} in config")
+    out = H.render_project_memory(d, today=TODAY)
+    assert raw not in out
+    assert "[body suppressed" in out

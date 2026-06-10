@@ -94,7 +94,7 @@ _SUPPRESSED_BODY = "[body suppressed — safety filter]"
 # sk-ant-abc1234567890 (13-char run) suppressed; 16 would let them slip through.
 _SECRET_RE = re.compile(
     r"""
-    \bsk-(?:[A-Za-z0-9]+-){0,3}[A-Za-z0-9]{12,}\b  # OpenAI/Anthropic sk- keys (hyphenated prefixes)
+    \bsk-(?:[A-Za-z0-9]+-){0,3}[A-Za-z0-9_]{12,}\b  # OpenAI/Anthropic sk- keys (hyphenated prefixes; _ allowed in base64url tails)
     | \bgithub_pat_[A-Za-z0-9_]{20,}   # GitHub fine-grained PATs
     | \bgh[pousr]_[A-Za-z0-9]{10,}     # GitHub tokens (ghp_/gho_/ghu_/ghs_/ghr_)
     | \bglpat-[A-Za-z0-9]{5,}          # GitLab PATs
