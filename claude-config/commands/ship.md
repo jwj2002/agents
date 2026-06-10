@@ -306,6 +306,7 @@ Shipped  PR #N  {pr_url}
 | HEAD parity | Step 7 | Always |
 | Kill switch (`y/N`) | Step 7 | Plain `/ship` only |
 | PROVE gate | Step 7.5 | Always (override only via `--override-prove`, recorded) |
+| Regression-set gate | Step 7.6 — diff touches `claude-config/agents/` or `claude-config/commands/` | Always (REGRESSED verdict blocks merge) |
 | Post-merge test failure | Step 9 | Always (blocks prune) |
 
 `--auto` bypasses only the kill switch (the `y/N` prompt). All other guards
