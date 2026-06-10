@@ -330,6 +330,7 @@ def get_active_work(yaml_content: str) -> dict:
 # don't bloat. Chars ≈ 4 × tokens.
 AUTORECALL_TOTAL_CHARS = 6000
 AUTORECALL_PER_FACT_CHARS = 1200
+AUTORECALL_SUMMARY_CHARS = 200
 _TYPE_PRIORITY = {"feedback": 0, "user": 1, "reference": 2, "project": 3}
 
 
@@ -343,19 +344,112 @@ def _fact_meta(path: Path) -> dict | None:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return None
-    meta = {"name": path.stem, "type": "project", "expires": None, "body": text}
+    meta = {
+        "name": path.stem,
+        "type": "project",
+        "expires": None,
+        "summary": "",
+        "durability": "",
+        "body": text,
+    }
     if text.startswith("---\n"):
         end = text.find("\n---", 4)
         if end != -1:
             for line in text[4:end].splitlines():
                 stripped = line.strip()
-                for key in ("type", "expires", "name"):
+                for key in ("type", "expires", "name", "summary", "durability"):
                     if stripped.startswith(f"{key}:"):
                         meta[key] = (
                             stripped.split(":", 1)[1].strip().strip("'\"") or meta[key]
                         )
             meta["body"] = text[end + 4 :].lstrip("-").lstrip("\n")
     return meta
+
+
+def _extract_summary(
+    meta: dict, body: str, *, max_chars: int = AUTORECALL_SUMMARY_CHARS
+) -> str:
+    """Derive a ≤max_chars summary for a fact.
+
+    Uses ``meta["summary"]`` if set; otherwise falls back to the first
+    non-header, non-list, non-empty sentence in the body. Always passes the
+    candidate through ``_classify_body`` — a suppressed body never leaks via
+    its summary. Fail-open: any exception returns a short safe default.
+    """
+    try:
+        candidate = meta.get("summary", "").strip()
+        if not candidate:
+            # Fallback: first non-header, non-list, non-empty sentence.
+            for raw_line in body.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                if line.startswith(("#", "-", "*", ">")):
+                    continue
+                # Split on ". " to get first sentence.
+                candidate = line.split(". ")[0].rstrip(".")
+                break
+        candidate = candidate[:max_chars]
+        # Safety: a suppressed body must not leak via its summary.
+        # "error" is fail-open (classifier failed internally) — treat as safe.
+        verdict, _ = _classify_body(candidate)
+        if verdict in ("secret", "injection"):
+            return _SUPPRESSED_BODY
+        return candidate
+    except Exception:  # noqa: BLE001 — fail-open: summary error must not crash hook
+        return ""
+
+
+def _rank_score(f: dict, today_str: str) -> float:
+    """Compute a sort key for fact ``f``; lower score = injected first.
+
+    Formula (all components non-negative except durability bonus):
+        base_priority     = _TYPE_PRIORITY.get(type, 9)          # 0..9
+        freshness_penalty = clamp((days - 30) / 30, 0, 2)        # 0 at <30d, +2 at >90d
+        size_penalty      = clamp((body_size - 1200) / 1200, 0, 1.5)  # project type only
+        durability_bonus  = -1.0 if durable else 0.0
+    """
+    try:
+        ftype = f.get("type", "project")
+        base = float(_TYPE_PRIORITY.get(ftype, 9))
+
+        # Freshness penalty: 0 for facts touched ≤30d ago, up to +2 at 90d+.
+        try:
+            mtime = f["path"].stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        try:
+            today_date = date.fromisoformat(today_str)
+        except ValueError:
+            today_date = date.today()
+        days = (today_date - date.fromtimestamp(mtime)).days
+        freshness = max(0.0, min(2.0, (days - 30) / 30.0))
+
+        # session/temporary facts get an extra staleness multiplier.
+        durability = f.get("durability", "")
+        if durability in ("session", "temporary"):
+            freshness *= 1.5
+
+        # Size penalty: only for project-type facts (they are the over-represented class).
+        if ftype == "project":
+            body_size = len(f.get("body", "").strip())
+            size_penalty = max(
+                0.0,
+                min(
+                    1.5,
+                    (body_size - AUTORECALL_PER_FACT_CHARS)
+                    / float(AUTORECALL_PER_FACT_CHARS),
+                ),
+            )
+        else:
+            size_penalty = 0.0
+
+        # Durability bonus: durable facts resist size/freshness penalties.
+        dur_bonus = -1.0 if durability == "durable" else 0.0
+
+        return base + freshness + size_penalty + dur_bonus
+    except Exception:  # noqa: BLE001 — fail-open: ranking error must not crash hook
+        return float(_TYPE_PRIORITY.get(f.get("type", "project"), 9))
 
 
 def _expired(expires: str | None, today: str) -> bool:
@@ -365,9 +459,10 @@ def _expired(expires: str | None, today: str) -> bool:
 def render_project_memory(fact_dir: Path, *, today: str | None = None) -> str:
     """Build the auto-recalled Project Memory section (empty string if none).
 
-    Selection: non-expired facts ranked by type priority (feedback > user >
-    reference > project) then mtime (newest first), injected until the char
-    budget runs out. Remaining facts are listed as topics with the recall CTA.
+    Two-pass injection (#430):
+      Pass 1 — inject a summary line for every selected fact (budget: first half).
+      Pass 2 — inject full bodies for top-N eligible facts (remaining budget).
+    Total budget: AUTORECALL_TOTAL_CHARS (6000 chars, unchanged from #365).
     """
     from datetime import date
 
@@ -384,11 +479,63 @@ def render_project_memory(fact_dir: Path, *, today: str | None = None) -> str:
     if not facts:
         return ""
 
-    facts.sort(
-        key=lambda f: (_TYPE_PRIORITY.get(f["type"], 9), -f["path"].stat().st_mtime)
-    )
-    injected, leftover, used = [], [], 0
+    # Rank by _rank_score (lower = better); use path.name as deterministic tiebreaker.
+    facts.sort(key=lambda f: (_rank_score(f, today), f["path"].name))
+
+    project = fact_dir.parent.name
+
+    # ---- Pass 1: summary injection ----
+    # Budget slice for summaries: up to half the total budget so full bodies
+    # can always fill the second half.
+    summary_budget = AUTORECALL_TOTAL_CHARS // 2
+    summary_used = 0
+    summary_entries = []  # (safe_name, ftype, summary_text, fact_dict, verdict)
+    leftover = []
+
     for f in facts:
+        try:
+            safe_name = _redact_secret_name(f["name"])
+        except Exception:  # noqa: BLE001 — fail-open: redaction must not crash hook
+            safe_name = f["name"]
+
+        # Derive summary — safety-filtered inside _extract_summary.
+        summary = _extract_summary(f, f["body"].strip())
+
+        # Summary line cost.
+        cost = len(summary) + len(safe_name) + 30
+        if summary_used + cost > summary_budget:
+            leftover.append(f)
+            continue
+
+        # Also classify the raw body for the body-pass safety check.
+        try:
+            verdict, excerpt = _classify_body(f["body"].strip())
+        except Exception:  # noqa: BLE001 — fail-open: filter errors must not crash hook
+            verdict, excerpt = "error", None
+
+        if verdict == "error":
+            _log_classify_error(safe_name, project)
+        elif verdict != "ok":
+            _log_injection_skip(safe_name, verdict, excerpt or "", project)
+            # Suppressed body must not leak via its summary (PLAN: fail-safe).
+            summary = _SUPPRESSED_BODY
+
+        summary_entries.append((safe_name, f["type"], summary, f, verdict))
+        summary_used += cost
+
+    # ---- Pass 2: full-body injection ----
+    body_budget = AUTORECALL_TOTAL_CHARS - summary_used
+    body_used = 0
+    body_entries = []  # (safe_name, ftype, body_text)
+
+    for safe_name, ftype, _summary, f, verdict in summary_entries:
+        # session/temporary facts are summary-only by declaration.
+        if f.get("durability", "") in ("session", "temporary"):
+            continue
+        # Suppressed bodies are not injected.
+        if verdict not in ("ok", "error"):
+            continue
+
         body = f["body"].strip()
         if len(body) > AUTORECALL_PER_FACT_CHARS:
             body = (
@@ -396,61 +543,46 @@ def render_project_memory(fact_dir: Path, *, today: str | None = None) -> str:
                 + f"\n… *(truncated — full fact: `{f['path']}`)*"
             )
 
-        project = fact_dir.parent.name
-
-        # BLOCKING 3: the fact NAME is rendered to context and written to the
-        # log verbatim — run it through the same classifier and redact it in
-        # BOTH surfaces if it is secret/injection-shaped. Never emit raw name.
-        try:
-            safe_name = _redact_secret_name(f["name"])
-        except Exception:  # noqa: BLE001 — fail-open: redaction must not crash hook
-            safe_name = f["name"]
-
-        # Safety filter: check for secret-shaped or injection-phrase content.
-        try:
-            verdict, excerpt = _classify_body(body)
-        except Exception:  # noqa: BLE001 — fail-open: filter errors must not crash hook
-            verdict, excerpt = "error", None
-
-        if verdict == "error":
-            # NIT 1: classifier failed. Fail-open (inject the body) but emit a
-            # diagnostic so the failure is observable. Never logs the body.
-            _log_classify_error(safe_name, project)
-        elif verdict != "ok":
-            _log_injection_skip(safe_name, verdict, excerpt or "", project)
-            # Replace body with sentinel — fact name (redacted if needed) still
-            # appears in output but raw content is not injected.
-            body = _SUPPRESSED_BODY
-
-        cost = len(body) + len(safe_name) + 40
-        if used + cost > AUTORECALL_TOTAL_CHARS:
-            leftover.append(f)
+        cost = len(body) + len(safe_name) + 20
+        if body_used + cost > body_budget:
             continue
-        injected.append((safe_name, f["type"], body))
-        used += cost
+        body_entries.append((safe_name, ftype, body))
+        body_used += cost
 
-    # Count only non-suppressed facts for the metrics record.
-    real_injected = sum(1 for _, _, b in injected if b != _SUPPRESSED_BODY)
+    # Count only body-pass (non-suppressed) facts for the metrics record.
+    real_injected = len(body_entries)
 
+    # ---- Render ----
     lines = ["### Project Memory (auto-recalled)\n"]
+    n_summaries = len(summary_entries)
+    n_bodies = len(body_entries)
     lines.append(
-        f"{real_injected} of {len(facts)} fact bodies injected "
-        "(highest-value first, budget-capped). Verify against current code "
-        "before acting — facts reflect what was true when written.\n"
+        f"{n_summaries} summaries injected ({n_bodies} of {n_summaries} with full body). "
+        "Verify against current code before acting — facts reflect what was true when written.\n"
     )
-    for name, ftype, body in injected:
-        lines.append(f"**{name}** ({ftype}):\n{body}\n")
+
+    # Summary section.
+    for safe_name, ftype, summary, _f, _verdict in summary_entries:
+        lines.append(f"**{safe_name}** ({ftype}): {summary}")
+
+    # Full-body section (omitted when empty).
+    if body_entries:
+        lines.append(f"\n#### Full bodies (top-{n_bodies})\n")
+        for safe_name, ftype, body in body_entries:
+            lines.append(f"**{safe_name}** ({ftype}):\n{body}\n")
+
     if leftover:
         topics = ", ".join(
             _redact_secret_name(f["name"]).replace("_", " ").replace("-", " ")
             for f in leftover[:8]
         )
         lines.append(
-            f"Not injected ({len(leftover)}): {topics}. "
+            f"\nNot injected ({len(leftover)}): {topics}. "
             "→ `~/agents/bin/memory recall <topic>` to pull these.\n"
         )
 
-    _log_autorecall(fact_dir, real_injected, len(facts), used)
+    total_used = summary_used + body_used
+    _log_autorecall(fact_dir, real_injected, len(facts), total_used)
     return "\n".join(lines)
 
 
