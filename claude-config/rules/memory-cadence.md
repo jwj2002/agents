@@ -45,7 +45,8 @@ consider archiving stale perishables or re-tagging facts with shorter TTLs.
 - The global `memory doctor` checks ALL projects. Use `--project <substr>` to
   focus on one.
 - cold% in `memory doctor` is mtime-based: fact files whose mtime is older than
-  90 days / total fact files. A high cold% means facts exist but are not being
+  30 days / total fact files (the audit definition; distinct from the 90-day
+  `archive` perishable threshold). A high cold% means facts exist but are not being
   updated — a candidate for archiving.
 - injection coverage in `memory readout` (avg facts_injected / facts_total per
   session) shows what fraction of the store's indexed facts are actually reaching
