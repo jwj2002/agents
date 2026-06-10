@@ -22,9 +22,8 @@ commit → push → PR → validate/review → squash-merge → sync main
 ```
 
 Ordering matters (#367): post-merge verification runs BEFORE pruning. If
-verification fails, do NOT prune — the branch is your recovery path; create
-`fix/hotfix-<description>` from origin/main instead (see
-`post-merge-verification.md`, which this sequence now matches).
+verification fails, do NOT prune — create `fix/hotfix-<description>` from
+origin/main instead.
 
 **Stop before merge ONLY when:**
 
@@ -116,9 +115,7 @@ After every PR merge, and before starting new work, prune merged branches:
 ~/agents/bin/agent-git cleanup --branch <merged-branch>
 ```
 
-Manual fallbacks (`git fetch --prune`, deleting merged remote/local branches)
-and the "enable auto-delete head branches" repo setting are in
-`~/agents/docs/git-process.md` → "Merge And Cleanup".
+Manual fallbacks and the "enable auto-delete head branches" setting: `~/agents/docs/git-process.md` → "Merge And Cleanup".
 
 ## Parallel Agent Work
 
@@ -147,7 +144,5 @@ helper:
 - Force push to shared branches
 - Skip CI with `--no-verify`
 - Merge without rebasing on latest main
-- `git stash` to clear the working tree and not restore it later (stash-and-forget).
-  If a dirty tree blocks a pull, commit WIP to a `wip/<date>-<slug>` branch
-  first — full procedure in `~/agents/docs/git-process.md` → "Working Tree
-  Hygiene (Autonomous Runs)".
+- `git stash` to clear the working tree without restoring (stash-and-forget).
+  Commit WIP to a `wip/<date>-<slug>` branch instead.
