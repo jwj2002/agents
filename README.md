@@ -70,13 +70,13 @@ git pull
 
 Active: `obsidian-agent/` (session → vault writer), `pulse/` + `email-digest/`
 (+ `google/`/`m365/` transports), `action/` / `decision/` / `project/` CLIs
-(deployed via `bin/`), `mcp-server/` (vault-metrics MCP — **active**, wired in
-`~/.claude/settings.local.json`; serves vault_status/search/dashboard +
-agent_metrics/failure_patterns), `knowledge/`, `lib/`, `machines/`,
+(deployed via `bin/`), `knowledge/`, `lib/`, `machines/`,
 `codex-config/`.
 
 Dormant (keep until a decision forces it): `code-review/`, `ui-testing/`,
-`project-template/`.
+`project-template/`, `mcp-server/` (vault-metrics — retired from
+auto-registration #425, 4 calls/45d; surfaces are pure CLIs since Path B;
+re-register with `claude mcp add --scope user vault-metrics -- <venv-python> mcp-server/server.py`).
 
 Archived 2026-06-10 (#408): `orchestrate-workflow/` → `_archived/orchestrate-workflow-legacy/` (superseded by claude-config orchestrate).
 

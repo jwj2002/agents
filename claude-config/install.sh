@@ -174,42 +174,13 @@ pip_install() {
 }
 
 if [ -n "$PIP_CMD" ]; then
-    # MCP server (editable install — --user incompatible with -e, use venv)
-    MCP_DIR="$REPO_DIR/mcp-server"
-    MCP_VENV="$REPO_DIR/mcp-server/.venv"
-    if [ -f "$MCP_DIR/pyproject.toml" ]; then
-        # Editable installs need a proper venv (can't use --user with -e)
-        if [ -n "$VIRTUAL_ENV" ]; then
-            # Already in a venv — install directly
-            if pip install -e "$MCP_DIR" --quiet 2>/dev/null; then
-                MCP_STATUS="installed"
-                echo "  ✓ MCP server (pip install -e, in active venv)"
-            else
-                MCP_STATUS="failed"
-                echo "  ✗ MCP server install failed"
-            fi
-        else
-            # Create/reuse a dedicated venv for the MCP server
-            if [ ! -d "$MCP_VENV" ]; then
-                python3 -m venv "$MCP_VENV" 2>/dev/null || true
-            fi
-            if [ -f "$MCP_VENV/bin/pip" ]; then
-                if "$MCP_VENV/bin/pip" install -e "$MCP_DIR" --quiet 2>/dev/null; then
-                    MCP_STATUS="installed (venv)"
-                    echo "  ✓ MCP server (dedicated venv: $MCP_VENV)"
-                else
-                    MCP_STATUS="failed"
-                    echo "  ✗ MCP server install failed"
-                fi
-            else
-                MCP_STATUS="failed"
-                echo "  ✗ Could not create venv for MCP server (install python3-venv)"
-            fi
-        fi
-    else
-        MCP_STATUS="not found"
-        echo "  - MCP server: $MCP_DIR/pyproject.toml not found"
-    fi
+    # MCP server venv build RETIRED (#425, 2026-06-10): vault-metrics is no
+    # longer auto-registered (4 tool calls in 45 days; its dashboard/metrics/
+    # project surfaces moved to pure CLIs in Path B). Code stays in
+    # mcp-server/ — to revive: python3 -m venv mcp-server/.venv &&
+    # mcp-server/.venv/bin/pip install -e mcp-server, then
+    # claude mcp add --scope user vault-metrics -- <venv-python> <server.py>.
+    MCP_STATUS="retired (#425)"
 
     # PyYAML (for hooks) — check if already importable first
     if python3 -c "import yaml" 2>/dev/null; then
@@ -284,113 +255,26 @@ echo ""
 
 # ─── Phase 2.6: MCP Servers ────────────────────────────────────────────────
 #
-# Claude Code reads MCP servers from ~/.claude.json (NOT ~/.claude/settings.json).
-# The `claude mcp add --scope user` command registers them in the right place.
-# Each server is registered idempotently — existing entries are overwritten.
+# RETIRED from auto-registration (#425, 2026-06-10). 45-day transcript usage:
+# context7 0 calls, apple-mcp 3, vault-metrics 4 — vs the per-session cost of
+# npx/server spawns, npm cache warm-ups, and context7's instruction block in
+# every system prompt. playwright (142 calls/45d) is plugin-managed (Phase
+# 2.5) and unaffected. This phase now DEREGISTERS the retired names so
+# machines that had them get cleaned on their next pull+install. To re-add
+# one deliberately: claude mcp add --scope user <name> -- <command...>
 
 echo "Phase 2.6: MCP Servers (user-level, ~/.claude.json)"
 
-MCP_SERVERS_REGISTERED=0
-MCP_SERVERS_TOTAL=0
-
 if command -v claude &>/dev/null; then
-    register_mcp() {
-        # register_mcp <name> <command> [args...]
-        # `claude mcp add` is NOT idempotent — it exits 1 with "already exists"
-        # if the server is registered. Remove first (no-op if absent), then add,
-        # so paths stay correct if REPO_DIR moved between runs.
-        local name="$1"
-        shift
-        MCP_SERVERS_TOTAL=$((MCP_SERVERS_TOTAL + 1))
-
-        claude mcp remove --scope user "$name" >/dev/null 2>&1 || true
-
-        local err
-        if err=$(claude mcp add --scope user "$name" -- "$@" 2>&1); then
-            echo "  ✓ $name registered"
-            MCP_SERVERS_REGISTERED=$((MCP_SERVERS_REGISTERED + 1))
+    for retired in vault-metrics context7 apple-mcp; do
+        if claude mcp remove --scope user "$retired" >/dev/null 2>&1; then
+            echo "  ✓ $retired deregistered (retired from auto-registration, #425)"
         else
-            echo "  ✗ Failed to register $name: $err"
+            echo "  - $retired not registered (already clean)"
         fi
-    }
-
-    # knowledge-mcp was retired in Phase 6C (issue #146). The Knowledge MCP
-    # server's data — projects/decisions/patterns/learning-rules — now lives
-    # as filesystem YAMLs read directly by the action / dashboard / project /
-    # review-session CLIs. The TypeScript server is archived under
-    # _archived/knowledge-mcp/. See specs/knowledge-surfaces.md.
-
-    # --- vault-metrics (Python, uses dedicated venv) ---
-    MCP_VENV_PYTHON="$REPO_DIR/mcp-server/.venv/bin/python"
-    MCP_SERVER_PY="$REPO_DIR/mcp-server/server.py"
-    if [ -x "$MCP_VENV_PYTHON" ] && [ -f "$MCP_SERVER_PY" ]; then
-        register_mcp vault-metrics "$MCP_VENV_PYTHON" "$MCP_SERVER_PY"
-    elif [ -f "$MCP_SERVER_PY" ]; then
-        echo "  ✗ vault-metrics: venv not found (created in Phase 2)"
-        MCP_SERVERS_TOTAL=$((MCP_SERVERS_TOTAL + 1))
-    fi
-
-    # --- context7 (npm package, no local install needed) ---
-    register_mcp context7 npx -y @upstash/context7-mcp@latest
-
-    # --- apple-mcp (macOS only — Apple Contacts, Notes, Calendar, etc.) ---
-    if [ "$PLATFORM" = "macos" ]; then
-        register_mcp apple-mcp npx -y apple-mcp@latest
-    else
-        echo "  - apple-mcp: skipped (macOS only, current platform: $PLATFORM_LABEL)"
-    fi
-
-    # --- npm cache warm-up for npx-based MCP servers ---
-    #
-    # Cold `npx -y <pkg>@latest` resolves the dist-tag, downloads the tarball,
-    # then runs lifecycle scripts. On a cold npm cache this can take 5–30s and
-    # exceed Claude Code's MCP handshake timeout, so the first `claude mcp list`
-    # after install (or after `npm cache clean`) shows context7 / apple-mcp as
-    # "Failed to connect" even though they're correctly registered. Once the
-    # cache is warm the same servers start in ~1s. See issue #77.
-    #
-    # We pre-warm by running each server once with stdin closed; servers exit
-    # immediately on EOF without doing any real work. This is best-effort:
-    # network failures here do not break install (the registration already
-    # succeeded; the user can warm the cache later by re-running `claude mcp list`).
-    # Note: playwright is registered via the Claude plugin system (Phase 2.5),
-    # not Phase 2.6, so warming it isn't this script's job — the plugin owns
-    # its own lifecycle. This warm-up only covers the Phase 2.6 npx servers.
-    if command -v npx &>/dev/null; then
-        echo "  Warming npm cache for npx-based MCP servers (one-time, ~10s)..."
-        # Background npx directly (no subshell) so $! captures the npx PID,
-        # which lets the timeout-kill below actually target the download.
-        npx -y @upstash/context7-mcp@latest </dev/null >/dev/null 2>&1 &
-        WARM_PID1=$!
-        WARM_PIDS="$WARM_PID1"
-        if [ "$PLATFORM" = "macos" ]; then
-            npx -y apple-mcp@latest </dev/null >/dev/null 2>&1 &
-            WARM_PID2=$!
-            WARM_PIDS="$WARM_PIDS $WARM_PID2"
-        fi
-        # Bound the wait — if a download is genuinely stuck, don't block install.
-        WAIT_DEADLINE=$(( $(date +%s) + 30 ))
-        WARM_TIMED_OUT=0
-        for pid in $WARM_PIDS; do
-            while kill -0 "$pid" 2>/dev/null; do
-                if [ "$(date +%s)" -ge "$WAIT_DEADLINE" ]; then
-                    kill "$pid" 2>/dev/null || true
-                    WARM_TIMED_OUT=1
-                    break
-                fi
-                sleep 1
-            done
-            wait "$pid" 2>/dev/null || true
-        done
-        if [ "$WARM_TIMED_OUT" -eq 1 ]; then
-            echo "  ~ npm cache warm-up timed out (best-effort; first session may still see Failed to connect)"
-        else
-            echo "  ✓ npm cache warmed"
-        fi
-    fi
+    done
 else
-    echo "  ⚠ claude CLI not found — skipping MCP server registration"
-    echo "    Install Claude Code, then re-run this script."
+    echo "  ⚠ claude CLI not found — skipping MCP deregistration"
 fi
 
 echo ""
@@ -564,15 +448,6 @@ else
     echo "  ⚠ Hook validator not found at $HOOK_VALIDATOR — skipping"
 fi
 
-# Verify MCP server (runs as script, not importable as package)
-MCP_PYTHON="$REPO_DIR/mcp-server/.venv/bin/python"
-if [ -f "$MCP_PYTHON" ] && \
-   (cd "$REPO_DIR/mcp-server" && "$MCP_PYTHON" server.py --help &>/dev/null); then
-    echo "  ✓ MCP server runs (dedicated venv)"
-elif [[ "$MCP_STATUS" == installed* ]]; then
-    echo "  ~ MCP server installed (verify manually: cd ~/agents/mcp-server && python server.py --help)"
-fi
-
 # Verify PyYAML
 if python3 -c "import yaml" 2>/dev/null; then
     echo "  ✓ PyYAML importable"
@@ -595,7 +470,7 @@ echo "=== Installation Summary ==="
 echo "  Platform:     $PLATFORM_LABEL"
 echo "  Symlinks:     ✓ $LINKS_TOTAL/$LINKS_TOTAL linked"
 echo "  MCP Server:   $MCP_STATUS"
-echo "  MCP Servers:  $MCP_SERVERS_REGISTERED/$MCP_SERVERS_TOTAL registered in ~/.claude.json"
+echo "  MCP Servers:  retired from auto-registration (#425; playwright via plugin)"
 echo "  PyYAML:       $PYYAML_STATUS"
 echo "  Codex Plugin: $CODEX_PLUGIN_STATUS"
 
