@@ -83,10 +83,18 @@ _SUPPRESSED_BODY = "[body suppressed — safety filter]"
 # The key=value branch (last alternative) captures the value portion in group 1
 # so the whitelist guard can inspect it without re-running the full pattern.
 # Note: re.IGNORECASE applied globally to cover the key=value branch.
+#
+# The sk- alternative allows up to 3 short hyphenated prefix segments
+# (sk-ant-api03-…, sk-proj-…) before a HIGH-ENTROPY run of 12+ alnum chars.
+# Two guards stop ordinary hyphenated words (entertask-project-pointer,
+# task-project, EnterTask-Code-Review-2026-05-12) from matching: (1) the \b
+# anchor — in those words "sk" sits mid-token with no word boundary before it;
+# (2) the 12-char entropy floor on the final run — those words have no 12+ char
+# alnum segment. The floor is 12 (not 16) to keep real-shaped short keys like
+# sk-ant-abc1234567890 (13-char run) suppressed; 16 would let them slip through.
 _SECRET_RE = re.compile(
     r"""
-    \bsk-ant-[A-Za-z0-9]{10,}           # Anthropic sk-ant- (check before generic sk-)
-    | \bsk-[A-Za-z0-9]{10,}             # OpenAI sk- keys
+    \bsk-(?:[A-Za-z0-9]+-){0,3}[A-Za-z0-9]{12,}\b  # OpenAI/Anthropic sk- keys (hyphenated prefixes)
     | \bghp_[A-Za-z0-9]{10,}           # GitHub PATs
     | \bglpat-[A-Za-z0-9]{5,}          # GitLab PATs
     | \bxox[bpoas]-[A-Za-z0-9\-]{10,}  # Slack tokens
@@ -115,15 +123,35 @@ _INJECTION_RE = re.compile(
 )
 
 
+def _scan_secret_line(line: str) -> str | None:
+    """Return a redactable excerpt if a single line contains a literal secret.
+
+    The whitelist guard exempts ONLY a pointer-style key=value match on THIS
+    line. Because every key=value match is re-checked here per line, scanning
+    continues past a whitelisted match in the body (see _classify_body): a
+    whitelisted pointer on one line never grants the rest of the body a pass.
+    """
+    for m in _SECRET_RE.finditer(line):
+        value_capture = m.group(1) if m.lastindex else None
+        if value_capture is not None and _WHITELIST_VALUE_RE.match(value_capture):
+            # Pointer-style reference on this match — not a literal credential.
+            # Keep scanning later matches on the same line.
+            continue
+        return m.group(0)[:60]
+    return None
+
+
 def _classify_body(body: str) -> tuple[str, str | None]:
-    """Classify a fact body for injection safety.
+    """Classify a fact body (or fact name) for injection safety.
 
     Returns:
         ("ok", None)              -- safe to inject verbatim
         ("secret", excerpt)       -- secret-shaped pattern found
         ("injection", excerpt)    -- instruction-injection phrase found
 
-    Never raises. On internal error returns ("ok", None) (fail-open).
+    Never raises. On internal error returns ("ok", None) (fail-open) and the
+    caller is expected to emit a `classify_error` diagnostic via the boolean
+    returned by _classify_body_raised — kept simple here by logging directly.
     """
     try:  # noqa: BLE001 — fail-open surface: classification errors must never crash SessionStart
         # Check injection patterns first (no whitelist needed).
@@ -131,20 +159,18 @@ def _classify_body(body: str) -> tuple[str, str | None]:
         if m:
             return ("injection", m.group(0)[:60])
 
-        # Check secret patterns.
-        m = _SECRET_RE.search(body)
-        if m:
-            # The key=value pattern is the last alternative (group 1 captures the value).
-            # Apply the whitelist guard only to that branch.
-            value_capture = m.group(1) if m.lastindex else None
-            if value_capture is not None and _WHITELIST_VALUE_RE.match(value_capture):
-                # Pointer-style reference — not a literal credential.
-                return ("ok", None)
-            return ("secret", m.group(0)[:60])
+        # Scan for secrets line-by-line so a whitelisted pointer on one line
+        # never short-circuits scanning of the remaining lines (BLOCKING 2).
+        for line in body.splitlines() or [body]:
+            excerpt = _scan_secret_line(line)
+            if excerpt is not None:
+                return ("secret", excerpt)
 
         return ("ok", None)
     except Exception:  # noqa: BLE001 — fail-open: swallow all errors, log nothing sensitive
-        return ("ok", None)
+        # Signal the failure with a sentinel verdict so the caller can emit a
+        # classify_error diagnostic. "error" is treated as fail-open (inject).
+        return ("error", None)
 
 
 def _log_injection_skip(
@@ -178,6 +204,38 @@ def _log_injection_skip(
             fh.write(json.dumps(rec) + "\n")
     except Exception:  # noqa: BLE001 — fail-open: do not let log write crash the hook
         logging.warning("injection_skip log append failed", exc_info=True)
+
+
+def _log_classify_error(fact_name: str, project: str) -> None:
+    """Append a `classify_error` diagnostic to memory-autoinject.jsonl.
+
+    Emitted when the classifier hit its exception path (fail-open). NEVER
+    includes the body or any secret — only the (possibly redacted) fact name.
+    """
+    try:  # noqa: BLE001 — fail-open: logging errors must never crash SessionStart
+        rec = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "event": "classify_error",
+            "project": project,
+            "fact": fact_name,
+        }
+        log = Path.home() / ".claude" / "memory-autoinject.jsonl"
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec) + "\n")
+    except Exception:  # noqa: BLE001 — fail-open: do not let log write crash the hook
+        logging.warning("classify_error log append failed", exc_info=True)
+
+
+def _redact_secret_name(name: str) -> str:
+    """Redact a fact name that itself classifies as secret/injection (BLOCKING 3).
+
+    Returns a safe placeholder that never echoes the raw name. Pure function;
+    never raises (fail-open via _classify_body's internal try/except).
+    """
+    verdict, _ = _classify_body(name)
+    if verdict in ("secret", "injection"):
+        return "[name redacted — safety filter]"
+    return name
 
 
 # ---------------------------------------------------------------- active-work
@@ -267,27 +325,41 @@ def render_project_memory(fact_dir: Path, *, today: str | None = None) -> str:
                 + f"\n… *(truncated — full fact: `{f['path']}`)*"
             )
 
+        project = fact_dir.parent.name
+
+        # BLOCKING 3: the fact NAME is rendered to context and written to the
+        # log verbatim — run it through the same classifier and redact it in
+        # BOTH surfaces if it is secret/injection-shaped. Never emit raw name.
+        try:
+            safe_name = _redact_secret_name(f["name"])
+        except Exception:  # noqa: BLE001 — fail-open: redaction must not crash hook
+            safe_name = f["name"]
+
         # Safety filter: check for secret-shaped or injection-phrase content.
         try:
             verdict, excerpt = _classify_body(body)
         except Exception:  # noqa: BLE001 — fail-open: filter errors must not crash hook
-            verdict, excerpt = "ok", None
+            verdict, excerpt = "error", None
 
-        if verdict != "ok":
-            _log_injection_skip(f["name"], verdict, excerpt or "", fact_dir.parent.name)
-            # Replace body with sentinel — fact name still appears in output
-            # but raw content is not injected.
+        if verdict == "error":
+            # NIT 1: classifier failed. Fail-open (inject the body) but emit a
+            # diagnostic so the failure is observable. Never logs the body.
+            _log_classify_error(safe_name, project)
+        elif verdict != "ok":
+            _log_injection_skip(safe_name, verdict, excerpt or "", project)
+            # Replace body with sentinel — fact name (redacted if needed) still
+            # appears in output but raw content is not injected.
             body = _SUPPRESSED_BODY
 
-        cost = len(body) + len(f["name"]) + 40
+        cost = len(body) + len(safe_name) + 40
         if used + cost > AUTORECALL_TOTAL_CHARS:
             leftover.append(f)
             continue
-        injected.append((f, body))
+        injected.append((safe_name, f["type"], body))
         used += cost
 
     # Count only non-suppressed facts for the metrics record.
-    real_injected = sum(1 for _, b in injected if b != _SUPPRESSED_BODY)
+    real_injected = sum(1 for _, _, b in injected if b != _SUPPRESSED_BODY)
 
     lines = ["### Project Memory (auto-recalled)\n"]
     lines.append(
@@ -295,11 +367,12 @@ def render_project_memory(fact_dir: Path, *, today: str | None = None) -> str:
         "(highest-value first, budget-capped). Verify against current code "
         "before acting — facts reflect what was true when written.\n"
     )
-    for f, body in injected:
-        lines.append(f"**{f['name']}** ({f['type']}):\n{body}\n")
+    for name, ftype, body in injected:
+        lines.append(f"**{name}** ({ftype}):\n{body}\n")
     if leftover:
         topics = ", ".join(
-            f["name"].replace("_", " ").replace("-", " ") for f in leftover[:8]
+            _redact_secret_name(f["name"]).replace("_", " ").replace("-", " ")
+            for f in leftover[:8]
         )
         lines.append(
             f"Not injected ({len(leftover)}): {topics}. "

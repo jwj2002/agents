@@ -246,3 +246,190 @@ def test_suppressed_fact_does_not_block_session(tmp_path, monkeypatch):
     metrics_recs = [_json.loads(ln) for ln in lines if '"facts_injected"' in ln]
     assert len(metrics_recs) >= 1
     assert metrics_recs[-1]["facts_injected"] == 0
+
+
+# ------------------------------------------------- fix-cycle tests (issue #429)
+
+# ---- BLOCKING 1: hyphenated API keys + false-positive guard ----
+
+
+def test_hyphenated_anthropic_key_suppressed(tmp_path, monkeypatch):
+    """BLOCKING 1 positive: sk-ant-api03-<long> must be suppressed."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    _fact(
+        d,
+        "ant-key",
+        ftype="user",
+        body="key: sk-ant-api03-abc1234567890abcdef in the config",
+    )
+    out = H.render_project_memory(d, today=TODAY)
+    assert "sk-ant-api03-abc1234567890abcdef" not in out
+    assert "[body suppressed" in out
+
+
+def test_hyphenated_proj_key_suppressed(tmp_path, monkeypatch):
+    """BLOCKING 1 positive: sk-proj-<long> must be suppressed."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    _fact(
+        d,
+        "proj-key",
+        ftype="user",
+        body="key sk-proj-abc1234567890abcdef here",
+    )
+    out = H.render_project_memory(d, today=TODAY)
+    assert "sk-proj-abc1234567890abcdef" not in out
+    assert "[body suppressed" in out
+
+
+def test_hyphenated_words_not_false_positive(tmp_path, monkeypatch):
+    """BLOCKING 1 negative: ordinary hyphenated words containing 'sk-' but no
+    16+ char entropy run must NOT be suppressed."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    body = (
+        "Pointer: entertask-project-pointer\n"
+        "Review: EnterTask-Code-Review-2026-05-12\n"
+        "Link: task-project\n"
+    )
+    _fact(d, "harmless", ftype="reference", body=body)
+    out = H.render_project_memory(d, today=TODAY)
+    assert "[body suppressed" not in out
+    assert "entertask-project-pointer" in out
+    assert "EnterTask-Code-Review-2026-05-12" in out
+    assert "task-project" in out
+
+
+def test_classify_body_negatives_classify_ok():
+    """BLOCKING 1 negative (direct): each hyphenated word classifies 'ok'."""
+    for word in (
+        "entertask-project-pointer",
+        "EnterTask-Code-Review-2026-05-12",
+        "task-project",
+    ):
+        verdict, _ = H._classify_body(word)
+        assert verdict == "ok", f"{word!r} should classify ok, got {verdict}"
+
+
+# ---- BLOCKING 2: whitelist early-return must not mask later secrets ----
+
+
+def test_whitelist_pointer_then_secret_suppressed(tmp_path, monkeypatch):
+    """BLOCKING 2: a whitelisted pointer line followed by a real secret line
+    MUST still suppress the body — whitelisting exempts only its own match."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    body = "secret: <see vault>\nkey is sk-abc123456789xyz really\n"
+    _fact(d, "mixed", ftype="user", body=body)
+    out = H.render_project_memory(d, today=TODAY)
+    assert "sk-abc123456789xyz" not in out
+    assert "[body suppressed" in out
+
+
+# ---- BLOCKING 3: secret in fact NAME must be redacted everywhere ----
+
+
+def test_secret_in_name_redacted_in_output_and_log(tmp_path, monkeypatch):
+    """BLOCKING 3: a real-shaped key in the fact NAME must not appear in the
+    rendered output NOR in memory-autoinject.jsonl."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    secret_name = "sk-abc123456789xyz"
+    _fact(d, secret_name, ftype="user", body="harmless body text")
+    out = H.render_project_memory(d, today=TODAY)
+    assert secret_name not in out
+    assert "[name redacted" in out
+    log = tmp_path / ".claude" / "memory-autoinject.jsonl"
+    assert log.exists()
+    assert secret_name not in log.read_text()
+
+
+# ---- NIT 1: classifier error is fail-open AND logged ----
+
+
+def test_classify_error_fail_open_and_logged(tmp_path, monkeypatch):
+    """NIT 1: when the classifier raises internally, the body is still injected
+    (fail-open) AND a classify_error diagnostic is logged (no body/secret)."""
+    import json as _json
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    _fact(d, "boom", ftype="feedback", body="ordinary content")
+
+    # Force the classifier into its exception path by replacing the compiled
+    # pattern with a stand-in whose .search raises.
+    class _Boom:
+        def search(self, _body):
+            raise ValueError("boom")
+
+    monkeypatch.setattr(H, "_INJECTION_RE", _Boom())
+
+    out = H.render_project_memory(d, today=TODAY)
+    # Fail-open: body still injected, not suppressed.
+    assert "ordinary content" in out
+    assert "[body suppressed" not in out
+    log = tmp_path / ".claude" / "memory-autoinject.jsonl"
+    assert log.exists()
+    lines = log.read_text().splitlines()
+    err_recs = [_json.loads(ln) for ln in lines if '"classify_error"' in ln]
+    assert len(err_recs) >= 1
+    assert err_recs[0]["event"] == "classify_error"
+    assert "ordinary content" not in _json.dumps(err_recs[0])
+
+
+# ---- NIT 2: one direct suppression test per remaining secret class ----
+
+
+def _assert_secret_suppressed(tmp_path, monkeypatch, name, body, raw):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    d = _memdir(tmp_path)
+    _fact(d, name, ftype="project", body=body)
+    out = H.render_project_memory(d, today=TODAY)
+    assert raw not in out
+    assert "[body suppressed" in out
+
+
+def test_github_pat_suppressed(tmp_path, monkeypatch):
+    raw = "ghp_abcdefghijklmnop1234"
+    _assert_secret_suppressed(
+        tmp_path, monkeypatch, "gh", f"token {raw} for github", raw
+    )
+
+
+def test_gitlab_pat_suppressed(tmp_path, monkeypatch):
+    raw = "glpat-abcdef123456"
+    _assert_secret_suppressed(
+        tmp_path, monkeypatch, "gl", f"token {raw} for gitlab", raw
+    )
+
+
+def test_slack_token_suppressed(tmp_path, monkeypatch):
+    raw = "xoxb-abcdef1234567890"
+    _assert_secret_suppressed(tmp_path, monkeypatch, "slack", f"slack {raw} token", raw)
+
+
+def test_jwt_suppressed(tmp_path, monkeypatch):
+    raw = "eyJhbGciOiThisIsADummyJwtHeader"
+    _assert_secret_suppressed(tmp_path, monkeypatch, "jwt", f"bearer {raw} here", raw)
+
+
+def test_pem_private_key_suppressed(tmp_path, monkeypatch):
+    raw = "-----BEGIN RSA PRIVATE KEY-----"
+    _assert_secret_suppressed(
+        tmp_path, monkeypatch, "pem", f"{raw}\nMIIEpAIBAAKC...\n", raw
+    )
+
+
+def test_literal_password_credential_suppressed(tmp_path, monkeypatch):
+    """NIT 2: a literal (non-pointer) password=… value must be suppressed."""
+    raw = "hunter2supersecret"
+    _assert_secret_suppressed(
+        tmp_path, monkeypatch, "pw", f"db config password={raw}", raw
+    )
+
+
+def test_literal_api_key_credential_suppressed(tmp_path, monkeypatch):
+    """NIT 2: a literal (non-pointer) api_key=… value must be suppressed."""
+    raw = "literalkeyvalue123"
+    _assert_secret_suppressed(tmp_path, monkeypatch, "apik", f"api_key = {raw}", raw)
