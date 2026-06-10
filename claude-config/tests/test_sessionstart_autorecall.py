@@ -732,12 +732,12 @@ def test_suppressed_body_not_summarized(tmp_path, monkeypatch):
         d,
         "secret-fact",
         ftype="user",
-        body="My credentials: sk-ant-api03-abc1234567890abcdef is the key.",
+        body="My credentials: sk-ant-api03-abc1234567890abcdef is the key.",  # eval-ok: E15 — fabricated test fixture for safety-filter verification
     )
     out = H.render_project_memory(d, today=TODAY)
     assert "secret-fact" in out
     # Secret must not appear anywhere.
-    assert "sk-ant-api03-abc1234567890abcdef" not in out
+    assert "sk-ant-api03-abc1234567890abcdef" not in out  # eval-ok: E15 — fabricated test fixture for safety-filter verification
     # The suppressed sentinel must appear in the summary line.
     assert "[body suppressed" in out
 
