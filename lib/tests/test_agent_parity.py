@@ -27,6 +27,67 @@ def _make_repo(tmp_path: Path) -> Path:
     _write(repo / "codex-config" / "install.sh", "#!/bin/sh\n")
     _write(repo / "codex-config" / "AGENTS.md", "# Codex\n")
     _write(repo / "codex-config" / "config.toml.example", "model = 'x'\n")
+    _write(
+        repo / "codex-config" / "hooks.json",
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "python3 ~/.codex/hooks/session_start_memory.py",
+                                }
+                            ]
+                        }
+                    ],
+                    "PreCompact": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "python3 ~/.codex/hooks/precompact_checkpoint.py",
+                                }
+                            ]
+                        }
+                    ],
+                    "PostToolUse": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "python3 ~/.codex/hooks/context_monitor.py",
+                                }
+                            ]
+                        }
+                    ],
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "python3 ~/.codex/hooks/stop_verify.py",
+                                },
+                                {
+                                    "type": "command",
+                                    "command": "python3 ~/.codex/hooks/session_telemetry.py",
+                                },
+                            ]
+                        }
+                    ],
+                }
+            }
+        ),
+    )
+    for script in (
+        "session_start_memory.py",
+        "precompact_checkpoint.py",
+        "context_monitor.py",
+        "stop_verify.py",
+        "session_telemetry.py",
+    ):
+        _write(repo / "codex-config" / "hooks" / script, "#!/usr/bin/env python3\n")
     _write(repo / "codex-config" / "rules" / "shared.rules", "# rules\n")
     _write(repo / "codex-config" / "skills" / "native" / "SKILL.md", "---\nname: native\n---\n")
     _write(repo / "new-project-agents.sh", "#!/bin/sh\n")
@@ -87,6 +148,28 @@ def test_skill_parity_fails_lint_usage_errors(tmp_path: Path) -> None:
     assert "lint" in result.message
 
 
+def test_codex_hooks_enforces_installed_links(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path)
+    home = tmp_path / "home"
+    (home / ".codex").mkdir(parents=True)
+    os.symlink(repo / "codex-config" / "hooks.json", home / ".codex" / "hooks.json")
+    os.symlink(repo / "codex-config" / "hooks", home / ".codex" / "hooks")
+
+    result = agent_parity.codex_hooks_check(repo, home)
+
+    assert result.status == "pass"
+
+
+def test_codex_hooks_fail_when_script_missing(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path)
+    (repo / "codex-config" / "hooks" / "stop_verify.py").unlink()
+
+    result = agent_parity.codex_hooks_check(repo)
+
+    assert result.status == "fail"
+    assert "stop_verify.py" in result.details["errors"][-1]
+
+
 def test_workflow_tree_detects_active_legacy_duplicate(tmp_path: Path) -> None:
     repo = _make_repo(tmp_path)
     _write(repo / "orchestrate-workflow" / "orchestrate.md", "legacy\n")
@@ -112,8 +195,13 @@ def test_one_sided_hooks_are_warning_when_gap_is_documented(tmp_path: Path) -> N
 
     result = agent_parity.one_sided_hooks_check(repo)
 
-    assert result.status == "warn"
-    assert result.details["codex_gap_documented"] is True
+    assert result.status == "pass"
+    assert result.details["codex_hook_events"] == [
+        "PostToolUse",
+        "PreCompact",
+        "SessionStart",
+        "Stop",
+    ]
 
 
 def test_cli_json_runs_against_current_repo() -> None:

@@ -1,0 +1,60 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.codex/hooks/session_start_memory.py",
+            "timeout": 10,
+            "statusMessage": "Loading bounded memory context"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.codex/hooks/precompact_checkpoint.py",
+            "timeout": 10,
+            "statusMessage": "Checkpointing Codex state"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.codex/hooks/context_monitor.py",
+            "timeout": 5,
+            "statusMessage": "Checking context headroom"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.codex/hooks/stop_verify.py",
+            "timeout": 10,
+            "statusMessage": "Checking completion discipline"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.codex/hooks/session_telemetry.py",
+            "timeout": 5,
+            "statusMessage": "Recording Codex telemetry"
+          }
+        ]
+      }
+    ]
+  }
+}

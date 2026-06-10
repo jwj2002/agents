@@ -1,8 +1,8 @@
 # Codex Configuration
 
 Portable Codex configuration that can be installed on any machine. Uses
-symlinks from `~/.codex` to this repo for shared Codex guidance, shared
-command-policy rules, and user skills while preserving local
+symlinks from `~/.codex` to this repo for shared Codex guidance, lifecycle
+hooks, shared command-policy rules, and user skills while preserving local
 auth/history/sessions and machine-specific approval rules.
 
 ## Installation
@@ -19,6 +19,8 @@ git clone https://github.com/jwj2002/agents.git ~/agents
 
 ```text
 ~/.codex/AGENTS.md               -> ~/agents/codex-config/AGENTS.md
+~/.codex/hooks.json              -> ~/agents/codex-config/hooks.json
+~/.codex/hooks/                  -> ~/agents/codex-config/hooks/
 ~/.codex/rules/shared.rules      -> ~/agents/codex-config/rules/shared.rules
 ~/.codex/skills/user             -> ~/agents/codex-config/skills/
 ~/.codex/skills/<name>           -> shared skill folders
@@ -27,6 +29,10 @@ git clone https://github.com/jwj2002/agents.git ~/agents
 
 `AGENTS.md` is the behavioral instruction surface. `.rules` files are Codex
 command-policy files written in Starlark; do not put prose instructions there.
+`hooks.json` wires lifecycle hooks for bounded memory context, pre-compact
+state checkpoints, context headroom warnings, stop-time completion checks, and
+lightweight telemetry. After hook changes, review and trust the hook definitions
+inside Codex with `/hooks`.
 
 Codex skill links are written to both `~/.codex/skills` and
 `~/.agents/skills`. The former preserves current local behavior; the latter is

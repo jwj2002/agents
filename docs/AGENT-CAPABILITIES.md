@@ -39,12 +39,26 @@ state hooks.
 - Global Codex install: `codex-config/install.sh`
 - Global Codex guidance: `codex-config/AGENTS.md` -> `~/.codex/AGENTS.md`
 - Codex config template: `codex-config/config.toml.example`
+- Codex lifecycle hooks: `codex-config/hooks.json` and `codex-config/hooks/`
 - Codex command policy: `codex-config/rules/*.rules`
 - Codex-native skills: `codex-config/skills/`
 - Optional project Codex config: `.codex/config.toml`
 
 Codex `.rules` files are Starlark command-policy files. They are not
 instruction files. Prose guidance belongs in `AGENTS.md`.
+
+Codex hooks currently cover the high-value cross-agent performance and
+discipline adapters:
+
+- `SessionStart`: bounded memory context from the shared memory store, with
+  verify-against-code discipline.
+- `PreCompact`: compact YAML checkpoint under
+  `.agents/outputs/codex_checkpoints/PERSISTENT_STATE.yaml`.
+- `PostToolUse`: context headroom warnings.
+- `Stop`: unfinished-work warnings and lightweight derived telemetry.
+
+They do not attempt to mirror Claude transcript-only hooks that depend on
+Claude-specific payloads.
 
 ## Skill Support
 
@@ -115,6 +129,7 @@ bash -n codex-config/install.sh
 bash -n new-project-agents.sh
 bash -n claude-config/new-project-claude.sh
 python3 -c "import json; json.load(open('claude-config/settings.json'))"
+python3 -m json.tool codex-config/hooks.json >/dev/null
 SETTINGS_PATH=$PWD/claude-config/settings.json python3 claude-config/scripts/validate-hooks.py
 codex execpolicy check --pretty --rules codex-config/rules/shared.rules -- git status
 bin/agent-parity check
@@ -145,7 +160,7 @@ instead of claiming test coverage.
 - `/orchestrate` is still Claude-only.
 - Codex can maintain this repo directly, but there is no Codex-native
   orchestrate equivalent yet.
-- Codex hooks are not ported from Claude hooks. Port only after reviewing
-  Codex hook event semantics and trust behavior.
+- Codex hooks cover memory, checkpointing, context, completion, and telemetry.
+  They are not a full port of every Claude transcript-specific hook.
 - CI installs Codex CLI only for unauthenticated policy parsing. It does not
   validate authenticated Codex sessions, app connectors, or cloud tasks.

@@ -239,11 +239,20 @@ CAPABILITY_PATHS = {
     "codex_install": "codex-config/install.sh",
     "codex_guidance": "codex-config/AGENTS.md",
     "codex_config_template": "codex-config/config.toml.example",
+    "codex_hooks_config": "codex-config/hooks.json",
+    "codex_hooks": "codex-config/hooks",
     "codex_rules": "codex-config/rules",
     "codex_skills": "codex-config/skills",
     "project_bootstrap": "new-project-agents.sh",
     "parity_cli": "bin/agent-parity",
     "validate_workflow": ".github/workflows/validate.yml",
+}
+
+EXPECTED_CODEX_HOOKS = {
+    "SessionStart": ["session_start_memory.py"],
+    "PreCompact": ["precompact_checkpoint.py"],
+    "PostToolUse": ["context_monitor.py"],
+    "Stop": ["stop_verify.py", "session_telemetry.py"],
 }
 
 
@@ -293,9 +302,97 @@ def workflow_tree_check(repo: Path) -> CheckResult:
     return CheckResult("workflow_tree", "pass", "no active duplicate workflow tree", details)
 
 
+def _codex_hook_commands(hooks_json: Path) -> tuple[dict[str, list[str]], str | None]:
+    try:
+        payload = json.loads(hooks_json.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return ({}, f"hooks.json is invalid: {exc}")
+    hooks = payload.get("hooks")
+    if not isinstance(hooks, dict):
+        return ({}, "hooks.json must contain a top-level hooks object")
+
+    commands: dict[str, list[str]] = {}
+    for event, groups in hooks.items():
+        if not isinstance(groups, list):
+            return ({}, f"hooks.{event} must be a list")
+        event_commands: list[str] = []
+        for group in groups:
+            if not isinstance(group, dict):
+                return ({}, f"hooks.{event} entries must be objects")
+            handlers = group.get("hooks")
+            if not isinstance(handlers, list):
+                return ({}, f"hooks.{event} matcher group must contain hooks list")
+            for handler in handlers:
+                if not isinstance(handler, dict):
+                    return ({}, f"hooks.{event} handlers must be objects")
+                if handler.get("type") != "command":
+                    return ({}, f"hooks.{event} handler is not type=command")
+                command = handler.get("command")
+                if not isinstance(command, str) or not command.strip():
+                    return ({}, f"hooks.{event} handler has no command")
+                event_commands.append(command)
+        commands[event] = event_commands
+    return (commands, None)
+
+
+def codex_hooks_check(repo: Path, home: Path | None = None) -> CheckResult:
+    hooks_json = repo / "codex-config" / "hooks.json"
+    hooks_dir = repo / "codex-config" / "hooks"
+    details: dict[str, Any] = {
+        "expected_events": EXPECTED_CODEX_HOOKS,
+    }
+    errors: list[str] = []
+
+    if not hooks_json.is_file():
+        errors.append("missing codex-config/hooks.json")
+        commands: dict[str, list[str]] = {}
+    else:
+        commands, parse_error = _codex_hook_commands(hooks_json)
+        if parse_error:
+            errors.append(parse_error)
+        details["configured_commands"] = commands
+
+    if not hooks_dir.is_dir():
+        errors.append("missing codex-config/hooks")
+
+    for event, scripts in EXPECTED_CODEX_HOOKS.items():
+        configured = "\n".join(commands.get(event, []))
+        if event not in commands:
+            errors.append(f"missing Codex hook event {event}")
+        for script in scripts:
+            path = hooks_dir / script
+            if not path.is_file():
+                errors.append(f"missing Codex hook script {path.relative_to(repo)}")
+            if script not in configured:
+                errors.append(f"{event} does not reference {script}")
+
+    if home is not None:
+        installed = {
+            "hooks_json": home / ".codex" / "hooks.json",
+            "hooks_dir": home / ".codex" / "hooks",
+        }
+        link_checks: dict[str, dict[str, str]] = {}
+        for name, link in installed.items():
+            expected = (hooks_json if name == "hooks_json" else hooks_dir).resolve()
+            if not link.is_symlink():
+                errors.append(f"{link} is not a symlink")
+                continue
+            actual = link.resolve()
+            link_checks[str(link)] = {
+                "target": str(actual),
+                "expected": str(expected),
+            }
+            if actual != expected:
+                errors.append(f"{link} points to {actual}, expected {expected}")
+        details["installed_links"] = link_checks
+
+    if errors:
+        return CheckResult("codex_hooks", "fail", "Codex hook setup is incomplete", details | {"errors": errors})
+    return CheckResult("codex_hooks", "pass", "Codex hooks are configured and linkable", details)
+
+
 def one_sided_hooks_check(repo: Path) -> CheckResult:
     settings = repo / "claude-config" / "settings.json"
-    capabilities = repo / "docs" / "AGENT-CAPABILITIES.md"
     details: dict[str, Any] = {}
     if not settings.is_file():
         return CheckResult("one_sided_hooks", "fail", "Claude settings.json is missing", details)
@@ -307,24 +404,28 @@ def one_sided_hooks_check(repo: Path) -> CheckResult:
 
     hooks = payload.get("hooks") or {}
     details["claude_hook_events"] = sorted(hooks)
-    documented = capabilities.is_file() and "Codex hooks are not ported" in capabilities.read_text(
-        encoding="utf-8"
-    )
-    details["codex_gap_documented"] = documented
-    if hooks and not documented:
+    commands, parse_error = _codex_hook_commands(repo / "codex-config" / "hooks.json")
+    if parse_error:
         return CheckResult(
             "one_sided_hooks",
             "fail",
-            "Claude hooks exist but the Codex hook gap is not documented",
+            f"Codex hook config cannot be compared: {parse_error}",
             details,
         )
-    if hooks:
+    codex_events = set(commands)
+    claude_events = set(hooks)
+    details["codex_hook_events"] = sorted(codex_events)
+    one_sided = sorted(claude_events - codex_events)
+    details["claude_only_events"] = one_sided
+    if one_sided:
         return CheckResult(
             "one_sided_hooks",
             "warn",
-            "Claude hooks exist; Codex hook gap is documented",
+            "some Claude hook events have no Codex adapter yet",
             details,
         )
+    if hooks:
+        return CheckResult("one_sided_hooks", "pass", "Claude hook events have Codex adapters", details)
     return CheckResult("one_sided_hooks", "pass", "no one-sided hooks detected", details)
 
 
@@ -335,6 +436,7 @@ def run_checks(repo: Path, home: Path | None = None) -> ParityReport:
         capability_docs_check(repo),
         workflow_tree_check(repo),
         budget_check(repo),
+        codex_hooks_check(repo, home),
         one_sided_hooks_check(repo),
     ]
     return ParityReport(str(repo), checks)
@@ -364,6 +466,11 @@ def render_text(report: ParityReport) -> str:
         if check.name == "one_sided_hooks":
             events = ", ".join(check.details.get("claude_hook_events", [])) or "(none)"
             lines.append(f"  Claude hook events: {events}")
+            codex_events = ", ".join(check.details.get("codex_hook_events", [])) or "(none)"
+            lines.append(f"  Codex hook events: {codex_events}")
+        if check.name == "codex_hooks":
+            events = ", ".join(check.details.get("expected_events", {}).keys())
+            lines.append(f"  expected Codex events: {events}")
     return "\n".join(lines) + "\n"
 
 
