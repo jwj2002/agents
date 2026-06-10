@@ -189,6 +189,35 @@ Issue → MAP/MAP-PLAN → [TEST-PLANNER] → CONTRACT* → PATCH → PROVE
 
 ## Deployment
 
+### Shell Customizations (local-only, not templated)
+
+The `~/.zshrc` iTerm2 tab-naming block (`_set_tab_name` + `chpwd` + `preexec`) is
+a local shell customization. It is **not** written by `bootstrap-laptop.sh`,
+`machines/personal/post-install.sh`, or any other repo script. Each new machine
+must apply it manually from the reference block in `~/.zshrc`.
+
+**Required guard inside `chpwd()`** — Claude Code shell snapshots can serialize
+`chpwd()` into `~/.claude/shell-snapshots/snapshot-zsh-*.sh` without capturing
+`_set_tab_name` when the snapshot was generated from a session that predated the
+tab-naming block being loaded. Without the guard, every Bash tool call that
+changes directory emits `chpwd:1: command not found: _set_tab_name`. The guard
+must be the first statement in `chpwd()`:
+
+```zsh
+chpwd() {
+  (( $+functions[_set_tab_name] )) || return 0
+  _set_tab_name "$(basename "$PWD" | tr '[:upper:]' '[:lower:]') - zsh"
+}
+```
+
+The guard is a no-op in interactive iTerm2 sessions (where `_set_tab_name` is
+defined) and silently exits in non-interactive/snapshot contexts (where it is
+absent). Opening a fresh iTerm2 tab after editing `~/.zshrc` regenerates the
+snapshot with both functions present — making the guard effectively a one-time
+fix per machine.
+
+---
+
 ### New Machine Setup
 
 ```bash
