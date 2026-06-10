@@ -120,9 +120,11 @@ Every endpoint gets a permission check (E11). Detail: `~/.claude/rules/rbac-patt
 ## M365 / Microsoft Graph (this laptop)
 
 This laptop sends/reads mail as agent identity `jjob@vital-enterprises.com` via
-Graph. Helpers, credential paths, and the "always send as" rule:
-`~/.claude/rules/m365-graph.md` (on-demand). Credential absence at
-`~/.claude/m365/agent.json` signals the capability isn't configured here.
+Graph, and reads/writes VitalAILabs client documents on SharePoint (same app
+reg, `Sites.Selected`). Helpers, credential paths, the "always send as" rule,
+and the SharePoint helper: `~/.claude/rules/m365-graph.md` (on-demand).
+Credential absence at `~/.claude/m365/agent.json` signals the capability isn't
+configured here.
 
 ---
 
@@ -146,7 +148,7 @@ Graph. Helpers, credential paths, and the "always send as" rule:
 | `spec-state-machine-truth-table.md` | Auto-loads on `specs/**` — for multi-section state contracts |
 | `spec-new-substrate-domain-sweep.md` | Auto-loads on `specs/**` — 5-question domain check for NEW substrates |
 | `post-merge-verification.md` | After `/pr --merge` |
-| `m365-graph.md` | On-demand — sending/reading mail via Microsoft Graph |
+| `m365-graph.md` | On-demand — mail + SharePoint client docs via Microsoft Graph |
 | `memory-promotion.md` | On-demand — promoting a project lesson to a global rule |
 
 ---
