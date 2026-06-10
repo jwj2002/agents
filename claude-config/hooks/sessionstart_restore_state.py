@@ -99,7 +99,7 @@ _SECRET_RE = re.compile(
     | \bgh[pousr]_[A-Za-z0-9]{10,}     # GitHub tokens (ghp_/gho_/ghu_/ghs_/ghr_)
     | \bglpat-[A-Za-z0-9]{5,}          # GitLab PATs
     | \bxox[bpoas]-[A-Za-z0-9\-]{10,}  # Slack tokens
-    | \bAKIA[A-Z2-7]{16}\b             # AWS access key IDs
+    | \bAKIA[A-Z0-9]{16}\b             # AWS access key IDs ([A-Z0-9]{16} per AWS spec)
     | \beyJ[A-Za-z0-9_\-]{10,}         # JWT header prefix
     | -----BEGIN\ (?:RSA\ |EC\ |OPENSSH\ )?PRIVATE\ KEY-----  # PEM private keys
     | (?:password|secret|api_key)\s*[:=]\s*([^\s\$\{`][^\s]{4,})  # key=value credentials
@@ -107,9 +107,50 @@ _SECRET_RE = re.compile(
     re.VERBOSE | re.IGNORECASE,
 )
 
-# Pointer-style value guard — if the value portion (captured group 1 of the
-# key=value pattern) starts with these prefixes, it is NOT a literal credential.
-_WHITELIST_VALUE_RE = re.compile(r"^\s*(?:\$|\$\{|from |env:|<|`)")
+# Pointer-style value guard. A value portion (captured group 1 of the key=value
+# pattern) is exempt ONLY when it is unambiguously a pointer/placeholder, not a
+# smuggled literal credential (FIX C). The simple prefix list below covers the
+# shapes that carry no inline value:
+#   $FOO / ${FOO}   -- shell/template expansion
+#   `...`           -- code-span literal (markdown)
+#   from ...        -- prose pointer ("from $ENV", "from the vault")
+_WHITELIST_PREFIX_RE = re.compile(r"^\s*(?:\$|\$\{|`|from )")
+
+# An env: pointer is only a pointer when it names an env var in UPPER_SNAKE
+# convention (env:DB_PASSWORD). env:hunter2supersecret is a smuggled literal.
+_ENV_POINTER_RE = re.compile(r"^\s*env:[A-Z_][A-Z0-9_]*\s*$")
+
+# A <...> placeholder is only exempt when the inner content looks like a real
+# placeholder: no whitespace, no embedded secret shape, and no long unbroken
+# alphanumeric run (which would look like a credential rather than a label).
+_ANGLE_PLACEHOLDER_RE = re.compile(r"^\s*<([^>]*)>\s*$")
+_LONG_TOKEN_RE = re.compile(r"[A-Za-z0-9]{16,}")
+
+
+def _is_whitelisted_value(value: str) -> bool:
+    """True when a captured key=value value portion is a pointer/placeholder.
+
+    Tightened (FIX C): `env:` and `<...>` no longer blanket-exempt. `env:` must
+    name an UPPER_SNAKE env var; `<...>` must be a placeholder with no embedded
+    secret, no whitespace, and no long unbroken token. Anything else falls
+    through to the literal-credential branch and is suppressed.
+    """
+    if _WHITELIST_PREFIX_RE.match(value):
+        return True
+    if _ENV_POINTER_RE.match(value):
+        return True
+    m = _ANGLE_PLACEHOLDER_RE.match(value)
+    if m:
+        inner = m.group(1)
+        if (
+            inner
+            and not _SECRET_RE.search(inner)
+            and not re.search(r"\s", inner)
+            and not _LONG_TOKEN_RE.search(inner)
+        ):
+            return True
+    return False
+
 
 # Instruction-injection patterns (case-insensitive applied globally).
 _INJECTION_RE = re.compile(
@@ -124,6 +165,35 @@ _INJECTION_RE = re.compile(
 )
 
 
+def _scrub_secrets(text: str) -> str:
+    """Replace every secret-shaped match in `text` with a redacted token.
+
+    FIX A: redaction is UNCONDITIONAL — it does not depend on how the body was
+    classified. Any excerpt that leaves this module (log records AND rendered
+    output) must pass through here so a secret embedded inside an
+    injection-classified or error excerpt can never be written verbatim. Each
+    match is replaced by its first 3 chars + "***" (token prefix preserved for
+    triage, credential body removed). Whitelisted pointer values are left intact
+    so harmless pointers in an excerpt are not mangled.
+    """
+    if not text:
+        return text
+
+    def _repl(m: "re.Match[str]") -> str:
+        value_capture = m.group(1) if m.lastindex else None
+        if value_capture is not None and _is_whitelisted_value(value_capture):
+            return m.group(0)
+        matched = m.group(0)
+        return matched[:3] + "***"
+
+    try:
+        return _SECRET_RE.sub(_repl, text)
+    except Exception:  # noqa: BLE001 — fail-closed on redaction: never emit raw
+        # If substitution somehow fails, drop the excerpt entirely rather than
+        # risk leaking it.
+        return "[redacted — safety filter]"
+
+
 def _scan_secret_line(line: str) -> str | None:
     """Return a redactable excerpt if a single line contains a literal secret.
 
@@ -134,7 +204,7 @@ def _scan_secret_line(line: str) -> str | None:
     """
     for m in _SECRET_RE.finditer(line):
         value_capture = m.group(1) if m.lastindex else None
-        if value_capture is not None and _WHITELIST_VALUE_RE.match(value_capture):
+        if value_capture is not None and _is_whitelisted_value(value_capture):
             # Pointer-style reference on this match — not a literal credential.
             # Keep scanning later matches on the same line.
             continue
@@ -182,15 +252,15 @@ def _log_injection_skip(
 ) -> None:
     """Append a skip record to memory-autoinject.jsonl. Best-effort.
 
-    NEVER writes the matched secret value — excerpt is redacted for 'secret' reason.
+    NEVER writes a raw secret. FIX A: the excerpt is scrubbed UNCONDITIONALLY
+    (regardless of `reason`) so a secret embedded inside an injection or error
+    excerpt is also redacted before it is written.
     """
     try:  # noqa: BLE001 — fail-open: logging errors must never crash SessionStart
-        # Redact for secret: keep first 3 chars + *** so the log shows the
-        # token prefix without leaking the credential.
-        if reason == "secret" and excerpt:
-            safe_excerpt = excerpt[:3] + "***"
-        else:
-            safe_excerpt = excerpt
+        # Scrub every secret-shaped match out of the excerpt, no matter the
+        # classification reason — an injection-classified excerpt can still
+        # contain a credential.
+        safe_excerpt = _scrub_secrets(excerpt) if excerpt else excerpt
 
         rec = {
             "ts": datetime.now(timezone.utc).isoformat(),
