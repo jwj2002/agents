@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 from datetime import date, datetime, timezone
@@ -51,6 +52,7 @@ logging.basicConfig(
 
 try:
     import yaml
+
     HAS_YAML = True
 except ImportError:
     HAS_YAML = False
@@ -58,9 +60,127 @@ except ImportError:
 # Try to import centralized state manager
 try:
     from state_manager import get_active_work as _sm_get_active_work
+
     HAS_STATE_MANAGER = True
 except ImportError:
     HAS_STATE_MANAGER = False
+
+
+# ---------------------------------------------------------------- safety-filter
+
+
+class BodyClassificationError(Exception):
+    """Internal: classification logic failed (caught immediately, never propagates)."""
+
+
+class InjectionSkipLogError(Exception):
+    """Internal: skip-log write failed (caught immediately, never propagates)."""
+
+
+_SUPPRESSED_BODY = "[body suppressed — safety filter]"
+
+# Secret-shaped patterns — any match suppresses the body.
+# The key=value branch (last alternative) captures the value portion in group 1
+# so the whitelist guard can inspect it without re-running the full pattern.
+# Note: re.IGNORECASE applied globally to cover the key=value branch.
+_SECRET_RE = re.compile(
+    r"""
+    \bsk-ant-[A-Za-z0-9]{10,}           # Anthropic sk-ant- (check before generic sk-)
+    | \bsk-[A-Za-z0-9]{10,}             # OpenAI sk- keys
+    | \bghp_[A-Za-z0-9]{10,}           # GitHub PATs
+    | \bglpat-[A-Za-z0-9]{5,}          # GitLab PATs
+    | \bxox[bpoas]-[A-Za-z0-9\-]{10,}  # Slack tokens
+    | \bAKIA[A-Z2-7]{16}\b             # AWS access key IDs
+    | \beyJ[A-Za-z0-9_\-]{10,}         # JWT header prefix
+    | -----BEGIN\ (?:RSA\ |EC\ |OPENSSH\ )?PRIVATE\ KEY-----  # PEM private keys
+    | (?:password|secret|api_key)\s*[:=]\s*([^\s\$\{`][^\s]{4,})  # key=value credentials
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+# Pointer-style value guard — if the value portion (captured group 1 of the
+# key=value pattern) starts with these prefixes, it is NOT a literal credential.
+_WHITELIST_VALUE_RE = re.compile(r"^\s*(?:\$|\$\{|from |env:|<|`)")
+
+# Instruction-injection patterns (case-insensitive applied globally).
+_INJECTION_RE = re.compile(
+    r"""
+    ignore\s+(?:all\s+)?previous\s+instructions?
+    | you\s+are\s+now\s+(?:a\s+)?\w+(?:\s+\w+){2,}(?:$|\.)
+    | disregard\s+(?:all\s+)?(?:prior|previous)\s+(?:instructions?|context)
+    | system\s*prompt\s*:
+    | \[INST\]|\[\/INST\]|<\|im_start\|>
+    """,
+    re.VERBOSE | re.MULTILINE | re.IGNORECASE,
+)
+
+
+def _classify_body(body: str) -> tuple[str, str | None]:
+    """Classify a fact body for injection safety.
+
+    Returns:
+        ("ok", None)              -- safe to inject verbatim
+        ("secret", excerpt)       -- secret-shaped pattern found
+        ("injection", excerpt)    -- instruction-injection phrase found
+
+    Never raises. On internal error returns ("ok", None) (fail-open).
+    """
+    try:  # noqa: BLE001 — fail-open surface: classification errors must never crash SessionStart
+        # Check injection patterns first (no whitelist needed).
+        m = _INJECTION_RE.search(body)
+        if m:
+            return ("injection", m.group(0)[:60])
+
+        # Check secret patterns.
+        m = _SECRET_RE.search(body)
+        if m:
+            # The key=value pattern is the last alternative (group 1 captures the value).
+            # Apply the whitelist guard only to that branch.
+            value_capture = m.group(1) if m.lastindex else None
+            if value_capture is not None and _WHITELIST_VALUE_RE.match(value_capture):
+                # Pointer-style reference — not a literal credential.
+                return ("ok", None)
+            return ("secret", m.group(0)[:60])
+
+        return ("ok", None)
+    except Exception:  # noqa: BLE001 — fail-open: swallow all errors, log nothing sensitive
+        return ("ok", None)
+
+
+def _log_injection_skip(
+    fact_name: str,
+    reason: str,
+    excerpt: str,
+    project: str,
+) -> None:
+    """Append a skip record to memory-autoinject.jsonl. Best-effort.
+
+    NEVER writes the matched secret value — excerpt is redacted for 'secret' reason.
+    """
+    try:  # noqa: BLE001 — fail-open: logging errors must never crash SessionStart
+        # Redact for secret: keep first 3 chars + *** so the log shows the
+        # token prefix without leaking the credential.
+        if reason == "secret" and excerpt:
+            safe_excerpt = excerpt[:3] + "***"
+        else:
+            safe_excerpt = excerpt
+
+        rec = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "event": "injection_skip",
+            "project": project,
+            "fact": fact_name,
+            "reason": reason,
+            "excerpt": safe_excerpt,
+        }
+        log = Path.home() / ".claude" / "memory-autoinject.jsonl"
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec) + "\n")
+    except Exception:  # noqa: BLE001 — fail-open: do not let log write crash the hook
+        logging.warning("injection_skip log append failed", exc_info=True)
+
+
+# ---------------------------------------------------------------- active-work
 
 
 def get_active_work(yaml_content: str) -> dict:
@@ -102,8 +222,10 @@ def _fact_meta(path: Path) -> dict | None:
                 stripped = line.strip()
                 for key in ("type", "expires", "name"):
                     if stripped.startswith(f"{key}:"):
-                        meta[key] = stripped.split(":", 1)[1].strip().strip("'\"") or meta[key]
-            meta["body"] = text[end + 4:].lstrip("-").lstrip("\n")
+                        meta[key] = (
+                            stripped.split(":", 1)[1].strip().strip("'\"") or meta[key]
+                        )
+            meta["body"] = text[end + 4 :].lstrip("-").lstrip("\n")
     return meta
 
 
@@ -119,6 +241,7 @@ def render_project_memory(fact_dir: Path, *, today: str | None = None) -> str:
     budget runs out. Remaining facts are listed as topics with the recall CTA.
     """
     from datetime import date
+
     today = today or date.today().isoformat()
 
     paths = [p for p in sorted(fact_dir.glob("*.md")) if p.name != "MEMORY.md"]
@@ -132,14 +255,30 @@ def render_project_memory(fact_dir: Path, *, today: str | None = None) -> str:
     if not facts:
         return ""
 
-    facts.sort(key=lambda f: (_TYPE_PRIORITY.get(f["type"], 9),
-                              -f["path"].stat().st_mtime))
+    facts.sort(
+        key=lambda f: (_TYPE_PRIORITY.get(f["type"], 9), -f["path"].stat().st_mtime)
+    )
     injected, leftover, used = [], [], 0
     for f in facts:
         body = f["body"].strip()
         if len(body) > AUTORECALL_PER_FACT_CHARS:
-            body = (body[:AUTORECALL_PER_FACT_CHARS]
-                    + f"\n… *(truncated — full fact: `{f['path']}`)*")
+            body = (
+                body[:AUTORECALL_PER_FACT_CHARS]
+                + f"\n… *(truncated — full fact: `{f['path']}`)*"
+            )
+
+        # Safety filter: check for secret-shaped or injection-phrase content.
+        try:
+            verdict, excerpt = _classify_body(body)
+        except Exception:  # noqa: BLE001 — fail-open: filter errors must not crash hook
+            verdict, excerpt = "ok", None
+
+        if verdict != "ok":
+            _log_injection_skip(f["name"], verdict, excerpt or "", fact_dir.parent.name)
+            # Replace body with sentinel — fact name still appears in output
+            # but raw content is not injected.
+            body = _SUPPRESSED_BODY
+
         cost = len(body) + len(f["name"]) + 40
         if used + cost > AUTORECALL_TOTAL_CHARS:
             leftover.append(f)
@@ -147,23 +286,27 @@ def render_project_memory(fact_dir: Path, *, today: str | None = None) -> str:
         injected.append((f, body))
         used += cost
 
+    # Count only non-suppressed facts for the metrics record.
+    real_injected = sum(1 for _, b in injected if b != _SUPPRESSED_BODY)
+
     lines = ["### Project Memory (auto-recalled)\n"]
     lines.append(
-        f"{len(injected)} of {len(facts)} fact bodies injected "
+        f"{real_injected} of {len(facts)} fact bodies injected "
         "(highest-value first, budget-capped). Verify against current code "
         "before acting — facts reflect what was true when written.\n"
     )
     for f, body in injected:
         lines.append(f"**{f['name']}** ({f['type']}):\n{body}\n")
     if leftover:
-        topics = ", ".join(f["name"].replace("_", " ").replace("-", " ")
-                           for f in leftover[:8])
+        topics = ", ".join(
+            f["name"].replace("_", " ").replace("-", " ") for f in leftover[:8]
+        )
         lines.append(
             f"Not injected ({len(leftover)}): {topics}. "
             "→ `~/agents/bin/memory recall <topic>` to pull these.\n"
         )
 
-    _log_autorecall(fact_dir, len(injected), len(facts), used)
+    _log_autorecall(fact_dir, real_injected, len(facts), used)
     return "\n".join(lines)
 
 
@@ -172,6 +315,7 @@ def _log_autorecall(fact_dir: Path, injected: int, total: int, chars: int) -> No
     auto-recall separately from manual recall. Best-effort."""
     try:
         from datetime import datetime, timezone
+
         rec = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "project": fact_dir.parent.name,
@@ -200,6 +344,7 @@ def _maybe_pull_agents(
     Fail-open: any exception is logged but never propagates.
     """
     if git_fn is None:
+
         def git_fn():
             return subprocess.run(
                 ["git", "-C", str(agents_root), "pull", "--ff-only", "--quiet"],
@@ -209,9 +354,11 @@ def _maybe_pull_agents(
 
     # Skip if already pulled today.
     if stamp_path.exists():
-        stamp_date = datetime.fromtimestamp(
-            stamp_path.stat().st_mtime, tz=timezone.utc
-        ).date().isoformat()
+        stamp_date = (
+            datetime.fromtimestamp(stamp_path.stat().st_mtime, tz=timezone.utc)
+            .date()
+            .isoformat()
+        )
         if stamp_date == today_str:
             return False  # already pulled today
 
@@ -233,7 +380,9 @@ def _maybe_pull_agents(
             stamp_path.touch()
 
             # Check whether the telemetry gate is tripped.
-            _gate_script = agents_root / "claude-config" / "scripts" / "telemetry_gate.py"
+            _gate_script = (
+                agents_root / "claude-config" / "scripts" / "telemetry_gate.py"
+            )
             if _gate_script.exists():
                 try:
                     _gate = subprocess.run(
@@ -246,7 +395,9 @@ def _maybe_pull_agents(
                         _gate_msg = _gate.stdout.strip() or "gate tripped"
                         print(f"**Advisory**: /learn gate tripped — {_gate_msg}\n")
                 except Exception as _gate_exc:
-                    logging.warning(f"telemetry_gate check failed (non-fatal): {_gate_exc}")
+                    logging.warning(
+                        f"telemetry_gate check failed (non-fatal): {_gate_exc}"
+                    )
     except (subprocess.TimeoutExpired, OSError, Exception) as _pull_exc:
         logging.warning(f"git pull --ff-only failed (non-fatal): {_pull_exc}")
 
@@ -311,7 +462,9 @@ def main() -> int:
             # Last resort: minimal inline reminder
             print("### Critical Patterns\n")
             print("1. **VERIFICATION_GAP**: Read spec/code before assuming")
-            print("2. **ENUM_VALUE**: Use VALUES not Python names (CO-OWNER not CO_OWNER)")
+            print(
+                "2. **ENUM_VALUE**: Use VALUES not Python names (CO-OWNER not CO_OWNER)"
+            )
             print("3. **COMPONENT_API**: Read PropTypes before using components")
             print()
             print("Full patterns: `~/.claude/rules/core-patterns.md`\n")
@@ -356,9 +509,12 @@ def main() -> int:
         global_memory_dir / "patterns-full.md"
     ).exists():
         print("---")
-        print("*Full patterns available at `.claude/memory/patterns-full.md` if needed.*\n")
+        print(
+            "*Full patterns available at `.claude/memory/patterns-full.md` if needed.*\n"
+        )
 
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
