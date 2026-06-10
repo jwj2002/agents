@@ -23,16 +23,11 @@ surfaces. See `~/agents/docs/CLAUDE-CODEX-COLLABORATION.md`.
 
 ## Failure patterns to actively prevent
 
-From the 2026 failure corpus (N=40, Jan–Jun 2026; regenerated 2026-06-09, #366):
-
-| Pattern | Share | Trigger | Prevention |
-|---|---|---|---|
-| **VERIFICATION_GAP** | 27.5% — the dominant cluster | Any assumption about code structure, spec content, or data shape | Read the actual file. "Resolved/unchanged" claims need a fresh read. New field → grep every consumer. |
-| **AMBIGUITY_UNRESOLVED** | 7.5% | Two valid interpretations; a contradiction you noticed | Pick ONE, document it, flag the alternative. Noticing without resolving is the failure. |
-| **ENUM_VALUE** / **COMPONENT_API** | 0 in 2026 (legacy headliners) | Fullstack enum/component work | Still apply: backend enum **VALUE** not NAME (`"CO-OWNER"` not `"CO_OWNER"`); read component source before reuse. Now mechanically gated (E01 evals runner, /quick gate). |
-
-Full pattern detail: `~/.claude/rules/core-patterns.md` and any auto-loaded
-`patterns-critical.md` (which carries the corpus provenance).
+Top clusters from the 2026 failure corpus: **VERIFICATION_GAP** (read the
+actual file — assumptions about code/spec/data are the #1 failure) and
+**AMBIGUITY_UNRESOLVED** (pick one, document it, flag the alternative). Full
+table + provenance: `~/.claude/rules/core-patterns.md` (auto-loaded) and any
+auto-loaded `patterns-critical.md`.
 
 ---
 
@@ -109,25 +104,8 @@ Post-merge verification: `~/.claude/rules/post-merge-verification.md`.
 ## Behavioral evals (PROVE phase reference)
 
 E01–E15 are run by PROVE based on changed files. The catalog
-(`~/.claude/rules/behavioral-evals.md`) is authoritative; the highlights:
-
-- **E01 ENUM_VALUE_MISMATCH** — frontend uses backend enum NAME instead of VALUE
-- **E02 COMPONENT_API_MISMATCH** — reused component with wrong props
-- **E03 HOOK_DEPENDENCY_ARRAY** — missing/incorrect `useEffect` deps
-- **E04 MODEL_WITHOUT_MIGRATION** — SQLAlchemy change with no Alembic migration
-- **E05 NULLABLE_MISMATCH** — model nullable doesn't match schema Optional
-- **E06 SCHEMA_MODEL_DRIFT** — Pydantic schema fields don't match model
-- **E07 MIGRATION_NOT_ADDITIVE** — destructive migration (drop/alter type)
-- **E08 MIGRATION_MISSING_INDEX** — FK without index
-- **E09 SERVICE_BYPASSES_REPO** — service uses raw `db.execute` instead of repo
-- **E10 STALE_DATA_UNHANDLED** — flush without `StaleDataError` catch on versioned models
-- **E11 AUTH_DEPENDENCY_MISSING** — endpoint without auth dependency
-- **E12 AUDIT_LOG_MISSING** — write endpoint without `AuditService` call
-- **E13 MISSING_FK_INDEX** — FK column without `index=True`
-- **E14 DOCKER_ROOT_USER** — Dockerfile without `USER` directive
-- **E15 SECRETS_IN_CODE** — hardcoded API keys, passwords, tokens
-
-File→eval mapping: `~/.claude/rules/eval-file-mapping.md`.
+`~/.claude/rules/behavioral-evals.md` is authoritative (what/why/how per eval);
+`~/.claude/rules/eval-file-mapping.md` selects which evals run for which files.
 
 ---
 
@@ -141,24 +119,10 @@ Every endpoint gets a permission check (E11). Detail: `~/.claude/rules/rbac-patt
 
 ## M365 / Microsoft Graph (this laptop)
 
-This laptop has working Graph credentials for Jason's agent identity
-**`jjob@vital-enterprises.com`** (parallel to Paul's `ai-coder@vital-enterprises.com`
-and Ryan's `ryan-agent@vitalailabs.com`). The app is scoped via
-ApplicationAccessPolicy to that single mailbox — it cannot send-as or read
-any other address.
-
-| What | Where |
-|---|---|
-| Credentials (chmod 600, gitignored) | `~/.claude/m365/agent.json` |
-| Send helper | `~/agents/m365/send_mail.py --to … --subject … --body … [--attach …]` |
-| Read helper | `~/agents/m365/read_mail.py [--top N] [--from …] [--subject-contains …] [--since …] [--unread-only]` |
-| Renderer (markdown → HTML for email body) | `~/agents/m365/render_markdown.py` |
-| Token cache | `~/.claude/m365/token-cache.bin` (managed by msal) |
-
-**Always send as `jjob@vital-enterprises.com`** — never override the sender.
-On other machines this section may not apply (different identity / different
-provider); the credential file's absence at the path above is the signal
-that the M365 capability isn't configured on that machine.
+This laptop sends/reads mail as agent identity `jjob@vital-enterprises.com` via
+Graph. Helpers, credential paths, and the "always send as" rule:
+`~/.claude/rules/m365-graph.md` (on-demand). Credential absence at
+`~/.claude/m365/agent.json` signals the capability isn't configured here.
 
 ---
 
@@ -182,101 +146,35 @@ that the M365 capability isn't configured on that machine.
 | `spec-state-machine-truth-table.md` | Auto-loads on `specs/**` — for multi-section state contracts |
 | `spec-new-substrate-domain-sweep.md` | Auto-loads on `specs/**` — 5-question domain check for NEW substrates |
 | `post-merge-verification.md` | After `/pr --merge` |
+| `m365-graph.md` | On-demand — sending/reading mail via Microsoft Graph |
+| `memory-promotion.md` | On-demand — promoting a project lesson to a global rule |
 
 ---
 
 ## Recalling project memory (active recall)
 
-Project facts live under `~/.claude/projects/<project>/memory/`. Claude Code
-auto-injects the `MEMORY.md` **index** (titles) at SessionStart, but the fact
-**bodies** — where the "why" and "how to apply" live — are NOT auto-loaded.
-The store is write-heavy / read-light by default; close that gap by reading:
-
-```bash
-~/agents/bin/memory recall "<topic or keywords>"   # search bodies, ranked by relevance + recency
-~/agents/bin/memory doctor                          # index drift + TTL candidates
-~/agents/bin/memory archive [--apply]               # move expired/stale facts → memory/archive/
-```
-
-**Before non-trivial work in a project that has memory, run `memory recall`**
-on the task's keywords. Treat recalled bodies as background context — they
-reflect what was true when written, so verify against current code before
-acting (VERIFICATION_GAP). The SessionStart hook prints a one-line recall CTA
-listing how many facts the current project has.
-
-**TTL — keep perishable facts from rotting the store.** When you write a
-*session-state* fact (a resume/handoff doc, a milestone marker like
-shipped/complete/cancelled, or an in-flight plan), add an `expires:` date so it
-self-retires once it's dead:
-
-```yaml
----
-name: ...
-type: project
-expires: 2026-08-01   # absent = durable forever (feedback/user/reference never expire)
----
-```
-
-`recall` hides expired facts by default (`--all` to include); `doctor` flags
-them plus a heuristic for the legacy backlog (old `type: project` files whose
-names look like session-state); `memory archive --apply` moves both into
-`memory/archive/` (preserved, never deleted, skipped by recall). Run a cleanup
-pass with `memory archive --stale-days 30 --apply` when a store gets cluttered.
+Project facts live under `~/.claude/projects/<project>/memory/`. SessionStart
+auto-injects the `MEMORY.md` index (titles) but NOT fact bodies. Before
+non-trivial work in a project with memory, run `~/agents/bin/memory recall
+"<keywords>"` to read the bodies (verify against current code — VERIFICATION_GAP).
+Also: `memory doctor` (index drift + TTL) and `memory archive [--apply]`.
+TTL discipline (add `expires:` to session-state facts) + the full recall/doctor/
+archive workflow: `~/agents/docs/memory-review.md`.
 
 ---
 
 ## Promoting project memory to global rules
 
-When a project-memory file under
-`~/.claude/projects/<project>/memory/feedback-*.md` captures a lesson
-that's **generally applicable to other projects** (not specific to
-that project's domain), promote it to a global rule so every project
-inherits it.
-
-**Why this exists.** Project memory files are project-local — working
-in `safe174th` you won't see `buddy`'s feedback files. Without
-promotion, every project relearns the same lessons. The 2026-06-03
-Workspace V1 R1 incident documented this gap: 17 of 21 blockers were
-preventable by existing project-local feedback that had never been
-promoted.
-
-**Procedure:**
-
-1. **Decide it's promotable.** Cross-project relevance test: would a
-   teammate working on an unrelated project benefit from this rule
-   without seeing the originating incident? If yes, promote.
-2. **Write the new rule** in `~/agents/claude-config/rules/<name>.md`
-   with appropriate `paths:` frontmatter for auto-load.
-3. **Keep the project-memory file as back-reference.** Add a
-   `Companion: ~/.claude/rules/<name>.md` line so future readers
-   trace from incident → general rule.
-4. **Commit + PR + merge to `~/agents`** following the standard git
-   workflow (jwj2002 account per `github-accounts.md`).
-5. **Run `~/agents/claude-config/install.sh`** to refresh symlinks
-   (no-op if the rule directory was already symlinked; only catches
-   first-time symlink + missing-target cases).
-6. **For jbox06 (if applicable):** `ssh jbox06 'cd ~/agents && git
-   pull --ff-only && ./claude-config/install.sh'`. Without this step,
-   VitalAILabs app sessions won't see the new rule.
-
-**What counts as "generally applicable":**
-- Workflow discipline (review gates, self-checks, sequencing).
-- Cross-stack mistakes (enum collisions, schema drift, fence-post
-  errors in distributed systems).
-- Tool quirks that bite in any project (`codex` CLI, `gh` CLI, `git`
-  edge cases).
-
-**What stays project-local:**
-- Domain-specific patterns (e.g., a buddy-only entity-grid lesson).
-- Architectural choices recorded for context (resume docs,
-  pillar-status logs).
-- Operational incident notes specific to that project's infra.
+When a `~/.claude/projects/<project>/memory/feedback-*.md` lesson is
+**generally applicable** (workflow discipline, cross-stack mistakes, tool
+quirks — not domain-specific patterns), promote it to a global rule so every
+project inherits it. Full 6-step procedure + the "generally applicable vs
+project-local" test: `~/.claude/rules/memory-promotion.md` (on-demand).
 
 ## Anti-patterns to avoid
 
-- Long CLAUDE.md (target <200 lines; this file is the target — the
-  promotion-path section above adds ~30 lines, balanced by keeping
-  rules in their own files).
+- Long CLAUDE.md (target <200 lines; enforced by
+  `claude-config/scripts/check-context-budgets.py` in CI).
 - Reaching for a subagent before exhausting CLAUDE.md and skills (Anthropic's recommended order).
 - Editing `~/.claude/` directly. Always go through `~/agents/claude-config/`.
 - Putting secrets, ephemeral state, or large code patterns in CLAUDE.md.
