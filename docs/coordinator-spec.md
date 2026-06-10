@@ -226,6 +226,28 @@ remains is implementation detail:
   `profile=personal`; verify `install-all.sh` runs cleanly there (it has
   historically targeted laptops; `bootstrap-laptop.sh` may need a sibling or
   a rename).
+- **Per-project memory health on the dashboard (Phase 2/4)**: the §4.1 sweep
+  already opens each project's `MEMORY.md`; surface a one-line health signal per
+  project using the `~/agents/bin/memory` tooling shipped in #429–#431 — cold%
+  (>30d), active-recall%, dead pointers, unindexed facts (`memory doctor` /
+  `memory readout`). This is the agreed home for memory-health automation: a
+  standalone per-session doctor-nudge was rejected because it would touch
+  per-project mechanics (§10) and "nobody's session" upkeep rots (§1) — the
+  coordinator is the cross-project health surface, so the signal lives here.
+  Surfacing only; archiving stays a human-reviewed `memory archive --apply`,
+  never automatic.
+- **Coordinator refresh trigger (availability)**: capture is coordinator-independent
+  (events emit from project-session hooks, §4.2), so an absent coordinator loses
+  no data — but **synthesis** (sweep → rebuild `dashboard.md` → auto-write the
+  portfolio section, D4 → memory-health check) only happens when a coordinator
+  session runs. If that depends on Jason manually starting one, the portfolio
+  rots exactly like §1 (`superior.yaml`) — the rot risk moved up a level, not
+  removed. Split the two: the **non-interactive synthesis** (`git pull` + sweep +
+  portfolio write + health) must run on a **schedule** (cron/timer), not only on
+  manual session start; the interactive coordinator session is then for
+  asking/briefing, not the sole path to a fresh portfolio. D4's session-end
+  write stays as one trigger; the scheduled job is the other. (Personal is
+  partly covered by the always-on tmux server per D8; the work laptop is not.)
 
 ## 10. Explicitly out of scope
 
