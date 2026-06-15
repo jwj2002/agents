@@ -96,7 +96,6 @@ def cmd_ingest(args, cfg):
         for r in records:
             print(f"  [{r['namespace']}] {r['name']}  ({r['source_path']})")
         return 0
-    parsed["origin"] = P.ORIGIN
     payload = json.dumps(parsed)
     if is_remote(cfg):
         return _ssh(cfg, ["_embed-store"], stdin_data=payload)
@@ -114,7 +113,6 @@ def _embed_store(payload, cfg):
     if isinstance(env, list):  # back-compat: bare record list
         env = {"records": env, "prune_namespaces": []}
     incoming = env.get("records", [])
-    origin = env.get("origin") or "unknown"
     # residency: server-side allowlist — never store a non-personal namespace,
     # even from a misconfigured client.
     records = [r for r in incoming if r.get("namespace") in ALLOWED_NAMESPACES]
@@ -123,35 +121,41 @@ def _embed_store(payload, cfg):
 
     cache = cfg.get("FASTEMBED_CACHE")
     conn = store.connect(cfg["DATABASE_URL"])
+    stored = pruned = 0
     try:
         store.ensure_schema(conn)
-        namespaces = sorted({r["namespace"] for r in records})
-        store.claim_unowned(conn, origin, namespaces)  # one-time: adopt legacy rows
-        existing = store.existing_hashes(conn, origin, namespaces)
-        changed = [
-            r
-            for r in records
-            if existing.get((r["namespace"], r["source_path"])) != r["content_hash"]
-        ]
-        for i in range(0, len(changed), _INGEST_CHUNK):
-            batch = changed[i : i + _INGEST_CHUNK]
-            vecs = embedder.embed_docs(
-                [P.embed_text(r) for r in batch], cache_dir=cache
-            )
-            for r, v in zip(batch, vecs):
-                store.upsert(conn, r, v, origin)
+        # group by each record's own origin: project namespaces use the machine
+        # hostname; shared (git-synced) namespaces use "shared". Each origin is
+        # diffed/pruned independently so machines never clobber each other.
+        for origin in sorted({r.get("origin") or "unknown" for r in records}):
+            orecs = [r for r in records if (r.get("origin") or "unknown") == origin]
+            onamespaces = sorted({r["namespace"] for r in orecs})
+            store.claim_unowned(conn, origin, onamespaces)  # adopt legacy rows once
+            existing = store.existing_hashes(conn, origin, onamespaces)
+            changed = [
+                r
+                for r in orecs
+                if existing.get((r["namespace"], r["source_path"])) != r["content_hash"]
+            ]
+            for i in range(0, len(changed), _INGEST_CHUNK):
+                batch = changed[i : i + _INGEST_CHUNK]
+                vecs = embedder.embed_docs(
+                    [P.embed_text(r) for r in batch], cache_dir=cache
+                )
+                for r, v in zip(batch, vecs):
+                    store.upsert(conn, r, v, origin)
+                conn.commit()
+            stored += len(changed)
+            for ns in onamespaces:
+                if ns in prune_ns:
+                    keep = [r["source_path"] for r in orecs if r["namespace"] == ns]
+                    if keep:
+                        pruned += store.delete_missing(conn, origin, ns, keep)
             conn.commit()
-        # prune ONLY this machine's rows, in namespaces the client cleanly scanned
-        pruned = 0
-        for ns in prune_ns:
-            keep = [r["source_path"] for r in records if r["namespace"] == ns]
-            if keep:
-                pruned += store.delete_missing(conn, origin, ns, keep)
-        conn.commit()
         report = {
             "parsed": len(incoming),
-            "stored": len(changed),
-            "unchanged": len(records) - len(changed),
+            "stored": stored,
+            "unchanged": len(records) - stored,
             "rejected_nonpersonal": rejected,
             "pruned": pruned,
         }
@@ -249,7 +253,7 @@ def cmd_doctor(args, cfg):
         existing.setdefault(r["namespace"], []).append(r["source_path"])
     payload = json.dumps(
         {
-            "origin": P.ORIGIN,
+            "origin": P.current_origin(),
             "existing": existing,
             "scanned": parsed["prune_namespaces"],
             "prune_expired": args.prune_expired,

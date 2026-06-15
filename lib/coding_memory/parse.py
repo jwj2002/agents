@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import socket
 from pathlib import Path
 
-from . import SKIP_DIRS, SKIP_NAMES
+from . import REPO_ROOT, SHARED_NAMESPACES, SHARED_ORIGIN, SKIP_DIRS, SKIP_NAMES
 
-ORIGIN = socket.gethostname()  # this machine — per-origin identity in the shared store
+
+def current_origin() -> str:
+    """Stable per-machine identity for the shared store. Prefer the explicit config
+    value (CODING_MEMORY_ORIGIN, bridged into the env by load_config); fall back to
+    the SHORT hostname. NOT the raw FQDN — macOS appends volatile DHCP/domain
+    suffixes that would split one machine's facts across multiple origins.
+    Resolved lazily (not at import) so it sees the bridged config value."""
+    return os.environ.get("CODING_MEMORY_ORIGIN") or socket.gethostname().split(".")[0]
+
 
 try:
     import yaml
@@ -72,10 +81,19 @@ def parse_markdown(raw: str, fallback_name: str = "") -> dict:
 
 def _record(ns: str, path: str, raw: str) -> dict:
     meta = parse_markdown(raw, fallback_name=Path(path).stem)
+    if ns in SHARED_NAMESPACES:
+        # git-synced: fixed origin + repo-relative path -> identical on every machine
+        origin = SHARED_ORIGIN
+        try:
+            source_path = os.path.relpath(os.path.realpath(path), REPO_ROOT)
+        except ValueError:
+            source_path = path
+    else:
+        origin, source_path = current_origin(), path
     return {
-        "origin": ORIGIN,
+        "origin": origin,
         "namespace": ns,
-        "source_path": path,
+        "source_path": source_path,
         "content_hash": content_hash(raw),
         **meta,
     }

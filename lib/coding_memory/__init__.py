@@ -32,12 +32,22 @@ EMBED_BATCH = 8  # small batch caps peak memory (O(seq^2)*batch); avoids OOM on 
 CONFIG_PATH = Path(os.path.expanduser("~/.coding_memory.env"))
 
 # laptop-side markdown source -> namespace. Personal only (strict residency).
+# `global` is git-tracked craft knowledge in the agents repo, shared across machines.
 DEFAULT_SOURCES = {
     "agents": "~/.claude/projects/-Users-jasonjob-agents/memory",
     "buddy": "~/.claude/projects/-Users-jasonjob-projects-buddy/memory",
+    "global": "~/agents/memory/global",
 }
 SKIP_NAMES = {"MEMORY.md"}
 SKIP_DIRS = {"archive"}
+
+# Shared namespaces are identical on every machine (git-synced), so they get a fixed
+# origin + repo-relative source_path -> one row per fact regardless of which machine
+# ingests them (no cross-machine duplicates crowding recall). Project namespaces stay
+# per-origin (their content differs per machine).
+SHARED_NAMESPACES = frozenset({"global"})
+SHARED_ORIGIN = "shared"
+REPO_ROOT = os.path.realpath(os.path.expanduser("~/agents"))
 
 # Residency allowlist: only these namespaces may be written to the personal store.
 # The server (jns) enforces this so a misconfigured client cannot land work data.
@@ -62,6 +72,7 @@ _CFG_KEYS = (
     "FASTEMBED_CACHE",
     "CODING_MEMORY_REMOTE_BIN",
     "CODING_MEMORY_EMBED_URL",
+    "CODING_MEMORY_ORIGIN",
 )
 
 
@@ -86,9 +97,10 @@ def load_config() -> dict:
         if os.environ.get(k):
             cfg[k] = os.environ[k]
     cfg.setdefault("CODING_MEMORY_REMOTE_BIN", "~/agents/bin/coding-memory")
-    # bridge file-configured embedder settings into the process env — the embedder
-    # reads these from os.environ (so the CLI uses the warm service when set).
-    for k in ("CODING_MEMORY_EMBED_URL", "FASTEMBED_CACHE"):
+    # bridge file-configured settings into the process env — the embedder + the
+    # origin resolver read these from os.environ (so the CLI uses the warm service
+    # and a STABLE per-machine origin, not a volatile hostname).
+    for k in ("CODING_MEMORY_EMBED_URL", "FASTEMBED_CACHE", "CODING_MEMORY_ORIGIN"):
         if cfg.get(k) and not os.environ.get(k):
             os.environ[k] = cfg[k]
     return cfg
