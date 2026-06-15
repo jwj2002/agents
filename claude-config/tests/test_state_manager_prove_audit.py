@@ -16,6 +16,7 @@ from state_manager import (  # type: ignore[import-not-found]
     count_acceptance_bullets,
     record_prove_audit,
     validate_ac_audit,
+    validate_runtime_smoke,
 )
 
 
@@ -149,6 +150,152 @@ def test_non_dict_entry_is_failure():
     )
     assert audit["valid"] is False
     assert audit["downgrade_to"] == "FAIL"
+
+
+# ── validate_runtime_smoke (issue #460) ──────────────────────────────────────
+
+
+def test_smoke_pass_with_command_and_evidence_ok():
+    """status: PASS with both command and evidence → no downgrade."""
+    smoke = validate_runtime_smoke(
+        {"status": "PASS", "command": "python -m m --help", "evidence": "exit 0"}
+    )
+    assert smoke["valid"] is True
+    assert smoke["downgrade_to"] is None
+    assert smoke["missing"] == []
+
+
+def test_smoke_absent_is_violation():
+    """None (absent block) → fail-closed with the re-run message."""
+    smoke = validate_runtime_smoke(None)
+    assert smoke["valid"] is False
+    assert smoke["downgrade_to"] == "FAIL"
+    assert "re-run PROVE" in smoke["missing"][0]["reason"]
+
+
+def test_smoke_fail_is_violation():
+    """status: FAIL → blocked."""
+    smoke = validate_runtime_smoke(
+        {"status": "FAIL", "command": "x", "evidence": "crashed"}
+    )
+    assert smoke["downgrade_to"] == "FAIL"
+    assert "FAIL" in smoke["missing"][0]["reason"]
+
+
+def test_smoke_pass_without_command_is_violation():
+    """status: PASS requires the command that was run."""
+    smoke = validate_runtime_smoke(
+        {"status": "PASS", "command": "", "evidence": "ran"}
+    )
+    assert smoke["downgrade_to"] == "FAIL"
+
+
+def test_smoke_pass_without_evidence_is_violation():
+    """status: PASS requires non-empty evidence."""
+    smoke = validate_runtime_smoke(
+        {"status": "PASS", "command": "x", "evidence": ""}
+    )
+    assert smoke["downgrade_to"] == "FAIL"
+
+
+def test_smoke_na_with_evidence_ok():
+    """status: n/a with evidence (justification) → no downgrade."""
+    smoke = validate_runtime_smoke({"status": "n/a", "evidence": "docs only"})
+    assert smoke["downgrade_to"] is None
+
+
+def test_smoke_na_without_evidence_is_violation():
+    """status: n/a still requires a justification in evidence."""
+    smoke = validate_runtime_smoke({"status": "n/a", "evidence": ""})
+    assert smoke["downgrade_to"] == "FAIL"
+
+
+def test_smoke_scalar_string_coerced_to_na_ok():
+    """#459 backward-compat: a bare string coerces to n/a, no downgrade."""
+    smoke = validate_runtime_smoke("n/a (no runnable surface)")
+    assert smoke["valid"] is True
+    assert smoke["downgrade_to"] is None
+
+
+def test_smoke_unknown_status_is_violation():
+    """Garbage status string → invalid → FAIL."""
+    smoke = validate_runtime_smoke({"status": "maybe", "evidence": "x"})
+    assert smoke["valid"] is False
+    assert smoke["downgrade_to"] == "FAIL"
+
+
+def test_smoke_non_mapping_non_string_is_violation():
+    """A list/int (neither dict nor str nor None) → FAIL."""
+    smoke = validate_runtime_smoke([1, 2])
+    assert smoke["valid"] is False
+    assert smoke["downgrade_to"] == "FAIL"
+
+
+# ── #460 Codex review: type-confusion + empty-scalar bypass closures ──────────
+
+
+def test_smoke_pass_with_list_command_and_evidence_is_violation():
+    """THE BYPASS: ``command: []`` / ``evidence: []`` stringified to a
+    non-empty repr and wrongly passed. Non-string types FAIL closed now."""
+    smoke = validate_runtime_smoke({"status": "PASS", "command": [], "evidence": []})
+    assert smoke["valid"] is False
+    assert smoke["downgrade_to"] == "FAIL"
+
+
+def test_smoke_pass_with_bool_command_is_violation():
+    """``command: False`` is not a string → FAIL (was a bypass via repr)."""
+    smoke = validate_runtime_smoke(
+        {"status": "PASS", "command": False, "evidence": "x"}
+    )
+    assert smoke["valid"] is False
+    assert smoke["downgrade_to"] == "FAIL"
+
+
+def test_smoke_pass_with_empty_string_command_is_violation():
+    """An empty-STRING command carries no record of what was run → FAIL."""
+    smoke = validate_runtime_smoke({"status": "PASS", "command": "", "evidence": "x"})
+    assert smoke["valid"] is False
+    assert smoke["downgrade_to"] == "FAIL"
+
+
+def test_smoke_na_with_list_evidence_is_violation():
+    """``status: n/a`` with non-string evidence → FAIL (no justification)."""
+    smoke = validate_runtime_smoke({"status": "n/a", "evidence": []})
+    assert smoke["valid"] is False
+    assert smoke["downgrade_to"] == "FAIL"
+
+
+def test_smoke_empty_scalar_is_violation():
+    """An empty scalar string carries no evidence → FAIL closed (was the
+    scalar backward-compat bypass)."""
+    smoke = validate_runtime_smoke("")
+    assert smoke["valid"] is False
+    assert smoke["downgrade_to"] == "FAIL"
+
+
+def test_smoke_whitespace_scalar_is_violation():
+    """A whitespace-only scalar is equivalent to empty → FAIL closed."""
+    smoke = validate_runtime_smoke("   ")
+    assert smoke["valid"] is False
+    assert smoke["downgrade_to"] == "FAIL"
+
+
+def test_smoke_nonempty_scalar_still_coerces_to_na_ok():
+    """Locked design preserved: a NON-empty legacy scalar still coerces to
+    n/a and never blocks."""
+    smoke = validate_runtime_smoke("ran uvicorn, 200 OK")
+    assert smoke["valid"] is True
+    assert smoke["downgrade_to"] is None
+
+
+def test_smoke_fully_valid_pass_block_ok_regression_guard():
+    """Regression guard: a well-formed PASS block still passes."""
+    smoke = validate_runtime_smoke(
+        {"status": "PASS", "command": "pytest -q", "evidence": "58 passed"}
+    )
+    assert smoke["valid"] is True
+    assert smoke["downgrade_to"] is None
+    assert smoke["missing"] == []
 
 
 # ── record_prove_audit ───────────────────────────────────────────────────────

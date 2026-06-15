@@ -19,6 +19,9 @@ Exit codes (stable contract for ship.md):
                        no PROVE artifact — verification was skipped.
   5  GATE_PARSE_ERROR  artifact exists but frontmatter is unreadable.
                        Fail-CLOSED: an unverifiable verdict blocks the merge.
+  6  GATE_SMOKE_VIOLATION status=PASS but runtime_smoke (Level 5) is absent,
+                       FAIL, or structurally invalid (smoke not recorded / the
+                       smoke run failed). Fail-CLOSED — re-run PROVE (#460).
 
 Override: `--override "<reason>"` records the bypass to
 `<outputs-dir>/prove-overrides.jsonl` (who/when/why/what-the-gate-said) and
@@ -47,13 +50,14 @@ for _hooks in (Path.home() / ".claude" / "hooks",
         sys.path.insert(0, str(_hooks))
         break
 
-from state_manager import validate_ac_audit  # noqa: E402
+from state_manager import validate_ac_audit, validate_runtime_smoke  # noqa: E402
 
 GATE_PASS = 0
 GATE_FAIL = 2
 GATE_AC_VIOLATION = 3
 GATE_NO_ARTIFACT = 4
 GATE_PARSE_ERROR = 5
+GATE_SMOKE_VIOLATION = 6
 
 # Orchestrate phase artifacts that mark an issue as pipeline-tracked (and
 # therefore REQUIRED to have a PROVE artifact before shipping).
@@ -139,7 +143,21 @@ def check_gate(outputs_dir: Path, issue: int) -> tuple[int, str]:
             f"(AC-FORBIDS-APPROVE) — {offenders}"
         )
 
-    return GATE_PASS, f"{artifact.name}: status=PASS, ac_audit clean — merge may proceed."
+    smoke = validate_runtime_smoke(fm.get("runtime_smoke"))
+    if smoke.get("downgrade_to") == "FAIL":
+        offender = "; ".join(
+            f"{m.get('status', '?')}: {m.get('reason', '')}"
+            for m in smoke.get("missing", [])
+        )
+        return GATE_SMOKE_VIOLATION, (
+            f"{artifact.name}: status=PASS but runtime_smoke (Level 5) "
+            f"gate failed — {offender}"
+        )
+
+    return GATE_PASS, (
+        f"{artifact.name}: status=PASS, ac_audit clean, runtime_smoke OK — "
+        "merge may proceed."
+    )
 
 
 def record_override(outputs_dir: Path, issue: int, reason: str,
