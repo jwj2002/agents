@@ -20,6 +20,7 @@ import sys
 from . import (
     ALLOWED_NAMESPACES,
     DEFAULT_SOURCES,
+    RECALL_MIN_SCORE,
     is_remote,
     load_config,
     valid_remote_bin,
@@ -177,14 +178,14 @@ def cmd_query(args, cfg):
         remote = ["_query", "-k", str(args.k), "--mode", args.mode]
         if getattr(args, "for_prompt", False):
             remote.append("--for-prompt")
+        if getattr(args, "min_score", None) is not None:
+            remote += ["--min-score", str(args.min_score)]
         for ns in args.namespace or []:
             remote += ["--namespace", ns]
         remote += ["--", text]
         return _ssh(cfg, remote)
     return _query(text, args, cfg)
 
-
-_RECALL_HEADER = "## Recalled coding-memory (semantic; verify before trusting)"
 
 # This text is injected into phase prompts, so screen fact content for
 # instruction-injection (a fact could contain "ignore prior instructions" etc.).
@@ -209,7 +210,9 @@ def _prompt_block(rows, max_chars=700):
     Budget is deliberately small — this rides inside an orchestrate phase prompt."""
     if not rows:
         return ""
-    lines = [_RECALL_HEADER]
+    lines = [
+        f"## Recalled coding-memory ({len(rows)} relevant; verify before trusting)"
+    ]
     for r in rows:
         summ = _scrub_recall((r.get("summary") or "").replace("\n", " "))
         if len(summ) > 100:
@@ -227,6 +230,10 @@ def _query(text, args, cfg):
 
     cache = cfg.get("FASTEMBED_CACHE")
     qvec = embedder.embed_query(text, cache_dir=cache)
+    for_prompt = getattr(args, "for_prompt", False)
+    # --for-prompt is RELEVANCE-GATED: vector cosine, keep only facts above the
+    # threshold (usually 0-1), so weak/irrelevant matches never bloat a phase prompt.
+    mode = "vector" if for_prompt else args.mode
     conn = store.connect(cfg["DATABASE_URL"])
     try:
         rows = store.search(
@@ -235,12 +242,15 @@ def _query(text, args, cfg):
             text=text,
             k=args.k,
             namespaces=args.namespace or None,
-            mode=args.mode,
+            mode=mode,
         )
     finally:
         conn.close()
-    if getattr(args, "for_prompt", False):
-        block = _prompt_block(rows)  # bounded; empty -> nothing injected (fail-open)
+    if for_prompt:
+        ms = getattr(args, "min_score", None)
+        min_score = ms if ms is not None else RECALL_MIN_SCORE  # allow explicit 0.0
+        rows = [r for r in rows if r.get("score", 0.0) >= min_score]
+        block = _prompt_block(rows)  # empty -> nothing injected (fail-open)
         if block:
             print(block)
         return 0
@@ -437,7 +447,13 @@ def build_parser():
     q.add_argument(
         "--for-prompt",
         action="store_true",
-        help="emit a bounded recall block for injection into a phase prompt",
+        help="emit a relevance-gated recall block for injection into a phase prompt",
+    )
+    q.add_argument(
+        "--min-score",
+        type=float,
+        default=None,
+        help="cosine threshold for --for-prompt (default: calibrated RECALL_MIN_SCORE)",
     )
 
     sub.add_parser("stats", help="row counts per namespace")
@@ -471,6 +487,7 @@ def build_parser():
     qq.add_argument("--mode", choices=["hybrid", "vector", "fts"], default="hybrid")
     qq.add_argument("--namespace", action="append")
     qq.add_argument("--for-prompt", action="store_true")
+    qq.add_argument("--min-score", type=float, default=None)
     sub.add_parser("_stats")
     sub.add_parser("_doctor")
     _ev = sub.add_parser("_eval")
