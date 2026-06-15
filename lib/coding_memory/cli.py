@@ -16,6 +16,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 
 from . import (
     ALLOWED_NAMESPACES,
@@ -235,6 +236,7 @@ def _query(text, args, cfg):
     # threshold (usually 0-1), so weak/irrelevant matches never bloat a phase prompt.
     mode = "vector" if for_prompt else args.mode
     conn = store.connect(cfg["DATABASE_URL"])
+    t0 = time.monotonic()
     try:
         rows = store.search(
             conn,
@@ -244,12 +246,40 @@ def _query(text, args, cfg):
             namespaces=args.namespace or None,
             mode=mode,
         )
+        latency_ms = int((time.monotonic() - t0) * 1000)
+
+        # split pre/post gate so we can record both counts
+        rows_pre_gate = rows
+        if for_prompt:
+            ms = getattr(args, "min_score", None)
+            min_score = ms if ms is not None else RECALL_MIN_SCORE  # allow explicit 0.0
+            rows = [r for r in rows_pre_gate if r.get("score", 0.0) >= min_score]
+
+        # fail-open recall telemetry: a DB write error must never break the query
+        try:
+            import psycopg as _psycopg  # noqa: PLC0415
+
+            origin = cfg.get("CODING_MEMORY_ORIGIN") or P.current_origin()
+            store.log_recall(
+                conn,
+                origin=origin,
+                kind="push" if for_prompt else "pull",
+                mode=mode,
+                n_returned=len(rows_pre_gate),
+                n_injected=len(rows),
+                top_score=rows[0]["score"] if rows else None,
+                facts=[
+                    {"ns": r["namespace"], "name": r["name"], "score": r["score"]}
+                    for r in rows[:5]
+                ],
+                latency_ms=latency_ms,
+            )
+        except _psycopg.Error:
+            pass  # fail-open: logging must never break recall
     finally:
         conn.close()
+
     if for_prompt:
-        ms = getattr(args, "min_score", None)
-        min_score = ms if ms is not None else RECALL_MIN_SCORE  # allow explicit 0.0
-        rows = [r for r in rows if r.get("score", 0.0) >= min_score]
         block = _prompt_block(rows)  # empty -> nothing injected (fail-open)
         if block:
             print(block)
@@ -423,6 +453,46 @@ def _eval_run(as_json, cfg):
     return 0
 
 
+# ---------- recall-report ----------
+
+
+def cmd_recall_report(args, cfg):
+    if is_remote(cfg):
+        remote = ["_recall-report", "--days", str(args.days)]
+        if args.json:
+            remote.append("--json")
+        return _ssh(cfg, remote)
+    return _recall_report(args, cfg)
+
+
+def _recall_report(args, cfg):
+    from . import store
+
+    conn = store.connect(cfg["DATABASE_URL"])
+    try:
+        store.ensure_schema(conn)  # bootstraps recall_event on first use
+        data = store.recall_report_agg(conn, days=args.days)
+    finally:
+        conn.close()
+    if args.json:
+        print(json.dumps(data))
+        return 0
+    d = args.days
+    print(f"Recall telemetry (last {d} days)")
+    print(f"  total queries : {data['n_total']}")
+    print(f"  push (prompt) : {data['n_push']}")
+    print(f"  pull (interactive): {data['n_pull']}")
+    if data["n_returned_total"]:
+        eff = data["n_injected_total"] / data["n_returned_total"]
+        print(f"  gate efficiency : {eff:.0%} injected/returned")
+    print(f"  p50 latency   : {data['p50_latency_ms']} ms")
+    if data["top_facts"]:
+        print("  top surfaced facts:")
+        for f in data["top_facts"]:
+            print(f"    [{f['ns']}] {_sanitize(f['name'])} x{f['count']}")
+    return 0
+
+
 def build_parser():
     p = argparse.ArgumentParser(
         prog="coding-memory", description="Personal coding-memory store (jns)."
@@ -479,6 +549,10 @@ def build_parser():
     )
     ev.add_argument("--json", action="store_true")
 
+    rr = sub.add_parser("recall-report", help="recall telemetry summary")
+    rr.add_argument("--days", type=int, default=7, help="look-back window (default 7)")
+    rr.add_argument("--json", action="store_true", help="emit JSON")
+
     # internal (server-side on jns)
     sub.add_parser("_embed-store")
     qq = sub.add_parser("_query")
@@ -492,6 +566,9 @@ def build_parser():
     sub.add_parser("_doctor")
     _ev = sub.add_parser("_eval")
     _ev.add_argument("--json", action="store_true")
+    _rr = sub.add_parser("_recall-report")
+    _rr.add_argument("--days", type=int, default=7)
+    _rr.add_argument("--json", action="store_true")
     return p
 
 
@@ -508,6 +585,8 @@ def main(argv=None):
         return cmd_doctor(args, cfg)
     if args.cmd == "eval":
         return cmd_eval(args, cfg)
+    if args.cmd == "recall-report":
+        return cmd_recall_report(args, cfg)
     if args.cmd == "_embed-store":
         return _embed_store(sys.stdin.read(), cfg)
     if args.cmd == "_query":
@@ -518,6 +597,8 @@ def main(argv=None):
         return _doctor(sys.stdin.read(), cfg)
     if args.cmd == "_eval":
         return _eval_run(args.json, cfg)
+    if args.cmd == "_recall-report":
+        return _recall_report(args, cfg)
     raise SystemExit(2)
 
 
