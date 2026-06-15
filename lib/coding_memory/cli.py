@@ -261,7 +261,7 @@ def _query(text, args, cfg):
 
             origin = cfg.get("CODING_MEMORY_ORIGIN") or P.current_origin()
             store.log_recall(
-                conn,
+                cfg["DATABASE_URL"],
                 origin=origin,
                 kind="push" if for_prompt else "pull",
                 mode=mode,

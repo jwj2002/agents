@@ -299,7 +299,7 @@ def prune_expired(conn, namespaces=None) -> int:
 
 
 def log_recall(
-    conn,
+    dsn: str,
     *,
     origin: str,
     kind: str,
@@ -310,11 +310,14 @@ def log_recall(
     facts: list[dict],
     latency_ms: int,
 ) -> None:
-    """INSERT one recall_event row and commit.
+    """INSERT one recall_event row via an isolated autocommit connection.
 
-    Truncates facts to the top 5 before storage (privacy/lean).
-    Callers wrap in a narrow try/except psycopg.Error for fail-open logging.
+    Opens its own autocommit connection so a logging INSERT failure can never
+    abort the caller's query transaction. Truncates facts to the top 5 before
+    storage (privacy/lean). Callers wrap in a narrow try/except for fail-open.
     """
+    import psycopg  # noqa: PLC0415 — lazy; callers may not have psycopg
+
     top5 = facts[:5]
     sql = """
     INSERT INTO recall_event
@@ -322,21 +325,21 @@ def log_recall(
     VALUES
       (%s, %s, %s, %s, %s, %s, %s::jsonb, %s)
     """
-    with conn.cursor() as c:
-        c.execute(
-            sql,
-            (
-                origin,
-                kind,
-                mode,
-                n_returned,
-                n_injected,
-                top_score,
-                json.dumps(top5),
-                latency_ms,
-            ),
-        )
-    conn.commit()
+    with psycopg.connect(dsn, autocommit=True) as c:
+        with c.cursor() as cur:
+            cur.execute(
+                sql,
+                (
+                    origin,
+                    kind,
+                    mode,
+                    n_returned,
+                    n_injected,
+                    top_score,
+                    json.dumps(top5),
+                    latency_ms,
+                ),
+            )
 
 
 def recall_report_agg(conn, *, days: int = 7) -> dict:
@@ -346,6 +349,7 @@ def recall_report_agg(conn, *, days: int = 7) -> dict:
     n_returned_total, p50_latency_ms (int|None), top_facts ([{ns,name,count}]
     top 5), days.
     """
+    days = max(1, min(int(days), 365))  # clamp to sane range before binding
     agg_sql = """
     SELECT
         count(*)                                         AS n_total,
@@ -355,7 +359,7 @@ def recall_report_agg(conn, *, days: int = 7) -> dict:
         coalesce(sum(n_returned), 0)                     AS n_returned_total,
         percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms) AS p50_latency_ms
     FROM recall_event
-    WHERE ts >= now() - INTERVAL '%(days)s days'
+    WHERE ts >= now() - make_interval(days => %(days)s)
     """
     facts_sql = """
     SELECT
@@ -364,7 +368,7 @@ def recall_report_agg(conn, *, days: int = 7) -> dict:
         count(*)   AS cnt
     FROM recall_event,
          jsonb_array_elements(facts) AS f
-    WHERE ts >= now() - INTERVAL '%(days)s days'
+    WHERE ts >= now() - make_interval(days => %(days)s)
     GROUP BY f->>'ns', f->>'name'
     ORDER BY cnt DESC
     LIMIT 5
