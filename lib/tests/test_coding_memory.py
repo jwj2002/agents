@@ -132,6 +132,20 @@ def test_embed_service_unreachable_returns_none(monkeypatch):
     assert E._try_service(["x"], "doc") is None
 
 
+def test_prompt_block_empty_is_blank():
+    assert C._prompt_block([]) == ""  # fail-open: nothing relevant -> inject nothing
+
+
+def test_prompt_block_is_bounded():
+    rows = [
+        {"namespace": "global", "name": f"n{i}", "summary": "x" * 200}
+        for i in range(10)
+    ]
+    block = C._prompt_block(rows, max_chars=300)
+    assert block.startswith("## Recalled coding-memory")
+    assert len(block) <= 300  # hard cap so it can't bloat a phase prompt
+
+
 def test_embed_service_non_loopback_refused(monkeypatch):
     from coding_memory import embedder as E
 

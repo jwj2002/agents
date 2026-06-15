@@ -174,11 +174,35 @@ def cmd_query(args, cfg):
         raise SystemExit("query text required")
     if is_remote(cfg):
         remote = ["_query", "-k", str(args.k), "--mode", args.mode]
+        if getattr(args, "for_prompt", False):
+            remote.append("--for-prompt")
         for ns in args.namespace or []:
             remote += ["--namespace", ns]
         remote += ["--", text]
         return _ssh(cfg, remote)
     return _query(text, args, cfg)
+
+
+_RECALL_HEADER = "## Recalled coding-memory (semantic; verify before trusting)"
+
+
+def _prompt_block(rows, max_chars=700):
+    """A bounded, prompt-ready recall block: header + one summary line per fact,
+    hard char cap. Empty when there's nothing relevant (fail-open: inject nothing).
+    Budget is deliberately small — this rides inside an orchestrate phase prompt."""
+    if not rows:
+        return ""
+    lines = [_RECALL_HEADER]
+    for r in rows:
+        summ = _sanitize((r.get("summary") or "").replace("\n", " "))
+        if len(summ) > 100:
+            summ = summ[:97] + "..."
+        lines.append(
+            f"- [{r['namespace']}] {_sanitize(r['name'])}"
+            + (f" — {summ}" if summ else "")
+        )
+    block = "\n".join(lines)
+    return block[: max_chars - 3].rstrip() + "..." if len(block) > max_chars else block
 
 
 def _query(text, args, cfg):
@@ -198,6 +222,11 @@ def _query(text, args, cfg):
         )
     finally:
         conn.close()
+    if getattr(args, "for_prompt", False):
+        block = _prompt_block(rows)  # bounded; empty -> nothing injected (fail-open)
+        if block:
+            print(block)
+        return 0
     if not rows:
         print("(no matches)")
         return 0
@@ -388,6 +417,11 @@ def build_parser():
     q.add_argument("-k", type=int, default=8)
     q.add_argument("--mode", choices=["hybrid", "vector", "fts"], default="hybrid")
     q.add_argument("--namespace", action="append")
+    q.add_argument(
+        "--for-prompt",
+        action="store_true",
+        help="emit a bounded recall block for injection into a phase prompt",
+    )
 
     sub.add_parser("stats", help="row counts per namespace")
 
@@ -419,6 +453,7 @@ def build_parser():
     qq.add_argument("-k", type=int, default=8)
     qq.add_argument("--mode", choices=["hybrid", "vector", "fts"], default="hybrid")
     qq.add_argument("--namespace", action="append")
+    qq.add_argument("--for-prompt", action="store_true")
     sub.add_parser("_stats")
     sub.add_parser("_doctor")
     _ev = sub.add_parser("_eval")
