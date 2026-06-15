@@ -70,9 +70,11 @@ detect_profile() {
             ;;
     esac
 
-    # Auto-detect by platform
+    # Auto-detect by platform. macOS is the "personal" (MacBook) profile;
+    # the scheduler is platform-detected at post-install time, so this only
+    # picks which config.toml/env.template to seed.
     if [[ "$(uname)" == "Darwin" ]]; then
-        echo "work"
+        echo "personal"
         return
     fi
 
@@ -205,7 +207,9 @@ if [ "$SKIP_PROFILE" = false ] && [ -n "$PROFILE" ]; then
         echo ""
         echo "  Running post-install for $PROFILE..."
         echo ""
-        "$PROFILE_DIR/post-install.sh"
+        # Non-fatal: base config (Claude + Codex) already installed above; a
+        # profile automation hiccup must not fail the whole install.
+        "$PROFILE_DIR/post-install.sh" || echo "  ⚠ post-install reported a problem — base install is still complete."
     fi
 else
     echo "[3/3] Skipped machine profile"
