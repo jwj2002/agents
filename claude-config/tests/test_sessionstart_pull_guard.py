@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,8 +21,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "hooks"))
 
 import sessionstart_restore_state as H  # noqa: E402
 
-TODAY = "2026-06-10"
-YESTERDAY = "2026-06-09"
+# Computed dynamically so the suite never time-bombs as the calendar advances
+# (prod stamps with the real current date; hardcoded dates drift out of sync).
+_TODAY = datetime.now(timezone.utc).date()
+TODAY = _TODAY.isoformat()
+YESTERDAY = (_TODAY - timedelta(days=1)).isoformat()
 
 
 def _ok_result():
