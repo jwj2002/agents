@@ -62,8 +62,16 @@ _FRONTEND_PATH_RE = re.compile(r"(^|/)(pages|routes|app)/")
 _FRONTEND_EXT_RE = re.compile(r"\.(tsx|jsx)$")
 
 # --- content patterns (added lines / file text) ------------------------------
+# BACKEND_HTTP detection is FastAPI-biased and intentionally so for this
+# iteration: it matches FastAPI()/APIRouter() construction, add_api_route(),
+# and route decorators on `app`, `router`, or any `*router`-suffixed identifier
+# (e.g. @api_router.get, @v1_router.post). DOCUMENTED LIMITATION — Flask
+# (@app.route) and Django (urls.py) routes are NOT detected; downstream
+# projects relying on those frameworks should ship a project-local `smoke.sh`.
 _BACKEND_CONTENT_RE = re.compile(
-    r"FastAPI\(|@(app|router)\.(get|post|put|delete|patch)\b"
+    r"FastAPI\(|APIRouter\(|add_api_route\(|"
+    r"@(app|\w*router)\.(get|post|put|delete|patch|head|options)\b",
+    re.IGNORECASE,
 )
 # WORKER content marker fires on a lifespan/service DEFINITION or REGISTRATION
 # (not a bare prose/comment/regex mention) so docs and this tool's own source
@@ -72,9 +80,17 @@ _BACKEND_CONTENT_RE = re.compile(
 #   - `lifespan=`                            (FastAPI lifespan kwarg wiring)
 #   - `ServiceContainer(`                    (instantiating the container)
 #   - `_workers[`                            (registering in the worker dict)
+#   - `Celery(`                              (instantiating a Celery app)
+#   - `@<ident>.task`                        (a Celery task decorator)
+#   - `.add_job(`                            (APScheduler job registration)
 _WORKER_CONTENT_RE = re.compile(
-    r"\b(async\s+)?def\s+lifespan\b|\blifespan\s*=|\bServiceContainer\s*\(|\b_workers\["
+    r"\b(async\s+)?def\s+lifespan\b|\blifespan\s*=|\bServiceContainer\s*\(|"
+    r"\b_workers\[|\bCelery\s*\(|@\w+\.task\b|\.add_job\("
 )
+# CLI content marker: a Click command/group decorator anywhere in added .py.
+_CLI_CONTENT_RE = re.compile(r"@click\.(command|group)\b")
+# pyproject/setup CLI entrypoint markers (added lines only).
+_CONSOLE_SCRIPTS_RE = re.compile(r"\[project\.scripts\]|console_scripts")
 
 
 # Test files are exercised by the test runner, never booted as a runnable
@@ -114,9 +130,21 @@ def _backend_http_hit(cs: ChangeSet, path: str) -> bool:
     this repo's own ``claude-config/scripts/*.py`` from resolving to
     BACKEND_HTTP (the central anti-false-positive design point).
     """
-    if not _BACKEND_PATH_RE.search(path):
+    if not _BACKEND_PATH_RE.search(path) or _is_self_source(path):
         return False
     return _content_matches(cs, path, _BACKEND_CONTENT_RE)
+
+
+# This helper's own source file. Its module text legitimately contains the
+# very marker strings it scans for (regex literals like `@click.command`,
+# `console_scripts`, `Celery(`), so it must be excluded from CONTENT-based
+# obligation detection to avoid self-dogfood false positives. Path-token rules
+# don't match this file's name, so only the content scanners need the guard.
+_SELF_SOURCE = "runtime_smoke_gate.py"
+
+
+def _is_self_source(path: str) -> bool:
+    return path.endswith(_SELF_SOURCE)
 
 
 def _worker_hit(cs: ChangeSet, path: str) -> bool:
@@ -125,9 +153,23 @@ def _worker_hit(cs: ChangeSet, path: str) -> bool:
     # Content marker is a secondary trigger: only on Python source, and only on
     # ADDED lines (no whole-file fallback) — a worker entrypoint is being added,
     # not merely mentioned in a doc or comment elsewhere in the file.
-    if not path.endswith(".py"):
+    if not path.endswith(".py") or _is_self_source(path):
         return False
     return bool(_WORKER_CONTENT_RE.search(_added_text(cs, path)))
+
+
+def _cli_hit(cs: ChangeSet, path: str) -> bool:
+    """CLI obligation: path token, console-scripts entrypoint, or @click decorator."""
+    if _CLI_RE.search(path):
+        return True
+    if _is_self_source(path):
+        return False
+    name = path.rsplit("/", 1)[-1]
+    if name in ("pyproject.toml", "setup.py"):
+        return bool(_CONSOLE_SCRIPTS_RE.search(_added_text(cs, path)))
+    if path.endswith(".py"):
+        return bool(_CLI_CONTENT_RE.search(_added_text(cs, path)))
+    return False
 
 
 def _frontend_hit(path: str) -> bool:
@@ -142,7 +184,7 @@ def obligations(cs: ChangeSet) -> set[str]:
             continue
         if _backend_http_hit(cs, path):
             obs.add(SmokeObligation.BACKEND_HTTP.value)
-        if _CLI_RE.search(path):
+        if _cli_hit(cs, path):
             obs.add(SmokeObligation.CLI.value)
         if _worker_hit(cs, path):
             obs.add(SmokeObligation.WORKER.value)
@@ -161,11 +203,22 @@ def discover_smoke_sh(repo: Path, override: Path | None = None) -> Path | None:
     return None
 
 
+def _to_text(value: object) -> str:
+    """Normalize subprocess stdout/stderr to str (None→"", bytes→utf-8 decode)."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
 def run_smoke(smoke_sh: Path, repo: Path, timeout: int) -> tuple[int, str]:
     """Run `bash <smoke_sh>` in cwd=repo. Return (exit_code, combined output).
 
     A TimeoutExpired is mapped to a non-zero exit so the caller treats it as a
     FAIL. OSError (e.g. bash missing) is propagated for the caller's exit-2 path.
+    TimeoutExpired.stdout/.stderr may be bytes even under text=True, so both are
+    normalized via _to_text to avoid a TypeError on concatenation.
     """
     try:
         proc = subprocess.run(
@@ -176,7 +229,7 @@ def run_smoke(smoke_sh: Path, repo: Path, timeout: int) -> tuple[int, str]:
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
-        out = (exc.stdout or "") + (exc.stderr or "")
+        out = _to_text(exc.stdout) + _to_text(exc.stderr)
         return 124, f"{out}\nsmoke.sh timed out after {timeout}s"
     return proc.returncode, proc.stdout + proc.stderr
 
@@ -225,7 +278,12 @@ def main(argv: list[str] | None = None) -> int:
         _report(obs, None, None)
         return 0
 
-    smoke_sh = discover_smoke_sh(repo, args.smoke_sh)
+    # Resolve a relative --smoke-sh against --repo (not the process cwd) for
+    # predictability; absolute paths are used as-is.
+    override = args.smoke_sh
+    if override is not None and not override.is_absolute():
+        override = repo / override
+    smoke_sh = discover_smoke_sh(repo, override)
     if smoke_sh is None:
         _report(obs, None, None)
         return 1

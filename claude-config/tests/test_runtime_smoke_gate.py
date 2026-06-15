@@ -99,6 +99,123 @@ def test_comment_only_worker_marker_ignored(tmp_path):
     assert R.obligations(cs) == set()
 
 
+# ---------- broadened BACKEND_HTTP detection (codex review #463) ----------
+
+def test_backend_apirouter_construction(tmp_path):
+    cs = _cs(tmp_path, {"app/routers/x.py": [
+        (1, "api_router = APIRouter()"),
+        (2, "@api_router.get('/x')"),
+    ]})
+    assert R.obligations(cs) == {"backend_http"}
+
+
+def test_backend_add_api_route(tmp_path):
+    cs = _cs(tmp_path, {"app/main.py": [
+        (1, "app.add_api_route('/x', handler)"),
+    ]})
+    assert R.obligations(cs) == {"backend_http"}
+
+
+def test_backend_router_suffixed_identifier_decorator(tmp_path):
+    # A non-app/router identifier ending in `router` must still fire.
+    cs = _cs(tmp_path, {"app/routers/v1.py": [
+        (1, "@v1_router.post('/y')"),
+    ]})
+    assert R.obligations(cs) == {"backend_http"}
+
+
+def test_backend_path_no_fastapi_still_empty(tmp_path):
+    # No-false-positive guard still holds with the broadened content regex.
+    cs = _cs(tmp_path, {"app/util.py": [(1, "x = 1"), (2, "def helper(): ...")]})
+    assert R.obligations(cs) == set()
+
+
+# ---------- broadened CLI detection (codex review #463) ----------
+
+def test_pyproject_console_scripts_is_cli(tmp_path):
+    cs = _cs(tmp_path, {"pyproject.toml": [
+        (10, "[project.scripts]"),
+        (11, "mytool = 'pkg.cli:main'"),
+    ]})
+    assert R.obligations(cs) == {"cli"}
+
+
+def test_click_command_is_cli(tmp_path):
+    cs = _cs(tmp_path, {"tools/cmd.py": [
+        (1, "@click.command()"),
+        (2, "def run(): ..."),
+    ]})
+    assert R.obligations(cs) == {"cli"}
+
+
+# ---------- broadened WORKER detection (codex review #463) ----------
+
+def test_celery_task_decorator_is_worker(tmp_path):
+    cs = _cs(tmp_path, {"app/tasks.py": [
+        (1, "@celery_app.task"),
+        (2, "def crunch(): ..."),
+    ]})
+    assert R.obligations(cs) == {"worker"}
+
+
+def test_add_job_scheduler_is_worker(tmp_path):
+    cs = _cs(tmp_path, {"jobs/scheduler.py": [
+        (1, "scheduler.add_job(crunch, 'interval', seconds=30)"),
+    ]})
+    assert R.obligations(cs) == {"worker"}
+
+
+# ---------- path-boundary lock (codex review #463) ----------
+
+def test_test_path_boundary_does_not_swallow_lookalikes(tmp_path):
+    # `contests/` and `latest/` must NOT be treated as test paths — they remain
+    # eligible for obligations. A genuine `tests/test_*.py` IS excluded.
+    cs = _cs(tmp_path, {
+        "contests/foo.py": [(1, "@click.command()")],
+        "latest/foo.py": [(1, "@click.group()")],
+        "tests/test_x.py": [(1, "@click.command()")],
+    })
+    # Both lookalikes fire CLI; the real test path contributes nothing.
+    assert R.obligations(cs) == {"cli"}
+
+
+# ---------- self-source guard (codex review #463) ----------
+
+def test_self_source_not_self_dogfood_false_positive(tmp_path):
+    # The helper's own source contains marker string literals; it must not
+    # self-fire on content rules.
+    cs = _cs(tmp_path, {"claude-config/scripts/runtime_smoke_gate.py": [
+        (1, "_CLI_CONTENT_RE = re.compile(r'@click.command')"),
+        (2, "_CONSOLE_SCRIPTS_RE = re.compile(r'console_scripts')"),
+        (3, "r'Celery\\\\('"),
+    ]})
+    assert R.obligations(cs) == set()
+
+
+# ---------- timeout normalization (codex review #463) ----------
+
+def test_run_smoke_timeout_no_crash(tmp_path):
+    # A smoke.sh that sleeps past the timeout maps cleanly to a non-zero exit
+    # (no TypeError from bytes stdout/stderr concatenation).
+    sh = _write_smoke(tmp_path, "sleep 5")
+    code, out = R.run_smoke(sh, tmp_path, timeout=1)
+    assert code == 124
+    assert "timed out" in out
+
+
+def test_main_timeout_exit_3(tmp_path, monkeypatch):
+    _write_smoke(tmp_path, "sleep 5")
+    cs = _cs(tmp_path, {"services/x.py": [(1, "def run(): ...")]})
+    monkeypatch.setattr(R, "changeset_from_git", lambda *a, **k: cs)
+    assert R.main(["--repo", str(tmp_path), "--timeout", "1"]) == 3
+
+
+def test_to_text_normalizes(tmp_path):
+    assert R._to_text(None) == ""
+    assert R._to_text(b"hi") == "hi"
+    assert R._to_text("hi") == "hi"
+
+
 # ---------- smoke.sh discovery ----------
 
 def test_discover_none(tmp_path):
