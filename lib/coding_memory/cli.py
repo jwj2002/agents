@@ -96,6 +96,7 @@ def cmd_ingest(args, cfg):
         for r in records:
             print(f"  [{r['namespace']}] {r['name']}  ({r['source_path']})")
         return 0
+    parsed["origin"] = P.ORIGIN
     payload = json.dumps(parsed)
     if is_remote(cfg):
         return _ssh(cfg, ["_embed-store"], stdin_data=payload)
@@ -113,6 +114,7 @@ def _embed_store(payload, cfg):
     if isinstance(env, list):  # back-compat: bare record list
         env = {"records": env, "prune_namespaces": []}
     incoming = env.get("records", [])
+    origin = env.get("origin") or "unknown"
     # residency: server-side allowlist — never store a non-personal namespace,
     # even from a misconfigured client.
     records = [r for r in incoming if r.get("namespace") in ALLOWED_NAMESPACES]
@@ -124,7 +126,8 @@ def _embed_store(payload, cfg):
     try:
         store.ensure_schema(conn)
         namespaces = sorted({r["namespace"] for r in records})
-        existing = store.existing_hashes(conn, namespaces)
+        store.claim_unowned(conn, origin, namespaces)  # one-time: adopt legacy rows
+        existing = store.existing_hashes(conn, origin, namespaces)
         changed = [
             r
             for r in records
@@ -136,14 +139,14 @@ def _embed_store(payload, cfg):
                 [P.embed_text(r) for r in batch], cache_dir=cache
             )
             for r, v in zip(batch, vecs):
-                store.upsert(conn, r, v)
+                store.upsert(conn, r, v, origin)
             conn.commit()
-        # prune ONLY namespaces the client certified as fully + cleanly scanned
+        # prune ONLY this machine's rows, in namespaces the client cleanly scanned
         pruned = 0
         for ns in prune_ns:
             keep = [r["source_path"] for r in records if r["namespace"] == ns]
             if keep:
-                pruned += store.delete_missing(conn, ns, keep)
+                pruned += store.delete_missing(conn, origin, ns, keep)
         conn.commit()
         report = {
             "parsed": len(incoming),
@@ -226,6 +229,105 @@ def cmd_stats(args, cfg):
     return 0
 
 
+# ---------- doctor ----------
+
+
+def cmd_doctor(args, cfg):
+    # client gathers the laptop's filesystem view (which source files still exist)
+    # so jns can detect drift; only cleanly-scanned namespaces are prune-eligible.
+    if args.prune_missing and args.source:
+        # a custom --source can be a subdir of the canonical root; pruning "missing"
+        # against it would wipe the rest of the namespace. Only the default roots
+        # (full scan) may drive --prune-missing.
+        raise SystemExit(
+            "--prune-missing cannot be combined with --source (use default roots)"
+        )
+    sources = _sources_from_args(args.source)
+    parsed = P.build_records(sources)
+    existing: dict = {}
+    for r in parsed["records"]:
+        existing.setdefault(r["namespace"], []).append(r["source_path"])
+    payload = json.dumps(
+        {
+            "origin": P.ORIGIN,
+            "existing": existing,
+            "scanned": parsed["prune_namespaces"],
+            "prune_expired": args.prune_expired,
+            "prune_missing": args.prune_missing,
+            "json": args.json,
+        }
+    )
+    if is_remote(cfg):
+        return _ssh(cfg, ["_doctor"], stdin_data=payload)
+    return _doctor(payload, cfg)
+
+
+def _sanitize(s: str) -> str:
+    # strip control chars so DB-derived names/paths can't injure the terminal/log
+    return "".join(ch if ch.isprintable() else "?" for ch in str(s or ""))
+
+
+def _doctor(payload, cfg):
+    from . import store
+
+    env = json.loads(payload)
+    origin = env.get("origin") or "unknown"
+    existing = env.get("existing", {})
+    scanned = [n for n in env.get("scanned", []) if n in ALLOWED_NAMESPACES]
+    allowed = sorted(ALLOWED_NAMESPACES)
+    conn = store.connect(cfg["DATABASE_URL"])
+    try:
+        store.ensure_schema(conn)
+        expired = store.expired_rows(conn, allowed)
+        dups = store.duplicate_names(conn)
+        drift = {
+            ns: store.drift_rows(conn, origin, ns, existing.get(ns, []))
+            for ns in scanned
+        }
+        pruned_expired = (
+            store.prune_expired(conn, allowed) if env.get("prune_expired") else 0
+        )
+        pruned_missing = 0
+        if env.get("prune_missing"):
+            for ns in scanned:  # scanned => root present, fully read, >=1 file
+                keep = existing.get(ns, [])
+                if keep:
+                    pruned_missing += store.delete_missing(conn, origin, ns, keep)
+        conn.commit()
+    finally:
+        conn.close()
+
+    report = {
+        "expired": expired,
+        "duplicates": dups,
+        "drift": {k: v for k, v in drift.items() if v},
+        "scanned_namespaces": scanned,
+        "pruned_expired": pruned_expired,
+        "pruned_missing": pruned_missing,
+    }
+    if env.get("json"):
+        print(json.dumps(report, indent=2))
+        return 0
+    drift_total = sum(len(v) for v in report["drift"].values())
+    print(
+        f"expired: {len(expired)}   drift: {drift_total}   duplicate-names: {len(dups)}"
+    )
+    for e in expired:
+        print(
+            f"  EXPIRED [{e['namespace']}] {_sanitize(e['name'])} (expires {e['expires']})"
+        )
+    for ns, rows in report["drift"].items():
+        for d in rows:
+            print(
+                f"  DRIFT   [{ns}] {_sanitize(d['name'])} — source gone: {_sanitize(d['source_path'])}"
+            )
+    for d in dups:
+        print(f"  DUP     [{d['namespace']}] {_sanitize(d['name'])} x{d['count']}")
+    if env.get("prune_expired") or env.get("prune_missing"):
+        print(f"pruned: expired={pruned_expired} missing={pruned_missing}")
+    return 0
+
+
 def build_parser():
     p = argparse.ArgumentParser(
         prog="coding-memory", description="Personal coding-memory store (jns)."
@@ -250,6 +352,22 @@ def build_parser():
 
     sub.add_parser("stats", help="row counts per namespace")
 
+    d = sub.add_parser(
+        "doctor", help="report freshness/expiry/drift/duplicates (+ optional prune)"
+    )
+    d.add_argument("--source", action="append")
+    d.add_argument(
+        "--prune-expired",
+        action="store_true",
+        help="delete rows past their expires date",
+    )
+    d.add_argument(
+        "--prune-missing",
+        action="store_true",
+        help="delete drift rows in cleanly-scanned namespaces only",
+    )
+    d.add_argument("--json", action="store_true")
+
     # internal (server-side on jns)
     sub.add_parser("_embed-store")
     qq = sub.add_parser("_query")
@@ -258,6 +376,7 @@ def build_parser():
     qq.add_argument("--mode", choices=["hybrid", "vector", "fts"], default="hybrid")
     qq.add_argument("--namespace", action="append")
     sub.add_parser("_stats")
+    sub.add_parser("_doctor")
     return p
 
 
@@ -270,12 +389,16 @@ def main(argv=None):
         return cmd_query(args, cfg)
     if args.cmd == "stats":
         return cmd_stats(args, cfg)
+    if args.cmd == "doctor":
+        return cmd_doctor(args, cfg)
     if args.cmd == "_embed-store":
         return _embed_store(sys.stdin.read(), cfg)
     if args.cmd == "_query":
         return _query(" ".join(args.text).strip(), args, cfg)
     if args.cmd == "_stats":
         return cmd_stats(args, cfg)
+    if args.cmd == "_doctor":
+        return _doctor(sys.stdin.read(), cfg)
     raise SystemExit(2)
 
 
