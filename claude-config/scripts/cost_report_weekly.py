@@ -57,13 +57,88 @@ def _save_state(state: dict) -> None:
     EMAIL_STATE.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
 
 
-def format_recall_section(bin_path: Path | None = None) -> str:
+def _recall_correlation(metrics_path: Path) -> str:
+    """Compute first-pass rate split by recall.fired from metrics.jsonl.
+
+    Returns a markdown subsection when each cohort has N >= 3 qualifying
+    records (records with both a recall.fired bool AND a first_pass_correct
+    bool). Returns "" when the file is missing, unreadable, or either cohort
+    is below the minimum threshold.
+
+    Fail-open: any I/O or parse error returns "". BLE001 exempt — scripts/.
+    """
+    try:
+        if not metrics_path.exists():
+            return ""
+        records = []
+        for line in metrics_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except Exception:
+                continue
+
+        fired_pass = fired_total = 0
+        not_fired_pass = not_fired_total = 0
+        for rec in records:
+            recall = rec.get("recall")
+            if not isinstance(recall, dict):
+                continue  # pre-L2 record — exclude from split
+            fired = recall.get("fired")
+            if not isinstance(fired, bool):
+                continue
+            fpc = rec.get("first_pass_correct")
+            if not isinstance(fpc, bool):
+                continue
+            if fired:
+                fired_total += 1
+                if fpc:
+                    fired_pass += 1
+            else:
+                not_fired_total += 1
+                if fpc:
+                    not_fired_pass += 1
+
+        min_n = 3
+        if fired_total < min_n or not_fired_total < min_n:
+            return ""
+
+        fired_rate = f"{fired_pass / fired_total:.0%}"
+        not_fired_rate = f"{not_fired_pass / not_fired_total:.0%}"
+
+        lines = [
+            "### Outcome correlation (from metrics.jsonl)",
+            "",
+            "| cohort | issues | first-pass rate |",
+            "|--------|--------|-----------------|",
+            f"| recall fired | {fired_total} | {fired_rate} |",
+            f"| recall not fired | {not_fired_total} | {not_fired_rate} |",
+        ]
+        return "\n".join(lines)
+    except Exception:
+        return ""  # fail-open — BLE001 exempt for scripts/
+
+
+def format_recall_section(
+    bin_path: Path | None = None,
+    metrics_path: Path | None = None,
+) -> str:
     """Shell out to coding-memory recall-report --json --days 7.
 
     Fail-open: returns a one-line "data unavailable" notice on any error
     so the weekly report still sends when jns is unreachable or the CLI
     is absent. Broad catch is intentional (BLE001 exempted for scripts/).
     Uses the absolute bin path so launchd's restricted PATH is not a problem.
+
+    Args:
+        bin_path: Path to the coding-memory binary. Defaults to
+            ~/agents/bin/coding-memory.
+        metrics_path: Optional path to metrics.jsonl. When supplied, an
+            "Outcome correlation" subsection is appended showing first-pass
+            rate split by recall.fired (issue #456). Omitted when None or
+            when either cohort has fewer than 3 qualifying records.
     """
     if bin_path is None:
         bin_path = Path.home() / "agents" / "bin" / "coding-memory"
@@ -116,6 +191,15 @@ def format_recall_section(bin_path: Path | None = None) -> str:
     except Exception:
         pass  # malformed top_facts entry — omit the section, report still sends
 
+    if metrics_path is not None:
+        try:
+            corr = _recall_correlation(metrics_path)
+            if corr:
+                lines.append("")
+                lines.extend(corr.splitlines())
+        except Exception:
+            pass  # fail-open — BLE001 exempt for scripts/
+
     return "\n".join(lines)
 
 
@@ -144,7 +228,9 @@ def main() -> int:
     )
     if kpi_section:
         md = md + "\n\n" + kpi_section
-    recall_section = format_recall_section()
+    recall_section = format_recall_section(
+        metrics_path=Path.home() / ".claude" / "memory" / "metrics.jsonl"
+    )
     if recall_section:
         md = md + "\n\n" + recall_section
     print(f"[{now.isoformat()}] local report: {html_path} ({len(records)} records)")
