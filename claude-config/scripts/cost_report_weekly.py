@@ -78,17 +78,19 @@ def format_recall_section(bin_path: Path | None = None) -> str:
         if proc.returncode != 0 or not proc.stdout.strip():
             return stub
         data = json.loads(proc.stdout)
+        n_total = int(data.get("n_total") or 0)
+        n_push = int(data.get("n_push") or 0)
+        n_pull = int(data.get("n_pull") or 0)
+        n_inj = int(data.get("n_injected_total") or 0)
+        n_ret = int(data.get("n_returned_total") or 0)
+        p50_raw = data.get("p50_latency_ms")
+        p50 = int(p50_raw) if p50_raw is not None else None
+        top_facts = (
+            data.get("top_facts") if isinstance(data.get("top_facts"), list) else []
+        )
+        days = int(data.get("days") or 7)
     except Exception:
         return stub
-
-    n_total = data.get("n_total", 0)
-    n_push = data.get("n_push", 0)
-    n_pull = data.get("n_pull", 0)
-    n_inj = data.get("n_injected_total", 0)
-    n_ret = data.get("n_returned_total", 0)
-    p50 = data.get("p50_latency_ms")
-    top_facts = data.get("top_facts", [])
-    days = data.get("days", 7)
 
     eff_str = f"{n_inj / n_ret:.0%}" if n_ret else "n/a"
     p50_str = f"{p50} ms" if p50 is not None else "n/a"
@@ -104,12 +106,15 @@ def format_recall_section(bin_path: Path | None = None) -> str:
         f"| gate efficiency (injected/returned) | {eff_str} |",
         f"| p50 latency | {p50_str} |",
     ]
-    if top_facts:
-        lines += ["", "**Top surfaced facts:**", ""]
-        for f in top_facts:
-            lines.append(
-                f"- [{f.get('ns', '?')}] {f.get('name', '?')} ×{f.get('count', 0)}"
-            )
+    try:
+        if top_facts:
+            lines += ["", "**Top surfaced facts:**", ""]
+            for f in top_facts:
+                lines.append(
+                    f"- [{f.get('ns', '?')}] {f.get('name', '?')} ×{int(f.get('count') or 0)}"
+                )
+    except Exception:
+        pass  # malformed top_facts entry — omit the section, report still sends
 
     return "\n".join(lines)
 
