@@ -59,7 +59,7 @@ def test_partial_status_forbids_pass():
     """AC marked `partial` → FAIL."""
     audit = validate_ac_audit(
         [
-            {"ac": "AC 1", "status": "implemented", "evidence": "tests/test_a.py"},
+            {"ac": "AC 1", "status": "implemented", "evidence": "tests/test_a.py::test_something"},
             {"ac": "AC 2", "status": "partial", "evidence": "only read path; write path missing"},
         ]
     )
@@ -440,10 +440,10 @@ def test_emit_fewer_than_expected_is_failure():
     implemented) → FAIL because AC #5 is silently omitted."""
     audit = validate_ac_audit(
         [
-            {"ac": "AC 1", "status": "implemented", "evidence": "src/a.py"},
-            {"ac": "AC 2", "status": "implemented", "evidence": "src/b.py"},
-            {"ac": "AC 3", "status": "implemented", "evidence": "src/c.py"},
-            {"ac": "AC 4", "status": "implemented", "evidence": "src/d.py"},
+            {"ac": "AC 1", "status": "implemented", "evidence": "src/a.py:1"},
+            {"ac": "AC 2", "status": "implemented", "evidence": "src/b.py:2"},
+            {"ac": "AC 3", "status": "implemented", "evidence": "src/c.py:3"},
+            {"ac": "AC 4", "status": "implemented", "evidence": "src/d.py:4"},
         ],
         expected_ac_count=5,
     )
@@ -454,8 +454,8 @@ def test_emit_fewer_than_expected_is_failure():
 def test_emit_equal_to_expected_is_pass():
     audit = validate_ac_audit(
         [
-            {"ac": "AC 1", "status": "implemented", "evidence": "src/a.py"},
-            {"ac": "AC 2", "status": "implemented", "evidence": "src/b.py"},
+            {"ac": "AC 1", "status": "implemented", "evidence": "src/a.py:1"},
+            {"ac": "AC 2", "status": "implemented", "evidence": "src/b.py:2"},
         ],
         expected_ac_count=2,
     )
@@ -466,9 +466,9 @@ def test_emit_more_than_expected_is_pass():
     """Tolerate over-counting; under-counting is the load-bearing case."""
     audit = validate_ac_audit(
         [
-            {"ac": "AC 1", "status": "implemented", "evidence": "src/a.py"},
-            {"ac": "AC 2", "status": "implemented", "evidence": "src/b.py"},
-            {"ac": "AC 3 (bonus)", "status": "implemented", "evidence": "src/c.py"},
+            {"ac": "AC 1", "status": "implemented", "evidence": "src/a.py:1"},
+            {"ac": "AC 2", "status": "implemented", "evidence": "src/b.py:2"},
+            {"ac": "AC 3 (bonus)", "status": "implemented", "evidence": "src/c.py:3"},
         ],
         expected_ac_count=2,
     )
@@ -480,7 +480,80 @@ def test_expected_ac_count_none_skips_coverage_check():
     emit-only validation behavior (unit tests, issues with no parseable
     AC section)."""
     audit = validate_ac_audit(
-        [{"ac": "AC 1", "status": "implemented", "evidence": "src/a.py"}],
+        [{"ac": "AC 1", "status": "implemented", "evidence": "src/a.py:1"}],
         expected_ac_count=None,
     )
     assert audit["downgrade_to"] is None
+
+
+# ── evidence token gate (issue #461) ─────────────────────────────────────────
+
+
+def test_implemented_with_file_line_token_passes():
+    """file:line token is the canonical implemented evidence form."""
+    audit = validate_ac_audit(
+        [
+            {"ac": "AC 1", "status": "implemented", "evidence": "src/foo.py:42"},
+        ]
+    )
+    assert audit["downgrade_to"] is None
+    assert audit["missing"] == []
+
+
+def test_implemented_with_pytest_node_id_passes():
+    """pytest node id (path.py::test_name) counts as a verifier token."""
+    audit = validate_ac_audit(
+        [
+            {"ac": "AC 1", "status": "implemented",
+             "evidence": "tests/test_foo.py::test_bar"},
+        ]
+    )
+    assert audit["downgrade_to"] is None
+    assert audit["missing"] == []
+
+
+def test_implemented_with_command_prefix_passes():
+    """Explicit command:/test:/smoke: prefix counts as a verifier token."""
+    audit = validate_ac_audit(
+        [
+            {"ac": "AC 1", "status": "implemented",
+             "evidence": "command: ruff check . -> 0 errors"},
+        ]
+    )
+    assert audit["downgrade_to"] is None
+
+
+def test_implemented_with_empty_evidence_downgrades_to_fail():
+    """Empty evidence on implemented — no token -> downgrade to FAIL."""
+    audit = validate_ac_audit(
+        [
+            {"ac": "AC 1", "status": "implemented", "evidence": ""},
+        ]
+    )
+    assert audit["downgrade_to"] == "FAIL"
+    assert len(audit["missing"]) == 1
+    assert "verifier token" in audit["missing"][0]["reason"]
+    assert audit["missing"][0]["status"] == "missing"
+
+
+def test_implemented_with_hand_wavy_prose_downgrades_to_fail():
+    """Prose without a concrete token -> downgrade to FAIL."""
+    audit = validate_ac_audit(
+        [
+            {"ac": "AC 1", "status": "implemented",
+             "evidence": "implemented in the service layer"},
+        ]
+    )
+    assert audit["downgrade_to"] == "FAIL"
+    assert "verifier token" in audit["missing"][0]["reason"]
+
+
+def test_implemented_missing_evidence_key_downgrades_to_fail():
+    """No evidence key at all -> None -> no token -> FAIL."""
+    audit = validate_ac_audit(
+        [
+            {"ac": "AC 1", "status": "implemented"},
+        ]
+    )
+    assert audit["downgrade_to"] == "FAIL"
+    assert "verifier token" in audit["missing"][0]["reason"]
