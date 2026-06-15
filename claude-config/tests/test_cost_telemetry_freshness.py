@@ -9,7 +9,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import cost_telemetry_freshness as F  # noqa: E402
 
-NOW = datetime(2026, 6, 8, 12, 0, tzinfo=timezone.utc)
+# Dynamic so test_main_exit_codes (which calls F.main using the real current time)
+# stays in sync; a hardcoded NOW time-bombs as days pass.
+NOW = datetime.now(timezone.utc)
 
 
 def _state(base: Path, last_success, extra=None):
