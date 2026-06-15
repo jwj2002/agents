@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 
 from . import EMBED_DIM
@@ -25,6 +26,21 @@ CREATE TABLE IF NOT EXISTS memory_fact (
        (to_tsvector('english', coalesce(name,'')||' '||coalesce(summary,'')||' '||coalesce(body,''))) STORED,
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now()
+);
+"""
+
+_RECALL_DDL = """
+CREATE TABLE IF NOT EXISTS recall_event (
+  id           BIGSERIAL PRIMARY KEY,
+  ts           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  origin       TEXT,
+  kind         TEXT NOT NULL CHECK (kind IN ('push', 'pull')),
+  mode         TEXT,
+  n_returned   INT,
+  n_injected   INT,
+  top_score    REAL,
+  facts        JSONB,
+  latency_ms   INT
 );
 """
 
@@ -67,6 +83,9 @@ def ensure_schema(conn) -> None:
         c.execute(
             "CREATE INDEX IF NOT EXISTS idx_memfact_embed ON memory_fact USING hnsw (embedding vector_cosine_ops);"
         )
+        # recall telemetry table (#455)
+        c.execute(_RECALL_DDL)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_recall_event_ts ON recall_event(ts);")
     conn.commit()
 
 
@@ -274,3 +293,109 @@ def prune_expired(conn, namespaces=None) -> int:
     with conn.cursor() as c:
         c.execute(q, params)
         return c.rowcount
+
+
+# ---- recall telemetry (#455) ----
+
+
+def log_recall(
+    dsn: str,
+    *,
+    origin: str,
+    kind: str,
+    mode: str,
+    n_returned: int,
+    n_injected: int,
+    top_score: float | None,
+    facts: list[dict],
+    latency_ms: int,
+) -> None:
+    """INSERT one recall_event row via an isolated autocommit connection.
+
+    Opens its own autocommit connection so a logging INSERT failure can never
+    abort the caller's query transaction. Truncates facts to the top 5 before
+    storage (privacy/lean). Callers wrap in a narrow try/except for fail-open.
+    """
+    import psycopg  # noqa: PLC0415 — lazy; callers may not have psycopg
+
+    top5 = facts[:5]
+    sql = """
+    INSERT INTO recall_event
+      (origin, kind, mode, n_returned, n_injected, top_score, facts, latency_ms)
+    VALUES
+      (%s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+    """
+    with psycopg.connect(dsn, autocommit=True) as c:
+        with c.cursor() as cur:
+            cur.execute(
+                sql,
+                (
+                    origin,
+                    kind,
+                    mode,
+                    n_returned,
+                    n_injected,
+                    top_score,
+                    json.dumps(top5),
+                    latency_ms,
+                ),
+            )
+
+
+def recall_report_agg(conn, *, days: int = 7) -> dict:
+    """Aggregate recall_event rows for the last `days` days.
+
+    Returns a dict with keys: n_total, n_push, n_pull, n_injected_total,
+    n_returned_total, p50_latency_ms (int|None), top_facts ([{ns,name,count}]
+    top 5), days.
+    """
+    days = max(1, min(int(days), 365))  # clamp to sane range before binding
+    agg_sql = """
+    SELECT
+        count(*)                                         AS n_total,
+        count(*) FILTER (WHERE kind='push')              AS n_push,
+        count(*) FILTER (WHERE kind='pull')              AS n_pull,
+        coalesce(sum(n_injected), 0)                     AS n_injected_total,
+        coalesce(sum(n_returned), 0)                     AS n_returned_total,
+        percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms) AS p50_latency_ms
+    FROM recall_event
+    WHERE ts >= now() - make_interval(days => %(days)s)
+    """
+    facts_sql = """
+    SELECT
+        f->>'ns'   AS ns,
+        f->>'name' AS name,
+        count(*)   AS cnt
+    FROM recall_event,
+         jsonb_array_elements(facts) AS f
+    WHERE ts >= now() - make_interval(days => %(days)s)
+    GROUP BY f->>'ns', f->>'name'
+    ORDER BY cnt DESC
+    LIMIT 5
+    """
+    with conn.cursor() as c:
+        c.execute(agg_sql, {"days": days})
+        row = c.fetchone()
+        n_total = int(row[0]) if row else 0
+        n_push = int(row[1]) if row else 0
+        n_pull = int(row[2]) if row else 0
+        n_injected_total = int(row[3]) if row else 0
+        n_returned_total = int(row[4]) if row else 0
+        p50_raw = row[5] if row else None
+        p50_latency_ms = int(p50_raw) if p50_raw is not None else None
+
+        c.execute(facts_sql, {"days": days})
+        top_facts = [
+            {"ns": r[0], "name": r[1], "count": int(r[2])} for r in c.fetchall()
+        ]
+
+    return {
+        "n_total": n_total,
+        "n_push": n_push,
+        "n_pull": n_pull,
+        "n_injected_total": n_injected_total,
+        "n_returned_total": n_returned_total,
+        "p50_latency_ms": p50_latency_ms,
+        "top_facts": top_facts,
+        "days": days,
+    }
