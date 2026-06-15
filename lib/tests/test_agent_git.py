@@ -505,6 +505,45 @@ def test_readiness_runnable_log_without_command_errors(tmp_path: Path) -> None:
     assert result.validation_log_status == "no_commands"
 
 
+def test_readiness_runnable_log_with_prose_only_command_errors(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/foo.py")
+    log = write_log(tmp_path, "we will run pytest later\n")
+
+    result = readiness(
+        work,
+        issue=42,
+        summary="add shared git tooling",
+        test_evidence=["pytest -q"],
+        allowed_paths=["src/"],
+        validation_log=str(log),
+    )
+
+    assert not result.ok
+    assert any("recognized test/lint command" in error for error in result.errors)
+    assert result.validation_log_status == "no_commands"
+
+
+def test_readiness_runnable_log_with_prompt_prefixed_command_passes(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/foo.py")
+    log = write_log(tmp_path, "$ pytest -q\n... 35 passed\n")
+
+    result = readiness(
+        work,
+        issue=42,
+        summary="add shared git tooling",
+        test_evidence=["pytest -q"],
+        allowed_paths=["src/"],
+        validation_log=str(log),
+    )
+
+    assert result.ok
+    assert result.validation_log_status == "ok"
+
+
 def test_readiness_runnable_fresh_via_sha_passes(tmp_path: Path) -> None:
     work = make_repo(tmp_path)
     branch_for_issue(work, 42)

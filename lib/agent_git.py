@@ -258,9 +258,8 @@ RUNNABLE_SUFFIXES = {
     ".java", ".kt", ".c", ".cpp", ".h", ".sh",
 }
 VALIDATION_CMD_RE = re.compile(
-    r"(pytest|python\s+-m\s+pytest|ruff\s+check|ruff\s+format|"
-    r"npm\s+(test|run\s+(build|lint)))",
-    re.IGNORECASE,
+    r"(?im)^\s*(?:[$>]|\+\s*)?\s*"
+    r"(?:python\s+-m\s+pytest|pytest|ruff\s+(?:check|format)|npm\s+(?:test|run\s+(?:build|lint)))(?:\s|$)"
 )
 
 
