@@ -56,7 +56,6 @@
     ],
     "defaultMode": "auto"
   },
-  "model": "claude-fable-5[1m]",
   "hooks": {
     "PreCompact": [
       {
@@ -88,6 +87,10 @@
           {
             "type": "command",
             "command": "python3 ~/agents/claude-config/scripts/cost_telemetry_freshness.py --hook"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/coding_memory_maint.py"
           }
         ]
       }

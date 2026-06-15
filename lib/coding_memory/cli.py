@@ -226,6 +226,81 @@ def cmd_stats(args, cfg):
     return 0
 
 
+# ---------- doctor ----------
+
+
+def cmd_doctor(args, cfg):
+    # client gathers the laptop's filesystem view (which source files still exist)
+    # so jns can detect drift; only cleanly-scanned namespaces are prune-eligible.
+    sources = _sources_from_args(args.source)
+    parsed = P.build_records(sources)
+    existing: dict = {}
+    for r in parsed["records"]:
+        existing.setdefault(r["namespace"], []).append(r["source_path"])
+    payload = json.dumps(
+        {
+            "existing": existing,
+            "scanned": parsed["prune_namespaces"],
+            "prune_expired": args.prune_expired,
+            "prune_missing": args.prune_missing,
+            "json": args.json,
+        }
+    )
+    if is_remote(cfg):
+        return _ssh(cfg, ["_doctor"], stdin_data=payload)
+    return _doctor(payload, cfg)
+
+
+def _doctor(payload, cfg):
+    from . import store
+
+    env = json.loads(payload)
+    existing = env.get("existing", {})
+    scanned = [n for n in env.get("scanned", []) if n in ALLOWED_NAMESPACES]
+    conn = store.connect(cfg["DATABASE_URL"])
+    try:
+        store.ensure_schema(conn)
+        expired = store.expired_rows(conn)
+        dups = store.duplicate_names(conn)
+        drift = {ns: store.drift_rows(conn, ns, existing.get(ns, [])) for ns in scanned}
+        pruned_expired = store.prune_expired(conn) if env.get("prune_expired") else 0
+        pruned_missing = 0
+        if env.get("prune_missing"):
+            for ns in scanned:  # scanned => root present, fully read, >=1 file
+                keep = existing.get(ns, [])
+                if keep:
+                    pruned_missing += store.delete_missing(conn, ns, keep)
+        conn.commit()
+    finally:
+        conn.close()
+
+    report = {
+        "expired": expired,
+        "duplicates": dups,
+        "drift": {k: v for k, v in drift.items() if v},
+        "scanned_namespaces": scanned,
+        "pruned_expired": pruned_expired,
+        "pruned_missing": pruned_missing,
+    }
+    if env.get("json"):
+        print(json.dumps(report, indent=2))
+        return 0
+    drift_total = sum(len(v) for v in report["drift"].values())
+    print(
+        f"expired: {len(expired)}   drift: {drift_total}   duplicate-names: {len(dups)}"
+    )
+    for e in expired:
+        print(f"  EXPIRED [{e['namespace']}] {e['name']} (expires {e['expires']})")
+    for ns, rows in report["drift"].items():
+        for d in rows:
+            print(f"  DRIFT   [{ns}] {d['name']} — source gone: {d['source_path']}")
+    for d in dups:
+        print(f"  DUP     [{d['namespace']}] {d['name']} x{d['count']}")
+    if env.get("prune_expired") or env.get("prune_missing"):
+        print(f"pruned: expired={pruned_expired} missing={pruned_missing}")
+    return 0
+
+
 def build_parser():
     p = argparse.ArgumentParser(
         prog="coding-memory", description="Personal coding-memory store (jns)."
@@ -250,6 +325,22 @@ def build_parser():
 
     sub.add_parser("stats", help="row counts per namespace")
 
+    d = sub.add_parser(
+        "doctor", help="report freshness/expiry/drift/duplicates (+ optional prune)"
+    )
+    d.add_argument("--source", action="append")
+    d.add_argument(
+        "--prune-expired",
+        action="store_true",
+        help="delete rows past their expires date",
+    )
+    d.add_argument(
+        "--prune-missing",
+        action="store_true",
+        help="delete drift rows in cleanly-scanned namespaces only",
+    )
+    d.add_argument("--json", action="store_true")
+
     # internal (server-side on jns)
     sub.add_parser("_embed-store")
     qq = sub.add_parser("_query")
@@ -258,6 +349,7 @@ def build_parser():
     qq.add_argument("--mode", choices=["hybrid", "vector", "fts"], default="hybrid")
     qq.add_argument("--namespace", action="append")
     sub.add_parser("_stats")
+    sub.add_parser("_doctor")
     return p
 
 
@@ -270,12 +362,16 @@ def main(argv=None):
         return cmd_query(args, cfg)
     if args.cmd == "stats":
         return cmd_stats(args, cfg)
+    if args.cmd == "doctor":
+        return cmd_doctor(args, cfg)
     if args.cmd == "_embed-store":
         return _embed_store(sys.stdin.read(), cfg)
     if args.cmd == "_query":
         return _query(" ".join(args.text).strip(), args, cfg)
     if args.cmd == "_stats":
         return cmd_stats(args, cfg)
+    if args.cmd == "_doctor":
+        return _doctor(sys.stdin.read(), cfg)
     raise SystemExit(2)
 
 

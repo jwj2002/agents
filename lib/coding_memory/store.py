@@ -183,3 +183,64 @@ def search(conn, qvec, text=None, k=8, namespaces=None, mode="hybrid"):
         rec["score"] = round(s["rrf"], 5)
         out.append(rec)
     return out
+
+
+# ---- doctor: freshness / expiry / drift / duplicates ----
+
+
+def expired_rows(conn, namespaces=None):
+    q = (
+        "SELECT namespace, name, source_path, expires FROM memory_fact "
+        "WHERE expires IS NOT NULL AND expires < CURRENT_DATE"
+    )
+    params: tuple = ()
+    if namespaces:
+        q += " AND namespace = ANY(%s)"
+        params = (list(namespaces),)
+    q += " ORDER BY namespace, expires"
+    with conn.cursor() as c:
+        c.execute(q, params)
+        return [
+            {"namespace": r[0], "name": r[1], "source_path": r[2], "expires": str(r[3])}
+            for r in c.fetchall()
+        ]
+
+
+def duplicate_names(conn):
+    q = (
+        "SELECT namespace, name, count(*), array_agg(source_path) "
+        "FROM memory_fact GROUP BY namespace, name HAVING count(*) > 1 "
+        "ORDER BY namespace, name"
+    )
+    with conn.cursor() as c:
+        c.execute(q)
+        return [
+            {"namespace": r[0], "name": r[1], "count": r[2], "paths": r[3]}
+            for r in c.fetchall()
+        ]
+
+
+def drift_rows(conn, namespace, existing_paths):
+    """Rows in `namespace` whose source_path is NOT in the caller's existing set.
+
+    Caller must have CLEANLY scanned this namespace (root present, fully readable,
+    >=1 file) — otherwise an incomplete scan would mislabel live rows as drift.
+    """
+    with conn.cursor() as c:
+        c.execute(
+            "SELECT source_path, name FROM memory_fact "
+            "WHERE namespace = %s AND NOT (source_path = ANY(%s)) ORDER BY source_path",
+            (namespace, list(existing_paths)),
+        )
+        return [{"source_path": r[0], "name": r[1]} for r in c.fetchall()]
+
+
+def prune_expired(conn, namespaces=None) -> int:
+    q = "DELETE FROM memory_fact WHERE expires IS NOT NULL AND expires < CURRENT_DATE"
+    params: tuple = ()
+    if namespaces:
+        q += " AND namespace = ANY(%s)"
+        params = (list(namespaces),)
+    with conn.cursor() as c:
+        c.execute(q, params)
+        return c.rowcount

@@ -157,6 +157,12 @@ python3 ~/agents/claude-config/scripts/cost_report_weekly.py   # run once on dem
 
 ## Coding-memory ingest (`com.coding-memory-ingest`)
 
+> **Optional / macOS-only.** The canonical cross-platform maintenance is the
+> SessionStart hook `coding_memory_maint.py` (runs ingest + `doctor
+> --prune-expired` once/day, background, residency-gated, on macOS/WSL/Linux —
+> no scheduler needed). Use this launchd job only if you also want ingest to run
+> on macOS when you're *not* opening a Claude session.
+
 **Daily** (`StartInterval 86400`, `RunAtLoad` false). Keeps the personal
 coding-memory store on jns fresh without a manual `bin/coding-memory ingest`.
 Logic lives in
