@@ -1,0 +1,7 @@
+# Server-side (jns) deps for coding-memory. Install ONLY where embedding runs:
+#   ~/agents/.venv/bin/pip install -r lib/coding_memory/requirements-server.txt
+# Laptops are thin clients (parse + SSH dispatch) and need none of these.
+# fastembed is pinned: a version change can shift the embedding space — re-ingest
+# all namespaces if you bump it (see lib/coding_memory/__init__.py EMBED_MODEL).
+fastembed==0.8.0
+psycopg[binary]>=3.1
