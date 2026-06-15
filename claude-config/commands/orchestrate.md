@@ -336,17 +336,25 @@ cross-project `global` craft lessons.
 ~/agents/bin/coding-memory query "<issue title + key nouns + changed paths>" -k 3 --for-prompt
 ```
 
-- **Budget (deliberately small — this rides inside every phase prompt):** top-3
-  facts, one summary line each, **hard-capped at ~700 chars** total. Capture
-  verbatim as `{CODING_MEMORY_BLOCK}`. Summaries only — never bodies. Fact text is
-  injection-screened before it enters the block (instruction-injection content is
-  withheld).
+- **Relevance-gated (NOT a fixed top-3):** `--for-prompt` keeps only facts whose
+  cosine similarity clears the calibrated threshold (`RECALL_MIN_SCORE`, ~0.62).
+  Most phases get **0 facts** (nothing relevant → nothing injected); a strong
+  match yields **1–2** lines. This is for the *unknown-unknowns* — a gotcha for
+  the subsystem you're touching that you wouldn't know to search for. Capped at
+  ~700 chars, summaries only, injection-screened. Capture as `{CODING_MEMORY_BLOCK}`.
 - **Fail-open:** if the command errors, times out, prints nothing, or the store
   is unreachable (e.g. jns down / offline), set `{CODING_MEMORY_BLOCK}` to empty
   and proceed. Recall must NEVER block or delay a phase.
 - Inject the block into MAP/MAP-PLAN, PLAN, PATCH, and PROVE phase prompts
-  (alongside `{PROJECT_MEMORY_BLOCK}`). Agents treat it as a hint to verify, not
-  ground truth. Reuse across phases; re-recall only on `--resume` if absent.
+  (alongside `{PROJECT_MEMORY_BLOCK}`). Treat it as a hint to verify, not ground
+  truth. Re-key per phase on the **changed files** for sharper relevance; reuse on
+  `--resume` if absent.
+- **Pull (agent-driven, on demand):** the push above only catches what *you*
+  didn't know to ask. For anything you DO have a question about while working —
+  a pattern, a prior decision, how a subsystem behaves — query the store directly
+  with the specific problem: `~/agents/bin/coding-memory query "<your question>"`
+  (then Read the source file of any hit for the full body). Prefer this precise
+  pull over relying on the push.
 
 ### Step 3: Spawn Agents (Task Tool)
 

@@ -28,6 +28,10 @@ QUERY_PREFIX = "search_query: "
 EMBED_MAXCHARS = 2500  # truncate doc text before embedding (attention is O(seq^2));
 #                        FTS still covers the full body, so recall keeps full-text reach
 EMBED_BATCH = 8  # small batch caps peak memory (O(seq^2)*batch); avoids OOM on jns
+# Min cosine similarity for a fact to be PUSHED into a phase prompt (--for-prompt).
+# Calibrated 2026-06-15: true hits 0.68-0.82; irrelevant-query floor ~0.50; weak
+# secondaries ~0.59. 0.62 keeps real hits, gates out the floor + the bloat.
+RECALL_MIN_SCORE = 0.62
 
 CONFIG_PATH = Path(os.path.expanduser("~/.coding_memory.env"))
 
