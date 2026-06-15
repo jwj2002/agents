@@ -356,6 +356,44 @@ cross-project `global` craft lessons.
   (then Read the source file of any hit for the full body). Prefer this precise
   pull over relying on the push.
 
+**Persist recall summary for outcome recording**: After capturing
+`{CODING_MEMORY_BLOCK}`, write a JSON sidecar so Step 4 can
+correlate the recall result with the PROVE outcome without threading
+it through Task() prompts (the orchestrator is stateless between calls).
+Set `RECALL_CMD_OK=1` when the `coding-memory query` command exits 0 and
+produces output; set it to `0` when the command errors, times out, or
+returns nothing. The sidecar write is fail-open: if it fails, continue
+without it — Step 4 handles the absent-file case.
+
+```python
+import json
+from pathlib import Path
+# Parse the --for-prompt output to extract fired/n/facts.
+# {CODING_MEMORY_BLOCK} was captured above from coding-memory query --for-prompt.
+_recall_block = """{CODING_MEMORY_BLOCK}"""
+_facts = [
+    ln.strip().lstrip("- ").split(":")[0].strip()
+    for ln in _recall_block.splitlines()
+    if ln.strip().startswith("-")
+]
+_fired = bool(_facts)
+_sidecar = {
+    "issue": int("$ISSUE"),
+    "date": "$MMDDYY",
+    "fired": _fired,
+    "n": len(_facts),
+    "facts": _facts,
+    "flag": "on" if "$RECALL_CMD_OK" == "1" else "off",
+}
+try:
+    Path(".agents/outputs").mkdir(parents=True, exist_ok=True)
+    Path(f".agents/outputs/recall-$ISSUE-$MMDDYY.json").write_text(
+        json.dumps(_sidecar), encoding="utf-8"
+    )
+except Exception:
+    pass  # fail-open; Step 4 handles absent sidecar
+```
+
 ### Step 3: Spawn Agents (Task Tool)
 
 **CRITICAL**: Use the Task tool to spawn each phase agent via **native subagent
@@ -536,10 +574,24 @@ if status == "PASS":
         status = "FAIL"
         print(f"PROVE PASS downgraded to FAIL: {downgrade_reason}")
 
+# Read recall sidecar written at Step 2.85 (fail-open: absent/malformed sidecar → no recall field)
+import glob as _glob
+_recall_kwarg = {}
+try:
+    _sidecar_candidates = sorted(
+        _glob.glob(".agents/outputs/recall-$ISSUE-*.json")
+    )
+    if _sidecar_candidates:
+        _sc = json.loads(Path(_sidecar_candidates[-1]).read_text(encoding="utf-8"))
+        _recall_kwarg = {"recall": _sc}
+except Exception:
+    pass  # fail-open; record_metrics still runs, just without recall field
+
 record_metrics(
     Path("."), int("$ISSUE"), status, complexity, stack, agents_run,
     root_cause=root_cause,
     blocking_agent=("PROVE" if status in ("BLOCKED", "FAIL") else None),
+    **_recall_kwarg,
 )
 
 # Always log the per-AC audit row, regardless of verdict — clean PASS
