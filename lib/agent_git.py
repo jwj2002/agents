@@ -106,6 +106,7 @@ class ReadinessResult:
     summary: str | None
     test_evidence: list[str]
     pr_body: str | None = None
+    validation_log_status: str | None = None
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -126,6 +127,7 @@ class ReadinessResult:
             "summary": self.summary,
             "test_evidence": self.test_evidence,
             "pr_body": self.pr_body,
+            "validation_log_status": self.validation_log_status,
             "errors": self.errors,
             "warnings": self.warnings,
         }
@@ -250,6 +252,15 @@ BRANCH_RE = re.compile(
 )
 COMMIT_RE = re.compile(
     r"^(feat|fix|docs|test|chore|perf|refactor|ci|style)(\([a-z0-9_.-]+\))?: [a-z0-9].{0,70}$"
+)
+RUNNABLE_SUFFIXES = {
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".rb",
+    ".java", ".kt", ".c", ".cpp", ".h", ".sh",
+}
+VALIDATION_CMD_RE = re.compile(
+    r"(pytest|python\s+-m\s+pytest|ruff\s+check|ruff\s+format|"
+    r"npm\s+(test|run\s+(build|lint)))",
+    re.IGNORECASE,
 )
 
 
@@ -538,6 +549,62 @@ def build_pr_body(issue: int | None, summary: str | None, test_evidence: list[st
     )
 
 
+def _is_runnable_change(changed_files: list[str]) -> bool:
+    """True iff any changed path has a code suffix (see RUNNABLE_SUFFIXES)."""
+    return any(Path(p).suffix.lower() in RUNNABLE_SUFFIXES for p in changed_files)
+
+
+def _validate_log(
+    validation_log: str | None,
+    runnable: bool,
+    runner: Runner,
+    repo: Path,
+) -> tuple[list[str], str | None]:
+    """Validate a runnable change's --validation-log.
+
+    Returns (errors, status). status is one of
+    "ok"|"missing"|"absent"|"stale"|"no_commands"|None (non-runnable).
+    """
+    if not runnable:
+        return [], None
+    if not validation_log:
+        return (
+            ["Runnable change requires --validation-log "
+             "(a file with test/lint output)."],
+            "absent",
+        )
+    log_path = Path(validation_log)
+    if not log_path.is_absolute():
+        log_path = (Path.cwd() / log_path).resolve()
+    if not log_path.is_file():
+        return ([f"Validation log not found: {validation_log}"], "missing")
+    text = log_path.read_text(encoding="utf-8", errors="replace")
+
+    # Freshness: mtime >= HEAD commit epoch, OR HEAD short sha appears in log.
+    head_ct = run_git(runner, repo, ["show", "-s", "--format=%ct", "HEAD"])
+    short_sha = run_git(runner, repo, ["rev-parse", "--short", "HEAD"])
+    sha = short_sha.stdout.strip()
+    fresh = False
+    if head_ct.returncode == 0 and head_ct.stdout.strip().isdigit():
+        fresh = int(log_path.stat().st_mtime) >= int(head_ct.stdout.strip())
+    if not fresh and sha and sha in text:
+        fresh = True
+    if not fresh:
+        return (
+            ["Validation log is stale (older than HEAD and does not "
+             "reference the HEAD commit). Re-run tests after committing."],
+            "stale",
+        )
+
+    if not VALIDATION_CMD_RE.search(text):
+        return (
+            ["Validation log does not contain a recognized test/lint command "
+             "(pytest, ruff check, ruff format, npm test/run build/run lint)."],
+            "no_commands",
+        )
+    return [], "ok"
+
+
 def readiness(
     repo: Path,
     *,
@@ -548,6 +615,7 @@ def readiness(
     test_evidence: list[str] | None = None,
     allowed_paths: list[str] | None = None,
     generate_pr_body: bool = False,
+    validation_log: str | None = None,
     runner: Runner | None = None,
 ) -> ReadinessResult:
     runner = runner or Runner()
@@ -569,6 +637,7 @@ def readiness(
             changed_files=[],
             summary=summary,
             test_evidence=test_evidence,
+            validation_log_status=None,
             errors=[f"Not a git repository: {repo}"],
         )
 
@@ -616,6 +685,12 @@ def readiness(
     if not test_evidence:
         errors.append("Test Plan evidence is required.")
 
+    runnable = _is_runnable_change(changed_files)
+    log_errors, validation_log_status = _validate_log(
+        validation_log, runnable, runner, repo
+    )
+    errors.extend(log_errors)
+
     if stage == "merge":
         warnings.append("Merge-stage readiness currently validates local branch evidence only; CI state is handled by GitHub checks.")
 
@@ -632,6 +707,7 @@ def readiness(
         summary=summary,
         test_evidence=test_evidence,
         pr_body=body,
+        validation_log_status=validation_log_status,
         errors=errors,
         warnings=warnings,
     )
@@ -648,6 +724,7 @@ def render_readiness_text(result: ReadinessResult) -> str:
         f"commits: {len(result.commits)}",
         f"changed_files: {len(result.changed_files)}",
         f"test_evidence: {len(result.test_evidence)}",
+        f"validation_log: {result.validation_log_status or '(n/a)'}",
     ]
     if result.pr_body:
         lines.extend(["", "pr_body:", result.pr_body.rstrip()])
@@ -961,6 +1038,7 @@ def ship(
     no_fetch: bool = False,
     skip_checks_wait: bool = False,
     comment_on_stop: bool = False,
+    validation_log: str | None = None,
     runner: Runner | None = None,
 ) -> ShipResult:
     runner = runner or Runner()
@@ -1008,6 +1086,7 @@ def ship(
         test_evidence=test_evidence,
         allowed_paths=allowed_paths,
         generate_pr_body=True,
+        validation_log=validation_log,
         runner=runner,
     )
     add_warnings(readiness_result.warnings)
@@ -1278,6 +1357,11 @@ def add_readiness_parser(subparsers: argparse._SubParsersAction[argparse.Argumen
     parser.add_argument("--test-evidence", action="append", default=[], help="test plan evidence; repeatable")
     parser.add_argument("--allowed-path", action="append", default=[], help="allowed changed-file prefix; repeatable")
     parser.add_argument("--generate-pr-body", action="store_true", help="include generated PR body in output")
+    parser.add_argument(
+        "--validation-log",
+        dest="validation_log",
+        help="path to a file containing test/lint output (required for runnable code changes)",
+    )
 
 
 def add_ship_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -1292,6 +1376,11 @@ def add_ship_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
     parser.add_argument("--no-fetch", action="store_true", help="skip git fetch origin --prune during preflight")
     parser.add_argument("--skip-checks-wait", action="store_true", help="do not wait for gh pr checks before merge")
     parser.add_argument("--comment-on-stop", action="store_true", help="comment on the linked issue or PR when stopped")
+    parser.add_argument(
+        "--validation-log",
+        dest="validation_log",
+        help="path to a file containing test/lint output (required for runnable code changes)",
+    )
 
 
 def add_cleanup_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -1404,6 +1493,7 @@ def main(argv: list[str] | None = None) -> int:
             no_fetch=args.no_fetch,
             skip_checks_wait=args.skip_checks_wait,
             comment_on_stop=args.comment_on_stop,
+            validation_log=args.validation_log,
         )
         if args.json:
             print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
@@ -1421,6 +1511,7 @@ def main(argv: list[str] | None = None) -> int:
             test_evidence=args.test_evidence,
             allowed_paths=args.allowed_path,
             generate_pr_body=args.generate_pr_body,
+            validation_log=args.validation_log,
         )
         if args.json:
             print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
