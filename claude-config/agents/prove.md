@@ -252,7 +252,7 @@ For each AC bullet in the issue body / PLAN / MAP-PLAN:
 
 | Status | Meaning |
 |--------|---------|
-| `implemented` | Diff clearly satisfies this AC. Evidence cites `file:line` or a test path. |
+| `implemented` | Diff clearly satisfies this AC. Evidence MUST contain at least one verifier token: a `file:line` reference (e.g. `src/foo.py:42`), a pytest node id (`tests/test_foo.py::test_bar`), or an explicit `test:` / `command:` / `smoke:` prefix. Tokenless or empty evidence downgrades the verdict to `FAIL`. |
 | `partial` | Diff addresses part of the AC but not all of it. Evidence names what is missing. |
 | `missing` | No code in the diff addresses this AC. |
 | `deferred` | Diff explicitly defers this AC AND `evidence` cites a follow-up issue # (e.g. `"deferred to #1620"`). |
@@ -280,6 +280,11 @@ the contract:
 | {verbatim AC bullet 2} | deferred | deferred to #1620 |
 | {verbatim AC bullet 3} | partial | only the read path landed; write path missing — would need `src/bar.py` change |
 ```
+
+All three token forms count: `src/foo.py:42` (file:line), `tests/test_foo.py::test_x`
+(pytest node id), `command: pytest -q → 58 passed` (command: prefix).
+A bare file path without a line number or `::test_name` suffix does NOT satisfy
+the token requirement and will downgrade the verdict to `FAIL`.
 
 ---
 

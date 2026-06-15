@@ -664,6 +664,15 @@ _VALID_AC_STATUSES = frozenset({"implemented", "partial", "missing", "deferred",
 # "deferred to a follow-up" from becoming an APPROVE escape hatch.
 _DEFERRED_REF_RE = re.compile(r"#\d+|GH-\d+", re.IGNORECASE)
 
+# Evidence-token patterns accepted as proof for status="implemented".
+# At least ONE match is required; tokenless/empty evidence downgrades to FAIL.
+# Accepted forms: file:line  |  path.py::test_name  |  test:/command:/smoke: prefix.
+_EVIDENCE_TOKEN_RE = re.compile(
+    r"[\w./\-]+\.\w+:\d+"          # file:line or file:line-range
+    r"|[\w./\-]+\.py::[\w\[\]_-]+" # pytest node id (path.py::test_name)
+    r"|(?:test:|command:|smoke:)\s*\S",  # verifier prefix MUST have non-whitespace payload
+)
+
 # Issue #460 — runtime_smoke (Level 5) status set. Compared case-insensitively
 # on read (see validate_runtime_smoke); prove.md emits the lowercase/`n/a` forms.
 _VALID_SMOKE_STATUSES = frozenset({"pass", "fail", "n/a"})
@@ -851,7 +860,20 @@ def validate_ac_audit(
                         "reason": "deferred without follow-up issue # — treated as missing",
                     }
                 )
-        # implemented + n/a are clean; nothing to record.
+        elif status == "implemented":
+            evidence = entry.get("evidence")
+            if not isinstance(evidence, str) or not _EVIDENCE_TOKEN_RE.search(evidence):
+                missing.append(
+                    {
+                        "ac": _ac_label(entry, idx),
+                        "status": "missing",
+                        "reason": (
+                            "implemented evidence lacks a verifier token "
+                            "(need file:line, path.py::test_name, or test:/command:/smoke: prefix)"
+                        ),
+                    }
+                )
+        # n/a is clean; nothing to record.
 
     downgrade = "FAIL" if missing else None
     return {"valid": valid, "downgrade_to": downgrade, "missing": missing}
