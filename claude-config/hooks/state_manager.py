@@ -33,14 +33,15 @@ logging.basicConfig(
 
 try:
     import yaml
+
     HAS_YAML = True
 except ImportError:
     HAS_YAML = False
 
 
-
-
-def _event_id(issue: int, date: str, project: str, root_cause: str, details: str) -> str:
+def _event_id(
+    issue: int, date: str, project: str, root_cause: str, details: str
+) -> str:
     """Stable content-hash identifier for a failure record (M4).
 
     SHA-1 of ``issue|date|project|root_cause|details`` (pipe-delimited, UTF-8).
@@ -78,7 +79,13 @@ def ensure_event_id(record: dict) -> dict:
 
 
 def _state_path(project_dir: Path) -> Path:
-    return project_dir / ".agents" / "outputs" / "claude_checkpoints" / "PERSISTENT_STATE.yaml"
+    return (
+        project_dir
+        / ".agents"
+        / "outputs"
+        / "claude_checkpoints"
+        / "PERSISTENT_STATE.yaml"
+    )
 
 
 def load_state(project_dir: Path) -> dict:
@@ -106,8 +113,14 @@ def _write_state(project_dir: Path, data: dict) -> None:
         yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
 
 
-def update_phase(project_dir: Path, issue: int, branch: str, phase: str, action: str,
-                  worktree_path: str | None = None) -> None:
+def update_phase(
+    project_dir: Path,
+    issue: int,
+    branch: str,
+    phase: str,
+    action: str,
+    worktree_path: str | None = None,
+) -> None:
     """Update active_work with current phase. Tracks completed phases for --resume.
 
     Args:
@@ -197,7 +210,9 @@ def update_from_extracted(project_dir: Path, extracted: dict) -> None:
     if extracted.get("last_phase"):
         data["active_work"]["phase"] = extracted["last_phase"]
     if extracted.get("artifacts_created"):
-        data["active_work"]["last_action"] = f"Created {extracted['artifacts_created'][-1]}"
+        data["active_work"]["last_action"] = (
+            f"Created {extracted['artifacts_created'][-1]}"
+        )
 
     if "meta" not in data:
         data["meta"] = {}
@@ -225,6 +240,7 @@ def update_from_extracted(project_dir: Path, extracted: dict) -> None:
 # read-only filesystem, etc.) we log a warning to ~/.claude/hooks.log and
 # return None. Losing one metric line is acceptable; failing a successful
 # orchestrate run because we couldn't write a metric is not.
+
 
 def _memory_dir(project_dir: Path) -> Path:
     return project_dir / ".claude" / "memory"
@@ -267,6 +283,7 @@ def record_metrics(
     tier_corrected_to: str | None = None,
     guards_fired: list[str] | None = None,
     codex_overturned: dict | None = None,
+    recall: dict | None = None,
 ) -> None:
     """Append a single record to ``.claude/memory/metrics.jsonl``.
 
@@ -314,6 +331,14 @@ def record_metrics(
             the PROVE verdict. Both ``state`` and ``category`` must
             pass validation; the whole dict is dropped (with a WARNING)
             if either is invalid. DORMANT — schema only; no producer yet.
+        recall: Optional dict written by the orchestrator sidecar
+            (issue #456) with shape
+            ``{"fired": bool, "n": int, "facts": list[str],
+            "flag": "on"|"off"}``.
+            ``flag`` must be in ``_VALID_RECALL_FLAGS``; ``fired`` must
+            be bool; ``facts`` must be list. On any validation failure
+            the whole dict is omitted (WARNING logged, no raise).
+            Included in the record only when supplied.
 
     Returns: None. Errors are logged to ``~/.claude/hooks.log``; the
     function never raises into the orchestrator.
@@ -347,9 +372,7 @@ def record_metrics(
         valid = [g for g in guards_fired if g in _VALID_GUARDS]
         dropped = set(guards_fired) - set(valid)
         if dropped:
-            logging.warning(
-                "record_metrics: dropped unknown guards %r", dropped
-            )
+            logging.warning("record_metrics: dropped unknown guards %r", dropped)
         if valid:
             record["guards_fired"] = valid
 
@@ -358,16 +381,47 @@ def record_metrics(
         _cat = codex_overturned.get("category", "")
         if _state not in _VALID_CODEX_STATES:
             logging.warning(
-                "record_metrics: dropped codex_overturned with invalid "
-                "state %r", _state
+                "record_metrics: dropped codex_overturned with invalid state %r", _state
             )
         elif _cat not in _VALID_CODEX_CATEGORIES:
             logging.warning(
-                "record_metrics: dropped codex_overturned with invalid "
-                "category %r", _cat
+                "record_metrics: dropped codex_overturned with invalid category %r",
+                _cat,
             )
         else:
             record["codex_overturned"] = dict(codex_overturned)
+
+    if recall is not None:
+        if not isinstance(recall, dict):
+            logging.warning("record_metrics: dropped non-dict recall %r", recall)
+        else:
+            _flag = recall.get("flag", "")
+            _fired = recall.get("fired")
+            _facts = recall.get("facts")
+            _n = recall.get("n")
+            if _flag not in _VALID_RECALL_FLAGS:
+                logging.warning(
+                    "record_metrics: dropped recall with invalid flag %r", _flag
+                )
+            elif not isinstance(_fired, bool):
+                logging.warning(
+                    "record_metrics: dropped recall with non-bool fired %r", _fired
+                )
+            elif not isinstance(_facts, list):
+                logging.warning(
+                    "record_metrics: dropped recall with non-list facts %r", _facts
+                )
+            else:
+                try:
+                    _n_val = max(0, int(_n)) if _n is not None else 0
+                except (TypeError, ValueError):
+                    _n_val = 0
+                record["recall"] = {
+                    "fired": _fired,
+                    "n": _n_val,
+                    "facts": [str(f) for f in _facts],
+                    "flag": _flag,
+                }
 
     target = _memory_dir(project_dir) / "metrics.jsonl"
     try:
@@ -477,12 +531,12 @@ def flip_to_correction(
     target = _memory_dir(project_dir) / "metrics.jsonl"
     try:
         if not target.exists():
-            logging.warning(
-                f"flip_to_correction: metrics.jsonl not found at {target}"
-            )
+            logging.warning(f"flip_to_correction: metrics.jsonl not found at {target}")
             return False
 
-        lines = [ln for ln in target.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        lines = [
+            ln for ln in target.read_text(encoding="utf-8").splitlines() if ln.strip()
+        ]
         last_record: dict | None = None
         for line in lines:
             try:
@@ -610,13 +664,25 @@ _VALID_AC_STATUSES = frozenset({"implemented", "partial", "missing", "deferred",
 # "deferred to a follow-up" from becoming an APPROVE escape hatch.
 _DEFERRED_REF_RE = re.compile(r"#\d+|GH-\d+", re.IGNORECASE)
 
-_VALID_GUARDS = frozenset({
-    "VERIFICATION_GAP", "ENUM_VALUE", "COMPONENT_API",
-})
+_VALID_GUARDS = frozenset(
+    {
+        "VERIFICATION_GAP",
+        "ENUM_VALUE",
+        "COMPONENT_API",
+    }
+)
 _VALID_CODEX_STATES = frozenset({"not_run", "confirmed", "overturned"})
-_VALID_CODEX_CATEGORIES = frozenset({
-    "auth", "migration", "enum_contract", "cross_module", "secrets",
-})
+_VALID_CODEX_CATEGORIES = frozenset(
+    {
+        "auth",
+        "migration",
+        "enum_contract",
+        "cross_module",
+        "secrets",
+    }
+)
+_VALID_RECALL_KEYS = frozenset({"fired", "n", "facts", "flag"})
+_VALID_RECALL_FLAGS = frozenset({"on", "off"})
 
 
 def _ac_label(entry: dict, idx: int) -> str:
@@ -674,7 +740,9 @@ def count_acceptance_bullets(issue_body: str) -> int:
     return count
 
 
-def validate_ac_audit(ac_audit: list | None, expected_ac_count: int | None = None) -> dict:
+def validate_ac_audit(
+    ac_audit: list | None, expected_ac_count: int | None = None
+) -> dict:
     """Validate a PROVE ``ac_audit`` array against the AC-FORBIDS-APPROVE rule.
 
     Mirrors the Codex-side rule from issue #1609: a PROVE verdict of PASS
@@ -712,11 +780,13 @@ def validate_ac_audit(ac_audit: list | None, expected_ac_count: int | None = Non
         return {
             "valid": False,
             "downgrade_to": "FAIL",
-            "missing": [{
-                "ac": "(no ac_audit array)",
-                "status": "missing",
-                "reason": "PROVE artifact has no ac_audit entries; cannot verify AC coverage",
-            }],
+            "missing": [
+                {
+                    "ac": "(no ac_audit array)",
+                    "status": "missing",
+                    "reason": "PROVE artifact has no ac_audit entries; cannot verify AC coverage",
+                }
+            ],
         }
 
     valid = True
@@ -725,48 +795,58 @@ def validate_ac_audit(ac_audit: list | None, expected_ac_count: int | None = Non
     # uncovered slots so the verdict downgrades.
     if isinstance(expected_ac_count, int) and expected_ac_count > len(ac_audit):
         for slot in range(len(ac_audit), expected_ac_count):
-            missing.append({
-                "ac": f"AC#{slot + 1}",
-                "status": "missing",
-                "reason": (
-                    f"issue declares {expected_ac_count} AC bullets but "
-                    f"ac_audit has only {len(ac_audit)} entries; "
-                    f"AC #{slot + 1} omitted"
-                ),
-            })
+            missing.append(
+                {
+                    "ac": f"AC#{slot + 1}",
+                    "status": "missing",
+                    "reason": (
+                        f"issue declares {expected_ac_count} AC bullets but "
+                        f"ac_audit has only {len(ac_audit)} entries; "
+                        f"AC #{slot + 1} omitted"
+                    ),
+                }
+            )
 
     for idx, entry in enumerate(ac_audit):
         if not isinstance(entry, dict):
             valid = False
-            missing.append({
-                "ac": _ac_label({}, idx),
-                "status": "invalid",
-                "reason": f"ac_audit[{idx}] is not an object",
-            })
+            missing.append(
+                {
+                    "ac": _ac_label({}, idx),
+                    "status": "invalid",
+                    "reason": f"ac_audit[{idx}] is not an object",
+                }
+            )
             continue
         status = entry.get("status")
         if status not in _VALID_AC_STATUSES:
             valid = False
-            missing.append({
-                "ac": _ac_label(entry, idx),
-                "status": str(status),
-                "reason": f"unknown status {status!r}; expected one of {sorted(_VALID_AC_STATUSES)}",
-            })
+            missing.append(
+                {
+                    "ac": _ac_label(entry, idx),
+                    "status": str(status),
+                    "reason": f"unknown status {status!r}; expected one of {sorted(_VALID_AC_STATUSES)}",
+                }
+            )
             continue
         if status in ("missing", "partial"):
-            missing.append({
-                "ac": _ac_label(entry, idx),
-                "status": status,
-                "reason": f"AC #{idx + 1} marked {status}",
-            })
+            missing.append(
+                {
+                    "ac": _ac_label(entry, idx),
+                    "status": status,
+                    "reason": f"AC #{idx + 1} marked {status}",
+                }
+            )
         elif status == "deferred":
             evidence = entry.get("evidence")
             if not isinstance(evidence, str) or not _DEFERRED_REF_RE.search(evidence):
-                missing.append({
-                    "ac": _ac_label(entry, idx),
-                    "status": "missing",
-                    "reason": "deferred without follow-up issue # — treated as missing",
-                })
+                missing.append(
+                    {
+                        "ac": _ac_label(entry, idx),
+                        "status": "missing",
+                        "reason": "deferred without follow-up issue # — treated as missing",
+                    }
+                )
         # implemented + n/a are clean; nothing to record.
 
     downgrade = "FAIL" if missing else None
