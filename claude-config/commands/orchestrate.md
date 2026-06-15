@@ -347,12 +347,15 @@ _RECALL_FLAG="${CODING_MEMORY_RECALL:-on}"
 if [ "$_RECALL_FLAG" = "off" ]; then
   # Recall suppressed. Set block empty, write sidecar immediately, skip query.
   CODING_MEMORY_BLOCK=""
-  python3 - <<'SIDECAR_PY'
-import json
+  # Pass issue/date via ENV (the heredoc is single-quoted so $VARS would NOT
+  # expand inside it — int("$ISSUE") would raise and the sidecar never write).
+  RECALL_ISSUE="$ISSUE" RECALL_DATE="$MMDDYY" python3 - <<'SIDECAR_PY'
+import json, os
 from pathlib import Path
+_issue, _date = os.environ["RECALL_ISSUE"], os.environ["RECALL_DATE"]
 _sidecar = {
-    "issue": int("$ISSUE"),
-    "date": "$MMDDYY",
+    "issue": int(_issue),
+    "date": _date,
     "fired": False,
     "n": 0,
     "facts": [],
@@ -360,7 +363,7 @@ _sidecar = {
 }
 try:
     Path(".agents/outputs").mkdir(parents=True, exist_ok=True)
-    Path(f".agents/outputs/recall-$ISSUE-$MMDDYY.json").write_text(
+    Path(f".agents/outputs/recall-{_issue}-{_date}.json").write_text(
         json.dumps(_sidecar), encoding="utf-8"
     )
 except Exception:
@@ -405,10 +408,15 @@ when the `coding-memory query` command exits 0 and produces output; set it to
 `fired`, not `flag`). The sidecar write is fail-open: if it fails, continue
 without it — Step 4 handles the absent-file case.
 
-```python
-import json
+Run via a single-quoted heredoc with issue/date passed through the ENV (so the
+`$VARS` don't need shell expansion inside the heredoc; `{CODING_MEMORY_BLOCK}`
+is template-substituted by the orchestrator before the command runs):
+
+```bash
+RECALL_ISSUE="$ISSUE" RECALL_DATE="$MMDDYY" python3 - <<'SIDECAR_PY'
+import json, os
 from pathlib import Path
-# Parse the --for-prompt output to extract fired/n/facts.
+_issue, _date = os.environ["RECALL_ISSUE"], os.environ["RECALL_DATE"]
 # {CODING_MEMORY_BLOCK} was captured above from coding-memory query --for-prompt.
 _recall_block = """{CODING_MEMORY_BLOCK}"""
 _facts = [
@@ -416,22 +424,22 @@ _facts = [
     for ln in _recall_block.splitlines()
     if ln.strip().startswith("-")
 ]
-_fired = bool(_facts)
 _sidecar = {
-    "issue": int("$ISSUE"),
-    "date": "$MMDDYY",
-    "fired": _fired,
+    "issue": int(_issue),
+    "date": _date,
+    "fired": bool(_facts),
     "n": len(_facts),
     "facts": _facts,
-    "flag": "on",  # env flag was on; RECALL_CMD_OK affects fired, not flag
+    "flag": "on",  # env flag was on; command success affects fired, not flag
 }
 try:
     Path(".agents/outputs").mkdir(parents=True, exist_ok=True)
-    Path(f".agents/outputs/recall-$ISSUE-$MMDDYY.json").write_text(
+    Path(f".agents/outputs/recall-{_issue}-{_date}.json").write_text(
         json.dumps(_sidecar), encoding="utf-8"
     )
 except Exception:
     pass  # fail-open; Step 4 handles absent sidecar
+SIDECAR_PY
 ```
 
 ### Step 3: Spawn Agents (Task Tool)
