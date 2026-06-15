@@ -61,6 +61,7 @@ _CFG_KEYS = (
     "CODING_MEMORY_SSH",
     "FASTEMBED_CACHE",
     "CODING_MEMORY_REMOTE_BIN",
+    "CODING_MEMORY_EMBED_URL",
 )
 
 
@@ -85,6 +86,11 @@ def load_config() -> dict:
         if os.environ.get(k):
             cfg[k] = os.environ[k]
     cfg.setdefault("CODING_MEMORY_REMOTE_BIN", "~/agents/bin/coding-memory")
+    # bridge file-configured embedder settings into the process env — the embedder
+    # reads these from os.environ (so the CLI uses the warm service when set).
+    for k in ("CODING_MEMORY_EMBED_URL", "FASTEMBED_CACHE"):
+        if cfg.get(k) and not os.environ.get(k):
+            os.environ[k] = cfg[k]
     return cfg
 
 

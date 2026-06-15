@@ -30,3 +30,6 @@ extend-select = ["E722", "BLE"]
 "claude-config/statusline.py" = ["BLE001"]
 "obsidian-agent/**" = ["BLE001"]
 "code-review/**" = ["BLE001"]
+# The warm embed service is a long-running localhost daemon on jns — a broad
+# catch in its request handler keeps one bad request from killing the service.
+"lib/coding_memory/embed_service.py" = ["BLE001"]

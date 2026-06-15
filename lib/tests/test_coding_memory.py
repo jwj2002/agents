@@ -104,3 +104,18 @@ def test_residency_rejects_path_outside_namespace_root(tmp_path):
 def test_residency_defaults_pass():
     out = C._sources_from_args(None)
     assert set(out) == {"agents", "buddy"}
+
+
+def test_embed_service_disabled_returns_none(monkeypatch):
+    from coding_memory import embedder as E
+
+    monkeypatch.delenv("CODING_MEMORY_EMBED_URL", raising=False)
+    assert E._try_service(["x"], "doc") is None  # no URL -> caller falls back to local
+
+
+def test_embed_service_unreachable_returns_none(monkeypatch):
+    from coding_memory import embedder as E
+
+    # pointed at a dead port -> _try_service swallows the error and returns None
+    monkeypatch.setenv("CODING_MEMORY_EMBED_URL", "http://127.0.0.1:1")
+    assert E._try_service(["x"], "doc") is None
