@@ -19,7 +19,6 @@ import sys
 from . import (
     ALLOWED_NAMESPACES,
     DEFAULT_SOURCES,
-    PERSONAL_ROOT,
     is_remote,
     load_config,
     valid_remote_bin,
@@ -34,18 +33,20 @@ def _sources_from_args(pairs):
         if not path:
             raise SystemExit(f"--source expects ns=path, got: {item}")
         out[ns.strip()] = path.strip()
-    # residency guard: personal namespaces + personal paths only (work uses a
-    # separate, never-bridged store)
+    # residency guard: a source must be a KNOWN personal namespace AND resolve under
+    # THAT namespace's canonical root — not merely under the shared ~/.claude/projects
+    # parent, which also holds work-project memory on the work laptop.
     for ns, path in out.items():
-        if ns not in ALLOWED_NAMESPACES:
+        root = DEFAULT_SOURCES.get(ns)
+        if root is None:
             raise SystemExit(
-                f"refusing source ns '{ns}': not a personal namespace "
-                f"{sorted(ALLOWED_NAMESPACES)}"
+                f"refusing source ns '{ns}': not a known personal source {sorted(DEFAULT_SOURCES)}"
             )
+        root_real = os.path.realpath(os.path.expanduser(root))
         real = os.path.realpath(os.path.expanduser(path))
-        if real != PERSONAL_ROOT and not real.startswith(PERSONAL_ROOT + os.sep):
+        if real != root_real and not real.startswith(root_real + os.sep):
             raise SystemExit(
-                f"refusing source path '{path}': must resolve under {PERSONAL_ROOT}"
+                f"refusing source path '{path}' for ns '{ns}': must resolve under {root_real}"
             )
     return out
 

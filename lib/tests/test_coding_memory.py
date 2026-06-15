@@ -5,8 +5,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # lib/ on path
 
+from coding_memory import cli as C  # noqa: E402
 from coding_memory import parse as P  # noqa: E402
 
 
@@ -85,3 +88,19 @@ def test_build_records_empty_dir_not_prunable(tmp_path):
     out = P.build_records({"empty": str(d)})
     assert out["records"] == []
     assert "empty" not in out["prune_namespaces"]  # empty must not wipe existing rows
+
+
+def test_residency_rejects_unknown_namespace():
+    with pytest.raises(SystemExit):
+        C._sources_from_args(["work=~/.claude/projects/some-work-repo/memory"])
+
+
+def test_residency_rejects_path_outside_namespace_root(tmp_path):
+    # personal namespace label but a work/other path must be refused (the bridge bug)
+    with pytest.raises(SystemExit):
+        C._sources_from_args([f"agents={tmp_path}"])
+
+
+def test_residency_defaults_pass():
+    out = C._sources_from_args(None)
+    assert set(out) == {"agents", "buddy"}

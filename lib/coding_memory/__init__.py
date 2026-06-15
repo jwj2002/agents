@@ -41,9 +41,11 @@ SKIP_DIRS = {"archive"}
 
 # Residency allowlist: only these namespaces may be written to the personal store.
 # The server (jns) enforces this so a misconfigured client cannot land work data.
+# (Includes future namespaces global/craft sourced from the agents git repo.)
 ALLOWED_NAMESPACES = frozenset({"agents", "buddy", "global", "craft"})
-# Client-side guard: ingest --source paths must resolve under this personal root.
-PERSONAL_ROOT = os.path.realpath(os.path.expanduser("~/.claude/projects"))
+# Client-side guard: a filesystem --source must be a KNOWN personal namespace AND
+# resolve under THAT namespace's canonical root in DEFAULT_SOURCES. The shared
+# ~/.claude/projects parent is NOT a boundary (it also holds work-project memory).
 
 _SAFE_REMOTE_BIN = re.compile(r"^[\w/.~ -]+$")
 
