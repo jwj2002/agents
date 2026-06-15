@@ -670,7 +670,7 @@ _DEFERRED_REF_RE = re.compile(r"#\d+|GH-\d+", re.IGNORECASE)
 _EVIDENCE_TOKEN_RE = re.compile(
     r"[\w./\-]+\.\w+:\d+"          # file:line or file:line-range
     r"|[\w./\-]+\.py::[\w\[\]_-]+" # pytest node id (path.py::test_name)
-    r"|(?:test:|command:|smoke:)",  # explicit verifier prefixes
+    r"|(?:test:|command:|smoke:)\s*\S",  # verifier prefix MUST have non-whitespace payload
 )
 
 # Issue #460 — runtime_smoke (Level 5) status set. Compared case-insensitively

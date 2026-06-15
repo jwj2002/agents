@@ -557,3 +557,48 @@ def test_implemented_missing_evidence_key_downgrades_to_fail():
     )
     assert audit["downgrade_to"] == "FAIL"
     assert "verifier token" in audit["missing"][0]["reason"]
+
+
+# ── Codex review fix: require payload after test:/command:/smoke: (#461) ──────
+
+
+def test_implemented_command_prefix_no_payload_downgrades_to_fail():
+    """'command:' with no payload is not a valid token — bypass closed."""
+    audit = validate_ac_audit(
+        [{"ac": "AC 1", "status": "implemented", "evidence": "command:"}]
+    )
+    assert audit["downgrade_to"] == "FAIL"
+    assert "verifier token" in audit["missing"][0]["reason"]
+
+
+def test_implemented_smoke_prefix_whitespace_only_downgrades_to_fail():
+    """'smoke:   ' (whitespace only after colon) is not a valid token."""
+    audit = validate_ac_audit(
+        [{"ac": "AC 1", "status": "implemented", "evidence": "smoke:   "}]
+    )
+    assert audit["downgrade_to"] == "FAIL"
+    assert "verifier token" in audit["missing"][0]["reason"]
+
+
+def test_implemented_prose_with_bare_command_prefix_downgrades_to_fail():
+    """'implemented; command:' has no payload after the prefix — FAIL."""
+    audit = validate_ac_audit(
+        [{"ac": "AC 1", "status": "implemented", "evidence": "implemented; command:"}]
+    )
+    assert audit["downgrade_to"] == "FAIL"
+    assert "verifier token" in audit["missing"][0]["reason"]
+
+
+def test_implemented_command_prefix_with_real_payload_passes():
+    """Regression guard: 'command: pytest -q' still passes (real payload)."""
+    audit = validate_ac_audit(
+        [
+            {
+                "ac": "AC 1",
+                "status": "implemented",
+                "evidence": "command: pytest -q",
+            }
+        ]
+    )
+    assert audit["downgrade_to"] is None
+    assert audit["missing"] == []
