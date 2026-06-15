@@ -228,6 +228,16 @@ Assert: no ImportError, no AttributeError on startup symbols.
 ```
 Assert: page loads (HTTP 200); zero console errors of severity ERROR.
 
+**Determining obligations (helper):** PROVE may run
+`python3 ~/agents/claude-config/scripts/runtime_smoke_gate.py --repo <repo> --diff-range origin/main...HEAD`
+to map the diff to smoke obligations (`backend_http`/`cli`/`worker`/`frontend`)
+and discover a project-local `smoke.sh`. Exit 0 = obligation satisfied
+(`smoke.sh` passed) or n/a → record `runtime_smoke.status: PASS` or `n/a`.
+Exit 1 = obligation present but no `smoke.sh` → run the emitted recipe ad-hoc and
+record `status: PASS` with the command, or mark the AC partial. Exit 3 =
+`smoke.sh` ran and FAILED → record `status: FAIL`. The helper does NOT block
+merges — `prove_gate.py` (#460) enforces the recorded `runtime_smoke` block.
+
 **Escape hatch** — use ONLY for pure refactors, docs, config, or rename changes
 where no entrypoint is exercised. Any change to a route handler, CLI command,
 worker startup, or rendered page requires a smoke run. Record in the PROVE
