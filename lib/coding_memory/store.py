@@ -74,6 +74,14 @@ def claim_unowned(conn, origin: str, namespaces) -> int:
     """One-time migration: assign legacy rows (origin IS NULL) in the ingested
     namespaces to the ingesting machine, so they participate in per-origin identity."""
     with conn.cursor() as c:
+        # First drop any legacy NULL row that already has a claimed counterpart for
+        # this origin — otherwise the UPDATE would violate (origin,namespace,source_path).
+        c.execute(
+            "DELETE FROM memory_fact m WHERE m.origin IS NULL AND m.namespace = ANY(%s) "
+            "AND EXISTS (SELECT 1 FROM memory_fact o "
+            "WHERE o.origin=%s AND o.namespace=m.namespace AND o.source_path=m.source_path)",
+            (list(namespaces), origin),
+        )
         c.execute(
             "UPDATE memory_fact SET origin=%s WHERE origin IS NULL AND namespace = ANY(%s)",
             (origin, list(namespaces)),
@@ -131,7 +139,7 @@ def stats(conn) -> list[tuple]:
         return c.fetchall()
 
 
-_COLS = "namespace,name,type,summary,source_path"
+_COLS = "origin,namespace,name,type,summary,source_path"
 
 
 def _rows_to_dicts(rows):
@@ -139,12 +147,13 @@ def _rows_to_dicts(rows):
     for r in rows:
         out.append(
             {
-                "namespace": r[0],
-                "name": r[1],
-                "type": r[2],
-                "summary": r[3],
-                "source_path": r[4],
-                "score": float(r[5]),
+                "origin": r[0],
+                "namespace": r[1],
+                "name": r[2],
+                "type": r[3],
+                "summary": r[4],
+                "source_path": r[5],
+                "score": float(r[6]),
             }
         )
     return out
@@ -193,7 +202,7 @@ def search(conn, qvec, text=None, k=8, namespaces=None, mode="hybrid"):
         _fts(conn, text, over, namespaces),
     ):
         for rank, r in enumerate(rows):
-            key = (r["namespace"], r["source_path"])
+            key = (r["origin"], r["namespace"], r["source_path"])  # per-origin distinct
             slot = fused.setdefault(key, {"rec": r, "rrf": 0.0})
             slot["rrf"] += 1.0 / (60 + rank)
     merged = sorted(fused.values(), key=lambda s: s["rrf"], reverse=True)[:k]

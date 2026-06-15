@@ -7,20 +7,24 @@ set -uo pipefail
 REPO="$HOME/agents"
 LOG="$HOME/.claude/logs/coding-memory-maint.log"
 LOCK="$HOME/.claude/.coding-memory-maint.lock"   # mkdir lock: portable single-flight
+TOKEN="$$.${RANDOM:-0}.$(date +%s)"              # this run's ownership token
 mkdir -p "$(dirname "$LOG")"
 ts() { date "+%Y-%m-%dT%H:%M:%S%z"; }
 
-# single-flight via atomic mkdir; steal a stale lock (>60m) so a hung run can't wedge
-# future runs forever. flock/timeout are unavailable on stock macOS, so avoid them.
+# Acquire: atomic mkdir; steal only a STALE lock (>60m) so a hung run can't wedge
+# future runs forever. flock/timeout aren't on stock macOS, so we avoid them.
 if ! mkdir "$LOCK" 2>/dev/null; then
   if [ -n "$(find "$LOCK" -prune -mmin +60 2>/dev/null)" ]; then
-    rmdir "$LOCK" 2>/dev/null || rm -rf "$LOCK" 2>/dev/null
+    rm -rf "$LOCK" 2>/dev/null
     mkdir "$LOCK" 2>/dev/null || { echo "[$(ts)] lock contended; skip" >>"$LOG"; exit 0; }
   else
     echo "[$(ts)] another maint run holds the lock; skip" >>"$LOG"; exit 0
   fi
 fi
-trap 'rmdir "$LOCK" 2>/dev/null || rm -rf "$LOCK" 2>/dev/null' EXIT
+printf '%s' "$TOKEN" >"$LOCK/owner"
+# Ownership-safe release: only remove the lock if WE still own it (a run that stole
+# our stale lock writes its own token, so our trap won't delete its lock).
+trap '[ "$(cat "$LOCK/owner" 2>/dev/null)" = "$TOKEN" ] && rm -rf "$LOCK" 2>/dev/null' EXIT
 
 echo "[$(ts)] maint start" >>"$LOG"
 "$REPO/bin/coding-memory" ingest >>"$LOG" 2>&1; ing=$?
