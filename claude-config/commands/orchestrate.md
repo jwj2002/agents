@@ -332,9 +332,51 @@ before?" check — it surfaces the one prior lesson that prevents a re-do (e.g. 
 gotcha for the subsystem you're about to touch), drawn from all your machines +
 cross-project `global` craft lessons.
 
+**L3 on/off flag (`CODING_MEMORY_RECALL`, default `on`):** Set
+`CODING_MEMORY_RECALL=off` in the environment to suppress the query entirely for
+a workflow run. Alternating `on`/`off` across runs creates a causal A/B
+comparison: the sidecar `flag` field records the env INTENT (`"on"` or `"off"`),
+not command success, so the weekly report can split first-pass rates cleanly by
+cohort. The ONLY call site is here — no other path can inject coding-memory when
+`off`.
+
 ```bash
-~/agents/bin/coding-memory query "<issue title + key nouns + changed paths>" -k 3 --for-prompt
+# L3: read env flag once. Default on (behavior-preserving).
+_RECALL_FLAG="${CODING_MEMORY_RECALL:-on}"
+
+if [ "$_RECALL_FLAG" = "off" ]; then
+  # Recall suppressed. Set block empty, write sidecar immediately, skip query.
+  CODING_MEMORY_BLOCK=""
+  # Pass issue/date via ENV (the heredoc is single-quoted so $VARS would NOT
+  # expand inside it — int("$ISSUE") would raise and the sidecar never write).
+  RECALL_ISSUE="$ISSUE" RECALL_DATE="$MMDDYY" python3 - <<'SIDECAR_PY'
+import json, os
+from pathlib import Path
+_issue, _date = os.environ["RECALL_ISSUE"], os.environ["RECALL_DATE"]
+_sidecar = {
+    "issue": int(_issue),
+    "date": _date,
+    "fired": False,
+    "n": 0,
+    "facts": [],
+    "flag": "off",
+}
+try:
+    Path(".agents/outputs").mkdir(parents=True, exist_ok=True)
+    Path(f".agents/outputs/recall-{_issue}-{_date}.json").write_text(
+        json.dumps(_sidecar), encoding="utf-8"
+    )
+except Exception:
+    pass  # fail-open; Step 4 handles absent sidecar
+SIDECAR_PY
+
+else
+  # Recall enabled. Run query and write sidecar with flag:"on".
+  ~/agents/bin/coding-memory query "<issue title + key nouns + changed paths>" -k 3 --for-prompt
+fi
 ```
+
+When `_RECALL_FLAG=on`:
 
 - **Relevance-gated (NOT a fixed top-3):** `--for-prompt` keeps only facts whose
   cosine similarity clears the calibrated threshold (`RECALL_MIN_SCORE`, ~0.62).
@@ -356,19 +398,25 @@ cross-project `global` craft lessons.
   (then Read the source file of any hit for the full body). Prefer this precise
   pull over relying on the push.
 
-**Persist recall summary for outcome recording**: After capturing
-`{CODING_MEMORY_BLOCK}`, write a JSON sidecar so Step 4 can
-correlate the recall result with the PROVE outcome without threading
-it through Task() prompts (the orchestrator is stateless between calls).
-Set `RECALL_CMD_OK=1` when the `coding-memory query` command exits 0 and
-produces output; set it to `0` when the command errors, times out, or
-returns nothing. The sidecar write is fail-open: if it fails, continue
+**Persist recall summary for outcome recording** (when `_RECALL_FLAG=on`): After
+capturing `{CODING_MEMORY_BLOCK}`, write a JSON sidecar so Step 4 can correlate
+the recall result with the PROVE outcome without threading it through Task()
+prompts (the orchestrator is stateless between calls). Set `RECALL_CMD_OK=1`
+when the `coding-memory query` command exits 0 and produces output; set it to
+`0` when the command errors, times out, or returns nothing. The sidecar
+`flag` field is ALWAYS `"on"` here (the env flag was `on`; command errors affect
+`fired`, not `flag`). The sidecar write is fail-open: if it fails, continue
 without it — Step 4 handles the absent-file case.
 
-```python
-import json
+Run via a single-quoted heredoc with issue/date passed through the ENV (so the
+`$VARS` don't need shell expansion inside the heredoc; `{CODING_MEMORY_BLOCK}`
+is template-substituted by the orchestrator before the command runs):
+
+```bash
+RECALL_ISSUE="$ISSUE" RECALL_DATE="$MMDDYY" python3 - <<'SIDECAR_PY'
+import json, os
 from pathlib import Path
-# Parse the --for-prompt output to extract fired/n/facts.
+_issue, _date = os.environ["RECALL_ISSUE"], os.environ["RECALL_DATE"]
 # {CODING_MEMORY_BLOCK} was captured above from coding-memory query --for-prompt.
 _recall_block = """{CODING_MEMORY_BLOCK}"""
 _facts = [
@@ -376,22 +424,22 @@ _facts = [
     for ln in _recall_block.splitlines()
     if ln.strip().startswith("-")
 ]
-_fired = bool(_facts)
 _sidecar = {
-    "issue": int("$ISSUE"),
-    "date": "$MMDDYY",
-    "fired": _fired,
+    "issue": int(_issue),
+    "date": _date,
+    "fired": bool(_facts),
     "n": len(_facts),
     "facts": _facts,
-    "flag": "on" if "$RECALL_CMD_OK" == "1" else "off",
+    "flag": "on",  # env flag was on; command success affects fired, not flag
 }
 try:
     Path(".agents/outputs").mkdir(parents=True, exist_ok=True)
-    Path(f".agents/outputs/recall-$ISSUE-$MMDDYY.json").write_text(
+    Path(f".agents/outputs/recall-{_issue}-{_date}.json").write_text(
         json.dumps(_sidecar), encoding="utf-8"
     )
 except Exception:
     pass  # fail-open; Step 4 handles absent sidecar
+SIDECAR_PY
 ```
 
 ### Step 3: Spawn Agents (Task Tool)
