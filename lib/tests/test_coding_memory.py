@@ -6,7 +6,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -185,54 +185,63 @@ def test_embed_service_non_loopback_refused(monkeypatch):
 # ---- recall telemetry unit tests (#455) ----
 
 
-def test_log_recall_inserts_and_commits():
-    """log_recall calls INSERT and commits — happy path via mock conn."""
-    conn = MagicMock()
-    cursor_ctx = MagicMock()
+def _make_autocommit_mock():
+    """Build a mock autocommit connection context + cursor for log_recall tests."""
     cursor_obj = MagicMock()
+    cursor_ctx = MagicMock()
     cursor_ctx.__enter__ = MagicMock(return_value=cursor_obj)
     cursor_ctx.__exit__ = MagicMock(return_value=False)
-    conn.cursor.return_value = cursor_ctx
 
-    S.log_recall(
-        conn,
-        origin="test-host",
-        kind="push",
-        mode="vector",
-        n_returned=5,
-        n_injected=3,
-        top_score=0.87,
-        facts=[{"ns": "agents", "name": "foo", "score": 0.87}],
-        latency_ms=42,
-    )
+    conn_obj = MagicMock()
+    conn_obj.cursor.return_value = cursor_ctx
+    conn_ctx = MagicMock()
+    conn_ctx.__enter__ = MagicMock(return_value=conn_obj)
+    conn_ctx.__exit__ = MagicMock(return_value=False)
+    return conn_ctx, conn_obj, cursor_obj
+
+
+def test_log_recall_inserts_and_commits():
+    """log_recall opens its own autocommit connection and INSERTs — happy path."""
+    conn_ctx, conn_obj, cursor_obj = _make_autocommit_mock()
+
+    with patch("psycopg.connect", return_value=conn_ctx) as mock_connect:
+        S.log_recall(
+            "postgresql://test/db",
+            origin="test-host",
+            kind="push",
+            mode="vector",
+            n_returned=5,
+            n_injected=3,
+            top_score=0.87,
+            facts=[{"ns": "agents", "name": "foo", "score": 0.87}],
+            latency_ms=42,
+        )
+        mock_connect.assert_called_once_with("postgresql://test/db", autocommit=True)
 
     assert cursor_obj.execute.called
     sql_arg = cursor_obj.execute.call_args[0][0]
     assert "INSERT INTO recall_event" in sql_arg
-    conn.commit.assert_called_once()
+    # no explicit commit — autocommit=True means there is none
+    conn_obj.commit.assert_not_called()
 
 
 def test_log_recall_truncates_facts_to_5():
     """log_recall stores at most 5 facts even when caller passes more."""
-    conn = MagicMock()
-    cursor_ctx = MagicMock()
-    cursor_obj = MagicMock()
-    cursor_ctx.__enter__ = MagicMock(return_value=cursor_obj)
-    cursor_ctx.__exit__ = MagicMock(return_value=False)
-    conn.cursor.return_value = cursor_ctx
+    conn_ctx, conn_obj, cursor_obj = _make_autocommit_mock()
 
     facts_8 = [{"ns": "a", "name": f"f{i}", "score": 0.9} for i in range(8)]
-    S.log_recall(
-        conn,
-        origin="test-host",
-        kind="pull",
-        mode="hybrid",
-        n_returned=8,
-        n_injected=8,
-        top_score=0.9,
-        facts=facts_8,
-        latency_ms=10,
-    )
+    with patch("psycopg.connect", return_value=conn_ctx):
+        S.log_recall(
+            "postgresql://test/db",
+            origin="test-host",
+            kind="pull",
+            mode="hybrid",
+            n_returned=8,
+            n_injected=8,
+            top_score=0.9,
+            facts=facts_8,
+            latency_ms=10,
+        )
 
     call_args = cursor_obj.execute.call_args[0]
     params = call_args[1]  # second positional arg is the params tuple
@@ -267,6 +276,35 @@ def test_recall_report_agg_returns_shape():
     assert len(result["top_facts"]) == 1
     assert result["top_facts"][0]["ns"] == "agents"
     assert result["top_facts"][0]["count"] == 4
+
+
+def test_recall_report_agg_uses_make_interval():
+    """recall_report_agg SQL must use make_interval(days => ...) not quoted INTERVAL.
+
+    Regression guard: a placeholder inside a quoted literal (INTERVAL '%(days)s days')
+    is fragile and non-portable. Binding via make_interval() is the correct form.
+    """
+    conn = MagicMock()
+    cursor_ctx = MagicMock()
+    cursor_obj = MagicMock()
+    cursor_ctx.__enter__ = MagicMock(return_value=cursor_obj)
+    cursor_ctx.__exit__ = MagicMock(return_value=False)
+    conn.cursor.return_value = cursor_ctx
+
+    cursor_obj.fetchone.return_value = (0, 0, 0, 0, 0, None)
+    cursor_obj.fetchall.return_value = []
+
+    S.recall_report_agg(conn, days=7)
+
+    # Both SQL calls (agg + facts) must use bound make_interval, not quoted literal
+    executed_sqls = [call[0][0] for call in cursor_obj.execute.call_args_list]
+    for sql in executed_sqls:
+        assert "make_interval(days =>" in sql, (
+            f"SQL must use make_interval(days => ...) for interval binding; got:\n{sql}"
+        )
+        assert "INTERVAL '" not in sql, (
+            f"SQL must not use quoted INTERVAL literal; got:\n{sql}"
+        )
 
 
 def test_format_recall_section_data_unavailable(monkeypatch):
