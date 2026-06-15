@@ -152,3 +152,38 @@ tail -f ~/Library/Logs/claude-learn/cost-report.log
 ls ~/.claude/cost-reports/                     # the local report archive
 python3 ~/agents/claude-config/scripts/cost_report_weekly.py   # run once on demand
 ```
+
+---
+
+## Coding-memory ingest (`com.coding-memory-ingest`)
+
+**Daily** (`StartInterval 86400`, `RunAtLoad` false). Keeps the personal
+coding-memory store on jns fresh without a manual `bin/coding-memory ingest`.
+Logic lives in
+[`../scripts/coding-memory-ingest.sh`](../scripts/coding-memory-ingest.sh) so it
+is editable without redeploying the plist.
+
+Each run executes `bin/coding-memory ingest` with the **default personal sources
+only** (`agents`, `buddy`) — no `--source` override, so strict residency holds
+(work memory uses a separate, never-bridged store). Embedding happens on jns; the
+laptop only parses + dispatches over SSH (key auth — no credentials in the plist).
+On error (e.g. jns unreachable) it logs and exits non-zero; launchd retries on the
+next interval — no tight loop.
+
+### Deploy / reload
+
+```bash
+p=com.coding-memory-ingest
+cp "claude-config/launchd/$p.plist" ~/Library/LaunchAgents/
+launchctl unload "$HOME/Library/LaunchAgents/$p.plist" 2>/dev/null || true
+launchctl load   "$HOME/Library/LaunchAgents/$p.plist"
+```
+
+### Observe
+
+```bash
+launchctl list | grep coding-memory-ingest
+tail -f ~/.claude/logs/coding-memory-ingest.log
+bash ~/agents/claude-config/scripts/coding-memory-ingest.sh   # run once on demand
+~/agents/bin/coding-memory stats                              # rows per namespace
+```
