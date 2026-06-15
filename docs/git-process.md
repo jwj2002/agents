@@ -192,10 +192,20 @@ Same-file work must serialize unless the user explicitly approves overlap.
 
 Each project defines its own commands, but agents must follow the same ladder:
 
-1. Static or formatting checks, if present.
-2. Unit tests for touched code, if present.
-3. Integration or smoke tests for touched workflows, if present.
-4. Manual verification when automation does not exist.
+1. Static or formatting checks (`ruff check`, `npm run lint`).
+2. Unit tests for touched code (`pytest -q`, `npm run build`).
+3. **Runtime smoke — mandatory for any change with a runnable surface (PROVE
+   Level 5).** Boot the changed entrypoint and confirm it starts and responds
+   without error. PROVE records the result as `runtime_smoke {status, command,
+   evidence}` in its artifact frontmatter; `prove_gate.py` fails closed
+   (exit 6 `GATE_SMOKE_VIOLATION`) when this field is absent or reports
+   failure. Escape hatch: `runtime_smoke: {status: n/a, evidence: "no runnable
+   surface"}`. See `claude-config/scripts/runtime_smoke_gate.py` for the
+   obligation-mapping helper and recipe guidance, and
+   `docs/orchestrate-verification-gap.md` for the gap analysis that motivated
+   this gate.
+4. Manual verification when automation does not exist and no runnable surface
+   is present.
 
 The PR must state exactly what ran and what failed or was skipped. "Not run" is
 acceptable only with a concrete reason.
@@ -208,7 +218,13 @@ An issue is not complete merely because files were added. Each issue must prove:
 - **Wired:** behavior is reachable from the installer, command, workflow, agent
   instruction, CI job, or user-facing entrypoint that should invoke it.
 - **Exercised:** at least one automated or manual test runs through that
-  entrypoint.
+  entrypoint. For runnable surfaces (backend HTTP, CLI, worker, frontend),
+  PROVE Level 5 runtime smoke is required and mechanically enforced: the
+  PROVE artifact must record a passing `runtime_smoke` block, or the
+  `prove_gate.py` merge gate blocks with `GATE_SMOKE_VIOLATION` (exit 6).
+  `agent-git readiness`/`ship` also require a fresh `--validation-log` (exists
+  + newer than HEAD + contains a command) for runnable changes. Docs and config
+  changes may satisfy this with prose evidence.
 - **Observed:** the PR includes command output summary, artifact, check result,
   or fixture evidence.
 - **Documented:** user or agent-facing docs explain operational behavior.

@@ -56,6 +56,14 @@ explanation and passes.
 |---|---|
 | No credentials in the diff | E15 via the evals runner (part of the command above) |
 
+## Runtime Smoke
+
+| Standard | Check |
+|---|---|
+| Any change with a runnable surface must record a passing runtime smoke | `python3 ~/agents/claude-config/scripts/runtime_smoke_gate.py --diff-range origin/main...HEAD` (advisory helper: maps changed files to obligations, runs `smoke.sh` if present; exits 0 = no obligation or passed, 1 = obligation but no `smoke.sh` found) |
+| PROVE Level 5 `runtime_smoke` block required in artifact frontmatter | `python3 ~/agents/claude-config/scripts/prove_gate.py --issue <N>` — exit 6 (`GATE_SMOKE_VIOLATION`) when `runtime_smoke` is absent, FAIL, or malformed on a PASS artifact |
+| Escape hatch for non-runnable surfaces | `runtime_smoke: {status: "n/a", evidence: "no runnable surface"}` — docs, config, and rename-only changes qualify |
+
 ## How the pipeline applies this
 
 - **PATCH** captures the coverage baseline before changes and records the
@@ -64,6 +72,12 @@ explanation and passes.
 - **PROVE** treats an unexplained coverage decrease, any lint failure on
   changed files, or a mechanical-eval finding as an `ac_audit`-level issue —
   which makes it FAIL-able via AC-FORBIDS-APPROVE and enforced at merge by
-  `prove_gate.py` (#360).
+  `prove_gate.py` (#360). For runnable surfaces, PROVE Level 5 runtime smoke
+  is mandatory; a PASS artifact without a valid `runtime_smoke` block triggers
+  `GATE_SMOKE_VIOLATION` (exit 6, fail-closed). See
+  `docs/orchestrate-verification-gap.md` for the full gap analysis (#458).
+- **agent-git readiness/ship** require a fresh `--validation-log` (file exists,
+  newer than HEAD, contains a command) for runnable changes; docs and config
+  changes accept prose evidence.
 - **/quick** applies the eval gate on risk triggers (quick.md §2.5); lint
   on touched areas is already mandatory there.
