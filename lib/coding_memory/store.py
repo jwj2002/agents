@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import math
+
+from . import EMBED_DIM
+
 _DDL = """
 CREATE TABLE IF NOT EXISTS memory_fact (
   id           BIGSERIAL PRIMARY KEY,
@@ -31,7 +35,12 @@ def connect(dsn: str):
 
 
 def _vlit(vec) -> str:
-    return "[" + ",".join(f"{x:.7g}" for x in vec) + "]"
+    vals = [float(x) for x in vec]
+    if len(vals) != EMBED_DIM:
+        raise ValueError(f"embedding dim {len(vals)} != {EMBED_DIM}")
+    if any(not math.isfinite(x) for x in vals):
+        raise ValueError("embedding contains non-finite values")
+    return "[" + ",".join(f"{x:.7g}" for x in vals) + "]"
 
 
 def ensure_schema(conn) -> None:

@@ -61,3 +61,27 @@ def test_embed_text_composition():
     rec = {"name": "N", "summary": "S", "body": "B"}
     assert P.embed_text(rec) == "N. S. B"
     assert P.embed_text({"name": "", "summary": None, "body": "B"}) == "B"
+
+
+def test_build_records_clean_dir_is_prune_safe(tmp_path):
+    d = tmp_path / "ns1"
+    d.mkdir()
+    (d / "a.md").write_text("---\nname: a\n---\nbody a\n")
+    (d / "MEMORY.md").write_text("index")  # skipped, not a fact
+    out = P.build_records({"ns1": str(d)})
+    assert len(out["records"]) == 1
+    assert out["prune_namespaces"] == ["ns1"]
+
+
+def test_build_records_missing_root_not_prunable(tmp_path):
+    out = P.build_records({"gone": str(tmp_path / "nope")})
+    assert out["records"] == []
+    assert out["prune_namespaces"] == []  # missing source must never trigger prune
+
+
+def test_build_records_empty_dir_not_prunable(tmp_path):
+    d = tmp_path / "empty"
+    d.mkdir()
+    out = P.build_records({"empty": str(d)})
+    assert out["records"] == []
+    assert "empty" not in out["prune_namespaces"]  # empty must not wipe existing rows

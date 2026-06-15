@@ -67,35 +67,49 @@ def parse_markdown(raw: str, fallback_name: str = "") -> dict:
     }
 
 
-def discover(sources: dict[str, str]):
-    """Yield (namespace, abs_path, raw_text) for each fact file under each source."""
+def _record(ns: str, path: str, raw: str) -> dict:
+    meta = parse_markdown(raw, fallback_name=Path(path).stem)
+    return {
+        "namespace": ns,
+        "source_path": path,
+        "content_hash": content_hash(raw),
+        **meta,
+    }
+
+
+def build_records(sources: dict[str, str]) -> dict:
+    """Parse all source files into upsertable records.
+
+    Returns ``{"records": [...], "prune_namespaces": [...]}``. A namespace is
+    prune-safe ONLY if its source root exists, every file read cleanly, and it has
+    >=1 record — so a missing / partially-readable / empty source can never trigger
+    a destructive prune of previously-ingested rows.
+    """
+    records: list[dict] = []
+    prune_ok: list[str] = []
     for ns, d in sources.items():
         base = Path(d).expanduser()
         if not base.is_dir():
-            continue
-        for p in sorted(base.rglob("*.md")):
-            if p.name in SKIP_NAMES or any(part in SKIP_DIRS for part in p.parts):
-                continue
+            continue  # missing root -> contribute nothing, never prune this ns
+        files = [
+            p
+            for p in sorted(base.rglob("*.md"))
+            if p.name not in SKIP_NAMES
+            and not any(part in SKIP_DIRS for part in p.parts)
+        ]
+        ns_records: list[dict] = []
+        errors = 0
+        for p in files:
             try:
-                yield ns, str(p), p.read_text(encoding="utf-8", errors="replace")
+                raw = p.read_text(encoding="utf-8", errors="replace")
             except OSError:
+                errors += 1
                 continue
-
-
-def build_records(sources: dict[str, str]) -> list[dict]:
-    """Parse all source files into upsertable records (no embedding yet)."""
-    recs: list[dict] = []
-    for ns, path, raw in discover(sources):
-        meta = parse_markdown(raw, fallback_name=Path(path).stem)
-        recs.append(
-            {
-                "namespace": ns,
-                "source_path": path,
-                "content_hash": content_hash(raw),
-                **meta,
-            }
-        )
-    return recs
+            ns_records.append(_record(ns, str(p), raw))
+        records.extend(ns_records)
+        if ns_records and errors == 0:
+            prune_ok.append(ns)
+    return {"records": records, "prune_namespaces": prune_ok}
 
 
 def embed_text(rec: dict) -> str:

@@ -11,31 +11,51 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import subprocess
 import sys
 
-from . import DEFAULT_SOURCES, is_remote, load_config
+from . import (
+    ALLOWED_NAMESPACES,
+    DEFAULT_SOURCES,
+    PERSONAL_ROOT,
+    is_remote,
+    load_config,
+    valid_remote_bin,
+)
 from . import parse as P
 
 
 def _sources_from_args(pairs):
-    if not pairs:
-        return dict(DEFAULT_SOURCES)
-    out = {}
-    for item in pairs:
+    out = dict(DEFAULT_SOURCES) if not pairs else {}
+    for item in pairs or []:
         ns, _, path = item.partition("=")
         if not path:
             raise SystemExit(f"--source expects ns=path, got: {item}")
         out[ns.strip()] = path.strip()
+    # residency guard: personal namespaces + personal paths only (work uses a
+    # separate, never-bridged store)
+    for ns, path in out.items():
+        if ns not in ALLOWED_NAMESPACES:
+            raise SystemExit(
+                f"refusing source ns '{ns}': not a personal namespace "
+                f"{sorted(ALLOWED_NAMESPACES)}"
+            )
+        real = os.path.realpath(os.path.expanduser(path))
+        if real != PERSONAL_ROOT and not real.startswith(PERSONAL_ROOT + os.sep):
+            raise SystemExit(
+                f"refusing source path '{path}': must resolve under {PERSONAL_ROOT}"
+            )
     return out
 
 
 def _ssh(cfg, remote_args, stdin_data=None):
     host = cfg["CODING_MEMORY_SSH"]
-    remote = f"{cfg['CODING_MEMORY_REMOTE_BIN']} " + " ".join(
-        shlex.quote(a) for a in remote_args
-    )
+    remote_bin = cfg["CODING_MEMORY_REMOTE_BIN"]
+    if not valid_remote_bin(remote_bin):
+        raise SystemExit(f"unsafe CODING_MEMORY_REMOTE_BIN: {remote_bin!r}")
+    remote = f"{remote_bin} " + " ".join(shlex.quote(a) for a in remote_args)
     # Keepalives: server-side embedding holds the channel idle for ~15s while the
     # model loads + embeds; a Cloudflare-tunneled SSH drops idle connections (-> 255).
     ssh = [
@@ -63,25 +83,41 @@ def _ssh(cfg, remote_args, stdin_data=None):
 
 def cmd_ingest(args, cfg):
     sources = _sources_from_args(args.source)
-    records = P.build_records(sources)
+    parsed = P.build_records(sources)
+    records = parsed["records"]
+    prune = parsed["prune_namespaces"]
     print(
-        f"parsed {len(records)} fact(s) from {len(sources)} namespace(s): {', '.join(sources)}",
+        f"parsed {len(records)} fact(s) from {len(sources)} namespace(s): "
+        f"{', '.join(sources)} | prune-safe: {', '.join(prune) or '(none)'}",
         file=sys.stderr,
     )
     if args.dry_run:
         for r in records:
             print(f"  [{r['namespace']}] {r['name']}  ({r['source_path']})")
         return 0
-    ndjson = "\n".join(json.dumps(r) for r in records)
+    payload = json.dumps(parsed)
     if is_remote(cfg):
-        return _ssh(cfg, ["_embed-store"], stdin_data=ndjson)
-    return _embed_store(ndjson, cfg)
+        return _ssh(cfg, ["_embed-store"], stdin_data=payload)
+    return _embed_store(payload, cfg)
 
 
-def _embed_store(ndjson, cfg):
+# embed + upsert this many records per chunk so a large ingest stays memory-bounded
+_INGEST_CHUNK = 64
+
+
+def _embed_store(payload, cfg):
     from . import embedder, store
 
-    records = [json.loads(line) for line in ndjson.splitlines() if line.strip()]
+    env = json.loads(payload)
+    if isinstance(env, list):  # back-compat: bare record list
+        env = {"records": env, "prune_namespaces": []}
+    incoming = env.get("records", [])
+    # residency: server-side allowlist — never store a non-personal namespace,
+    # even from a misconfigured client.
+    records = [r for r in incoming if r.get("namespace") in ALLOWED_NAMESPACES]
+    rejected = len(incoming) - len(records)
+    prune_ns = [n for n in env.get("prune_namespaces", []) if n in ALLOWED_NAMESPACES]
+
     cache = cfg.get("FASTEMBED_CACHE")
     conn = store.connect(cfg["DATABASE_URL"])
     try:
@@ -93,24 +129,28 @@ def _embed_store(ndjson, cfg):
             for r in records
             if existing.get((r["namespace"], r["source_path"])) != r["content_hash"]
         ]
-        report = {
-            "parsed": len(records),
-            "changed": len(changed),
-            "unchanged": len(records) - len(changed),
-        }
-        if changed:
+        for i in range(0, len(changed), _INGEST_CHUNK):
+            batch = changed[i : i + _INGEST_CHUNK]
             vecs = embedder.embed_docs(
-                [P.embed_text(r) for r in changed], cache_dir=cache
+                [P.embed_text(r) for r in batch], cache_dir=cache
             )
-            for r, v in zip(changed, vecs):
+            for r, v in zip(batch, vecs):
                 store.upsert(conn, r, v)
-        # prune rows whose source file disappeared
+            conn.commit()
+        # prune ONLY namespaces the client certified as fully + cleanly scanned
         pruned = 0
-        for ns in namespaces:
+        for ns in prune_ns:
             keep = [r["source_path"] for r in records if r["namespace"] == ns]
-            pruned += store.delete_missing(conn, ns, keep)
+            if keep:
+                pruned += store.delete_missing(conn, ns, keep)
         conn.commit()
-        report["pruned"] = pruned
+        report = {
+            "parsed": len(incoming),
+            "stored": len(changed),
+            "unchanged": len(records) - len(changed),
+            "rejected_nonpersonal": rejected,
+            "pruned": pruned,
+        }
         print(json.dumps(report))
         return 0
     finally:

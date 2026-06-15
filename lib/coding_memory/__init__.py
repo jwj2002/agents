@@ -18,6 +18,7 @@ Config: ``~/.coding_memory.env`` (KEY=VALUE per line), env vars override.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 EMBED_MODEL = "nomic-ai/nomic-embed-text-v1.5"
@@ -38,6 +39,21 @@ DEFAULT_SOURCES = {
 SKIP_NAMES = {"MEMORY.md"}
 SKIP_DIRS = {"archive"}
 
+# Residency allowlist: only these namespaces may be written to the personal store.
+# The server (jns) enforces this so a misconfigured client cannot land work data.
+ALLOWED_NAMESPACES = frozenset({"agents", "buddy", "global", "craft"})
+# Client-side guard: ingest --source paths must resolve under this personal root.
+PERSONAL_ROOT = os.path.realpath(os.path.expanduser("~/.claude/projects"))
+
+_SAFE_REMOTE_BIN = re.compile(r"^[\w/.~ -]+$")
+
+
+def valid_remote_bin(value: str) -> bool:
+    """Remote bin is interpolated raw (the remote shell must expand ~); only allow
+    a conservative path-ish charset so config can't smuggle shell metacharacters."""
+    return bool(_SAFE_REMOTE_BIN.match(value or ""))
+
+
 _CFG_KEYS = (
     "DATABASE_URL",
     "CODING_MEMORY_SSH",
@@ -49,6 +65,14 @@ _CFG_KEYS = (
 def load_config() -> dict:
     cfg: dict[str, str] = {}
     if CONFIG_PATH.exists():
+        mode = CONFIG_PATH.stat().st_mode
+        if mode & 0o077:
+            import sys
+
+            sys.stderr.write(
+                f"warning: {CONFIG_PATH} is group/world-readable; run "
+                f"`chmod 600 {CONFIG_PATH}` (it holds the DB password)\n"
+            )
         for line in CONFIG_PATH.read_text().splitlines():
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
