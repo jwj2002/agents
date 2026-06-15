@@ -181,18 +181,21 @@ def test_backward_compatibility(project_dir, tmp_path):
 
     # Write a legacy record (no decision fields) via raw write to simulate a
     # pre-change record that would have been written before issue #217.
-    _write_raw_metrics(project_dir, [
-        {
-            "issue": 100,
-            "date": "2026-01-01",
-            "recorded_at": "2026-01-01T10:00:00.000000Z",
-            "status": "PASS",
-            "complexity": "TRIVIAL",
-            "stack": "backend",
-            "agents_run": ["PATCH"],
-            "project": "agents",
-        }
-    ])
+    _write_raw_metrics(
+        project_dir,
+        [
+            {
+                "issue": 100,
+                "date": "2026-01-01",
+                "recorded_at": "2026-01-01T10:00:00.000000Z",
+                "status": "PASS",
+                "complexity": "TRIVIAL",
+                "stack": "backend",
+                "agents_run": ["PATCH"],
+                "project": "agents",
+            }
+        ],
+    )
 
     # Write a record with decision fields for a different issue.
     record_metrics(
@@ -221,7 +224,10 @@ def test_backward_compatibility(project_dir, tmp_path):
     # New record's decision fields must survive the rollup.
     assert issue200["tier_corrected_to"] == "COMPLEX"
     assert issue200["guards_fired"] == ["ENUM_VALUE"]
-    assert issue200["codex_overturned"] == {"state": "confirmed", "category": "migration"}
+    assert issue200["codex_overturned"] == {
+        "state": "confirmed",
+        "category": "migration",
+    }
 
 
 # ── Test 4: Field-level dedup collision (AC4b, TAUTOLOGY GUARD) ─────────────
@@ -238,31 +244,34 @@ def test_dedup_collision(project_dir, tmp_path):
     global_dir = tmp_path / "global"
 
     # Record A: older timestamp, HAS tier_corrected_to.
-    _write_raw_metrics(project_dir, [
-        {
-            "issue": 5,
-            "date": "2026-01-01",
-            "recorded_at": "2026-01-01T10:00:00.000000Z",
-            "status": "PASS",
-            "complexity": "SIMPLE",
-            "stack": "backend",
-            "agents_run": ["PATCH"],
-            "project": "agents",
-            "tier_corrected_to": "COMPLEX",
-        },
-        # Record B: newer timestamp (higher recorded_at), SAME key, NO tier_corrected_to.
-        # Under old last-wins code, B overwrites A entirely, losing tier_corrected_to.
-        {
-            "issue": 5,
-            "date": "2026-01-01",
-            "recorded_at": "2026-01-01T11:00:00.000000Z",
-            "status": "PASS",
-            "complexity": "SIMPLE",
-            "stack": "backend",
-            "agents_run": ["PATCH", "PROVE"],
-            "project": "agents",
-        },
-    ])
+    _write_raw_metrics(
+        project_dir,
+        [
+            {
+                "issue": 5,
+                "date": "2026-01-01",
+                "recorded_at": "2026-01-01T10:00:00.000000Z",
+                "status": "PASS",
+                "complexity": "SIMPLE",
+                "stack": "backend",
+                "agents_run": ["PATCH"],
+                "project": "agents",
+                "tier_corrected_to": "COMPLEX",
+            },
+            # Record B: newer timestamp (higher recorded_at), SAME key, NO tier_corrected_to.
+            # Under old last-wins code, B overwrites A entirely, losing tier_corrected_to.
+            {
+                "issue": 5,
+                "date": "2026-01-01",
+                "recorded_at": "2026-01-01T11:00:00.000000Z",
+                "status": "PASS",
+                "complexity": "SIMPLE",
+                "stack": "backend",
+                "agents_run": ["PATCH", "PROVE"],
+                "project": "agents",
+            },
+        ],
+    )
 
     aggregate("metrics", [source_dir], global_dir)
     global_rows = _read_global_metrics(global_dir)
@@ -382,3 +391,86 @@ def test_size_budget():
     }
     size = len(json.dumps(rec).encode("utf-8"))
     assert size <= 4096, f"Record size {size} exceeds 4096-byte PIPE_BUF budget"
+
+
+# ── Tests 8–12: recall= field round-trip and validation (issue #456) ─────────
+
+
+def test_recall_present_when_supplied(project_dir):
+    """recall= field is written when valid dict is supplied."""
+    record_metrics(
+        project_dir,
+        456,
+        "PASS",
+        "MODERATE",
+        "backend",
+        ["MAP-PLAN", "PATCH", "PROVE"],
+        recall={"fired": True, "n": 2, "facts": ["fact_a", "fact_b"], "flag": "on"},
+    )
+    row = _read_metrics(project_dir)[0]
+    assert "recall" in row
+    assert row["recall"]["fired"] is True
+    assert row["recall"]["n"] == 2
+    assert row["recall"]["facts"] == ["fact_a", "fact_b"]
+    assert row["recall"]["flag"] == "on"
+
+
+def test_recall_absent_when_not_supplied(project_dir):
+    """recall= field omitted when not passed (compact PASS records)."""
+    record_metrics(
+        project_dir,
+        100,
+        "PASS",
+        "SIMPLE",
+        "backend",
+        ["MAP-PLAN", "PATCH", "PROVE"],
+    )
+    row = _read_metrics(project_dir)[0]
+    assert "recall" not in row
+
+
+def test_recall_dropped_on_invalid_flag(project_dir):
+    """recall dict with unknown flag is dropped with warning, no raise."""
+    record_metrics(
+        project_dir,
+        457,
+        "PASS",
+        "SIMPLE",
+        "backend",
+        [],
+        recall={"fired": True, "n": 1, "facts": ["x"], "flag": "maybe"},
+    )
+    row = _read_metrics(project_dir)[0]
+    assert "recall" not in row
+
+
+def test_recall_dropped_on_non_bool_fired(project_dir):
+    """recall dict with non-bool fired is dropped."""
+    record_metrics(
+        project_dir,
+        458,
+        "PASS",
+        "SIMPLE",
+        "backend",
+        [],
+        recall={"fired": "yes", "n": 1, "facts": [], "flag": "on"},
+    )
+    row = _read_metrics(project_dir)[0]
+    assert "recall" not in row
+
+
+def test_recall_fired_false_with_empty_facts(project_dir):
+    """recall fired=False with n=0 and empty facts is valid."""
+    record_metrics(
+        project_dir,
+        459,
+        "PASS",
+        "SIMPLE",
+        "backend",
+        [],
+        recall={"fired": False, "n": 0, "facts": [], "flag": "on"},
+    )
+    row = _read_metrics(project_dir)[0]
+    assert row["recall"]["fired"] is False
+    assert row["recall"]["n"] == 0
+    assert row["recall"]["facts"] == []
