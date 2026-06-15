@@ -664,6 +664,10 @@ _VALID_AC_STATUSES = frozenset({"implemented", "partial", "missing", "deferred",
 # "deferred to a follow-up" from becoming an APPROVE escape hatch.
 _DEFERRED_REF_RE = re.compile(r"#\d+|GH-\d+", re.IGNORECASE)
 
+# Issue #460 — runtime_smoke (Level 5) status set. Compared case-insensitively
+# on read (see validate_runtime_smoke); prove.md emits the lowercase/`n/a` forms.
+_VALID_SMOKE_STATUSES = frozenset({"pass", "fail", "n/a"})
+
 _VALID_GUARDS = frozenset(
     {
         "VERIFICATION_GAP",
@@ -851,6 +855,114 @@ def validate_ac_audit(
 
     downgrade = "FAIL" if missing else None
     return {"valid": valid, "downgrade_to": downgrade, "missing": missing}
+
+
+def validate_runtime_smoke(value) -> dict:
+    """Validate a PROVE ``runtime_smoke`` (Level 5) value for the merge gate.
+
+    Issue #460 evolves ``runtime_smoke`` from the #459 scalar string into a
+    structured ``{status, command, evidence}`` block and binds a fail-closed
+    merge gate to it. This validator enforces *structural completeness* of the
+    declared result; it is the source of truth that ``prove_gate.check_gate``
+    calls after the ac_audit block.
+
+    **Trust model (Option A).** The gate TRUSTS PROVE's declared ``status``. It
+    does NOT re-derive runnable-ness from a git diff and does NOT re-execute the
+    smoke command — full re-execution / auto-run is out of scope here (that is
+    AC5 / issue #461). What this validator enforces:
+
+    - ``status`` is one of PASS / FAIL / n/a (case-insensitive).
+    - ``status: PASS`` requires BOTH a non-empty ``command`` (what was run) and
+      non-empty ``evidence`` (the result).
+    - ``status: n/a`` requires non-empty ``evidence`` (the justification);
+      ``command`` is optional.
+    - ``status: FAIL`` blocks — a failed smoke run cannot ship.
+    - Absent / missing block blocks fail-CLOSED ("PROVE did not record it").
+    - A bare string (the #459 scalar form) is coerced to ``n/a`` with the string
+      itself as evidence — backward compatible, never blocks on its own.
+
+    Args:
+        value: The ``runtime_smoke`` frontmatter value. May be a mapping
+            (structured block), a string (#459 scalar), ``None`` (absent), or
+            some other type (treated as a violation).
+
+    Returns:
+        ``{"valid": bool, "downgrade_to": str|None, "missing": list[dict]}`` —
+        the SAME shape as ``validate_ac_audit`` so ``check_gate`` reuses the
+        same consumption pattern. Each ``missing`` entry is shaped
+        ``{"field": "runtime_smoke", "status": <str>, "reason": <str>}``.
+        ``downgrade_to`` is ``"FAIL"`` on any violation, else ``None``.
+
+    The function is pure (no I/O). Callers persist / act on the result.
+    """
+
+    def _violation(status: str, reason: str) -> dict:
+        return {
+            "valid": False,
+            "downgrade_to": "FAIL",
+            "missing": [
+                {"field": "runtime_smoke", "status": status, "reason": reason}
+            ],
+        }
+
+    def _ok() -> dict:
+        return {"valid": True, "downgrade_to": None, "missing": []}
+
+    def _empty(v) -> bool:
+        return v is None or not str(v).strip()
+
+    if value is None:
+        return _violation(
+            "missing",
+            "PROVE did not record runtime_smoke (Level 5) — re-run PROVE",
+        )
+
+    # #459 backward-compat: a bare string is coerced to n/a with the string as
+    # evidence. Never blocks on its own.
+    if isinstance(value, str):
+        return _ok()
+
+    if not isinstance(value, dict):
+        return _violation(
+            "invalid",
+            f"runtime_smoke must be a mapping or string — got {type(value).__name__}",
+        )
+
+    raw_status = value.get("status")
+    if _empty(raw_status):
+        return _violation(
+            "missing",
+            "runtime_smoke.status absent — must be PASS, FAIL, or n/a",
+        )
+    status = str(raw_status).strip().lower()
+    if status not in _VALID_SMOKE_STATUSES:
+        return _violation(
+            status,
+            f"runtime_smoke.status={raw_status!r} invalid — expected PASS/FAIL/n/a",
+        )
+
+    command = value.get("command")
+    evidence = value.get("evidence")
+
+    if status == "fail":
+        return _violation("fail", "runtime_smoke reported FAIL — smoke run failed")
+
+    if status == "pass":
+        if _empty(evidence):
+            return _violation("pass", "runtime_smoke PASS requires non-empty evidence")
+        if _empty(command):
+            return _violation(
+                "pass",
+                "runtime_smoke PASS requires the command that was run (none recorded)",
+            )
+        return _ok()
+
+    # status == "n/a"
+    if _empty(evidence):
+        return _violation(
+            "n/a", "runtime_smoke n/a requires evidence (the justification)"
+        )
+    return _ok()
 
 
 def record_prove_audit(

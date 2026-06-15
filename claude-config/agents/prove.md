@@ -182,8 +182,11 @@ does not boot any runnable surface.
 
 Boot the changed entrypoint and confirm it starts and responds without error.
 PROVE records the result as `runtime_smoke` in the artifact frontmatter for
-future gate enforcement (see issue #460). Choose the recipe that matches the
-changed stack:
+gate enforcement (see issue #460). As of #460 `runtime_smoke` is a structured
+`{status, command, evidence}` block: `command` is REQUIRED when `status: PASS`
+(the smoke command actually run) and `evidence` is REQUIRED for every status.
+An absent block or `status: FAIL` blocks the merge gate (`GATE_SMOKE_VIOLATION`,
+fail-closed). Choose the recipe that matches the changed stack:
 
 **Backend (FastAPI / HTTP service)**
 ```bash
@@ -229,8 +232,11 @@ Assert: page loads (HTTP 200); zero console errors of severity ERROR.
 where no entrypoint is exercised. Any change to a route handler, CLI command,
 worker startup, or rendered page requires a smoke run. Record in the PROVE
 artifact as:
-```
-runtime_smoke: n/a (no runnable surface)
+```yaml
+runtime_smoke:
+  status: n/a            # PASS | FAIL | n/a
+  command: ""            # required when status: PASS
+  evidence: "no runnable surface — pure refactor/docs/config/rename"
 ```
 Mirror the coverage escape hatch style: `coverage: n/a (no test infra)`.
 
@@ -309,7 +315,10 @@ date: {YYYY-MM-DD}
 status: PASS            # PASS | FAIL | BLOCKED
 complexity: SIMPLE      # TRIVIAL | SIMPLE | COMPLEX
 stack: backend          # backend | frontend | fullstack
-runtime_smoke: "n/a (no runnable surface)"  # Level 5: PASS | FAIL | n/a (no runnable surface) — issue #460 binds the gate to this field
+runtime_smoke:           # Level 5 (issue #460 binds the merge gate to this)
+  status: n/a            # PASS | FAIL | n/a
+  command: ""            # the smoke command actually run (required when status: PASS)
+  evidence: "no runnable surface"
 root_cause: null        # MANDATORY if status=BLOCKED — use a code from _base.md §10
 blocking_agent: null    # MANDATORY if status=BLOCKED — usually "PROVE"
 # Issue #1612 — per-AC audit (mirrors buddy/prompts/codex-review-clauses.md):
@@ -364,7 +373,7 @@ order). Body skeleton:
 (verbatim output: focused tests, full suite, lint/build)
 ### Verification Levels
 - Level 1 EXISTS / Level 2 SUBSTANTIVE / Level 3 WIRED / Level 4 UNIT/BUILD / Level 5 RUNTIME (smoke) — ✅ or ❌ [detail]
-- runtime_smoke: PASS | FAIL | n/a (no runnable surface)
+- runtime_smoke: status={PASS|FAIL|n/a}, command=<cmd if PASS>, evidence=<...>
 ### Acceptance Criteria
 (prose table; the authoritative copy is the frontmatter `ac_audit`)
 
@@ -397,10 +406,11 @@ steps, and a prevention recommendation. Do NOT approve. Return to orchestrator.
 - [ ] Levels 1–4 all pass (EXISTS, SUBSTANTIVE, WIRED, UNIT/BUILD) — WIRED items
       per the Level 3 list above (reachability, callee existence, service
       registration, enum VALUE, expanduser, pipeline handoff)
-- [ ] Level 5 RUNTIME smoke: ran per-stack recipe OR recorded
-      `runtime_smoke: n/a (no runnable surface)` with justification (escape hatch
-      restricted to pure refactors/docs/config/renames)
-- [ ] Frontmatter has status + complexity + stack + `runtime_smoke` (Level 5) +
+- [ ] Level 5 RUNTIME smoke: ran per-stack recipe OR recorded the structured
+      `runtime_smoke` block with `status: n/a` + non-empty `evidence` (escape
+      hatch restricted to pure refactors/docs/config/renames)
+- [ ] Frontmatter has status + complexity + stack + `runtime_smoke` block
+      (Level 5: status + command-if-PASS + evidence) +
       `ac_audit` (one per AC bullet, #1612) + `applicable_evals` + `eval_results`
 - [ ] If BLOCKED: frontmatter `root_cause` (§10) + `blocking_agent`, body
       `## Failure Details` (details/fix/prevention)

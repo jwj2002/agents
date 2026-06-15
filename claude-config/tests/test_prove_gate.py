@@ -10,10 +10,33 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import prove_gate as G  # noqa: E402
 
 
-def _artifact(tmp_path, name, status="PASS", ac_audit=None, raw=None):
+def _artifact(
+    tmp_path, name, status="PASS", ac_audit=None, raw=None, runtime_smoke="__default__"
+):
     outputs = tmp_path / ".agents" / "outputs"
     outputs.mkdir(parents=True, exist_ok=True)
     if raw is None:
+        # runtime_smoke (#460):
+        #   "__default__" → a valid n/a block (keeps pre-#460 PASS tests green).
+        #   None          → emit NO runtime_smoke key (the absent case).
+        #   dict          → render as a nested YAML block.
+        #   str           → render as a scalar (#459 backward-compat form).
+        if runtime_smoke == "__default__":
+            smoke_lines = (
+                "runtime_smoke:\n"
+                "  status: n/a\n"
+                "  command: \"\"\n"
+                '  evidence: "test fixture — no runnable surface"\n'
+            )
+        elif runtime_smoke is None:
+            smoke_lines = ""
+        elif isinstance(runtime_smoke, dict):
+            smoke_lines = "runtime_smoke:\n" + "".join(
+                f"  {k}: \"{v}\"\n" for k, v in runtime_smoke.items()
+            )
+        else:
+            smoke_lines = f'runtime_smoke: "{runtime_smoke}"\n'
+
         audit_lines = ""
         if ac_audit is not None:
             audit_lines = "ac_audit:\n" + "".join(
@@ -23,7 +46,7 @@ def _artifact(tmp_path, name, status="PASS", ac_audit=None, raw=None):
             )
         raw = (
             f"---\nissue: 42\nagent: PROVE\nstatus: {status}\n"
-            f"{audit_lines}---\n\n# body\n"
+            f"{smoke_lines}{audit_lines}---\n\n# body\n"
         )
     (outputs / name).write_text(raw, encoding="utf-8")
     return outputs
@@ -126,3 +149,76 @@ def test_override_not_recorded_when_gate_passes(tmp_path):
 def test_cli_exit_codes(tmp_path):
     outputs = _artifact(tmp_path, "prove-42-060926.md", "FAIL", OK_AUDIT)
     assert G.main(["--issue", "42", "--outputs-dir", str(outputs)]) == G.GATE_FAIL
+
+
+# ── runtime_smoke gate (issue #460) ─────────────────────────────────────────
+
+
+def test_pass_with_smoke_pass_proceeds(tmp_path):
+    smoke = {"status": "PASS", "command": "python -m m --help", "evidence": "exit 0"}
+    outputs = _artifact(
+        tmp_path, "prove-42-060926.md", "PASS", OK_AUDIT, runtime_smoke=smoke
+    )
+    code, reason = G.check_gate(outputs, 42)
+    assert code == G.GATE_PASS
+    assert "merge may proceed" in reason
+
+
+def test_pass_with_smoke_absent_is_violation(tmp_path):
+    outputs = _artifact(
+        tmp_path, "prove-42-060926.md", "PASS", OK_AUDIT, runtime_smoke=None
+    )
+    code, reason = G.check_gate(outputs, 42)
+    assert code == G.GATE_SMOKE_VIOLATION
+    assert "re-run PROVE" in reason
+
+
+def test_pass_with_smoke_fail_is_violation(tmp_path):
+    smoke = {"status": "FAIL", "command": "x", "evidence": "crashed"}
+    outputs = _artifact(
+        tmp_path, "prove-42-060926.md", "PASS", OK_AUDIT, runtime_smoke=smoke
+    )
+    assert G.check_gate(outputs, 42)[0] == G.GATE_SMOKE_VIOLATION
+
+
+def test_pass_with_smoke_pass_no_command_is_violation(tmp_path):
+    smoke = {"status": "PASS", "command": "", "evidence": "ran"}
+    outputs = _artifact(
+        tmp_path, "prove-42-060926.md", "PASS", OK_AUDIT, runtime_smoke=smoke
+    )
+    assert G.check_gate(outputs, 42)[0] == G.GATE_SMOKE_VIOLATION
+
+
+def test_pass_with_smoke_pass_no_evidence_is_violation(tmp_path):
+    smoke = {"status": "PASS", "command": "x", "evidence": ""}
+    outputs = _artifact(
+        tmp_path, "prove-42-060926.md", "PASS", OK_AUDIT, runtime_smoke=smoke
+    )
+    assert G.check_gate(outputs, 42)[0] == G.GATE_SMOKE_VIOLATION
+
+
+def test_pass_with_smoke_na_proceeds(tmp_path):
+    smoke = {"status": "n/a", "command": "", "evidence": "docs only"}
+    outputs = _artifact(
+        tmp_path, "prove-42-060926.md", "PASS", OK_AUDIT, runtime_smoke=smoke
+    )
+    assert G.check_gate(outputs, 42)[0] == G.GATE_PASS
+
+
+def test_pass_with_smoke_unknown_status_is_violation(tmp_path):
+    smoke = {"status": "maybe", "command": "x", "evidence": "y"}
+    outputs = _artifact(
+        tmp_path, "prove-42-060926.md", "PASS", OK_AUDIT, runtime_smoke=smoke
+    )
+    assert G.check_gate(outputs, 42)[0] == G.GATE_SMOKE_VIOLATION
+
+
+def test_pass_with_smoke_scalar_string_proceeds(tmp_path):
+    outputs = _artifact(
+        tmp_path,
+        "prove-42-060926.md",
+        "PASS",
+        OK_AUDIT,
+        runtime_smoke="n/a (no runnable surface)",
+    )
+    assert G.check_gate(outputs, 42)[0] == G.GATE_PASS
