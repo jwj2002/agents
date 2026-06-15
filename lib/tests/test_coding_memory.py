@@ -202,6 +202,7 @@ def _make_autocommit_mock():
 
 def test_log_recall_inserts_and_commits():
     """log_recall opens its own autocommit connection and INSERTs — happy path."""
+    pytest.importorskip("psycopg")  # server-only driver; absent in CI
     conn_ctx, conn_obj, cursor_obj = _make_autocommit_mock()
 
     with patch("psycopg.connect", return_value=conn_ctx) as mock_connect:
@@ -227,6 +228,7 @@ def test_log_recall_inserts_and_commits():
 
 def test_log_recall_truncates_facts_to_5():
     """log_recall stores at most 5 facts even when caller passes more."""
+    pytest.importorskip("psycopg")  # server-only driver; absent in CI
     conn_ctx, conn_obj, cursor_obj = _make_autocommit_mock()
 
     facts_8 = [{"ns": "a", "name": f"f{i}", "score": 0.9} for i in range(8)]
