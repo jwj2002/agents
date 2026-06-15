@@ -9,6 +9,7 @@ from . import EMBED_DIM
 _DDL = """
 CREATE TABLE IF NOT EXISTS memory_fact (
   id           BIGSERIAL PRIMARY KEY,
+  origin       TEXT,
   namespace    TEXT NOT NULL,
   name         TEXT,
   type         TEXT,
@@ -46,12 +47,16 @@ def _vlit(vec) -> str:
 def ensure_schema(conn) -> None:
     with conn.cursor() as c:
         c.execute(_DDL)
-        # identity is (namespace, source_path); drop the original content_hash unique
+        # migrate to per-origin identity (origin, namespace, source_path) so multiple
+        # machines can share one store without clobbering each other's rows.
+        c.execute("ALTER TABLE memory_fact ADD COLUMN IF NOT EXISTS origin TEXT;")
         c.execute(
             "ALTER TABLE memory_fact DROP CONSTRAINT IF EXISTS memory_fact_namespace_content_hash_key;"
         )
+        c.execute("DROP INDEX IF EXISTS ux_memfact_ns_path;")
         c.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS ux_memfact_ns_path ON memory_fact(namespace, source_path);"
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_memfact_origin_ns_path "
+            "ON memory_fact(origin, namespace, source_path);"
         )
         c.execute(
             "CREATE INDEX IF NOT EXISTS idx_memfact_ns ON memory_fact(namespace);"
@@ -65,26 +70,39 @@ def ensure_schema(conn) -> None:
     conn.commit()
 
 
-def existing_hashes(conn, namespaces) -> dict:
+def claim_unowned(conn, origin: str, namespaces) -> int:
+    """One-time migration: assign legacy rows (origin IS NULL) in the ingested
+    namespaces to the ingesting machine, so they participate in per-origin identity."""
     with conn.cursor() as c:
         c.execute(
-            "SELECT namespace, source_path, content_hash FROM memory_fact WHERE namespace = ANY(%s)",
-            (list(namespaces),),
+            "UPDATE memory_fact SET origin=%s WHERE origin IS NULL AND namespace = ANY(%s)",
+            (origin, list(namespaces)),
+        )
+        return c.rowcount
+
+
+def existing_hashes(conn, origin: str, namespaces) -> dict:
+    with conn.cursor() as c:
+        c.execute(
+            "SELECT namespace, source_path, content_hash FROM memory_fact "
+            "WHERE origin=%s AND namespace = ANY(%s)",
+            (origin, list(namespaces)),
         )
         return {(r[0], r[1]): r[2] for r in c.fetchall()}
 
 
-def upsert(conn, rec: dict, embedding) -> None:
+def upsert(conn, rec: dict, embedding, origin: str) -> None:
     params = dict(rec)
+    params["origin"] = origin
     params["emb"] = _vlit(embedding)
     params["expires"] = rec.get("expires") or ""
     sql = """
     INSERT INTO memory_fact
-      (namespace,name,type,summary,body,source_path,durability,expires,content_hash,embedding,updated_at)
+      (origin,namespace,name,type,summary,body,source_path,durability,expires,content_hash,embedding,updated_at)
     VALUES
-      (%(namespace)s,%(name)s,%(type)s,%(summary)s,%(body)s,%(source_path)s,%(durability)s,
+      (%(origin)s,%(namespace)s,%(name)s,%(type)s,%(summary)s,%(body)s,%(source_path)s,%(durability)s,
        NULLIF(%(expires)s,'')::date,%(content_hash)s,%(emb)s::vector,now())
-    ON CONFLICT (namespace, source_path) DO UPDATE SET
+    ON CONFLICT (origin, namespace, source_path) DO UPDATE SET
       name=EXCLUDED.name, type=EXCLUDED.type, summary=EXCLUDED.summary, body=EXCLUDED.body,
       durability=EXCLUDED.durability, expires=EXCLUDED.expires, content_hash=EXCLUDED.content_hash,
       embedding=EXCLUDED.embedding, updated_at=now();
@@ -93,12 +111,14 @@ def upsert(conn, rec: dict, embedding) -> None:
         c.execute(sql, params)
 
 
-def delete_missing(conn, namespace: str, keep_paths: list[str]) -> int:
-    """Remove rows for a namespace whose source file no longer exists."""
+def delete_missing(conn, origin: str, namespace: str, keep_paths: list[str]) -> int:
+    """Remove THIS machine's rows for a namespace whose source file no longer exists.
+    Scoped to origin so one machine never prunes another machine's rows."""
     with conn.cursor() as c:
         c.execute(
-            "DELETE FROM memory_fact WHERE namespace=%s AND NOT (source_path = ANY(%s))",
-            (namespace, keep_paths),
+            "DELETE FROM memory_fact "
+            "WHERE origin=%s AND namespace=%s AND NOT (source_path = ANY(%s))",
+            (origin, namespace, keep_paths),
         )
         return c.rowcount
 
@@ -220,17 +240,18 @@ def duplicate_names(conn):
         ]
 
 
-def drift_rows(conn, namespace, existing_paths):
-    """Rows in `namespace` whose source_path is NOT in the caller's existing set.
-
-    Caller must have CLEANLY scanned this namespace (root present, fully readable,
-    >=1 file) — otherwise an incomplete scan would mislabel live rows as drift.
+def drift_rows(conn, origin, namespace, existing_paths):
+    """THIS machine's rows in `namespace` whose source_path is NOT in the caller's
+    existing set. Scoped to origin (one machine's scan can't mislabel another's
+    rows). Caller must have CLEANLY scanned this namespace (root present, fully
+    readable, >=1 file), else an incomplete scan would mislabel live rows as drift.
     """
     with conn.cursor() as c:
         c.execute(
             "SELECT source_path, name FROM memory_fact "
-            "WHERE namespace = %s AND NOT (source_path = ANY(%s)) ORDER BY source_path",
-            (namespace, list(existing_paths)),
+            "WHERE origin=%s AND namespace=%s AND NOT (source_path = ANY(%s)) "
+            "ORDER BY source_path",
+            (origin, namespace, list(existing_paths)),
         )
         return [{"source_path": r[0], "name": r[1]} for r in c.fetchall()]
 

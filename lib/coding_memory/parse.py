@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import re
+import socket
 from pathlib import Path
 
 from . import SKIP_DIRS, SKIP_NAMES
+
+ORIGIN = socket.gethostname()  # this machine — per-origin identity in the shared store
 
 try:
     import yaml
@@ -70,6 +73,7 @@ def parse_markdown(raw: str, fallback_name: str = "") -> dict:
 def _record(ns: str, path: str, raw: str) -> dict:
     meta = parse_markdown(raw, fallback_name=Path(path).stem)
     return {
+        "origin": ORIGIN,
         "namespace": ns,
         "source_path": path,
         "content_hash": content_hash(raw),

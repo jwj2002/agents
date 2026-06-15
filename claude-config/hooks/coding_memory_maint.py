@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 CONFIG = Path(os.path.expanduser("~/.coding_memory.env"))
@@ -27,18 +27,21 @@ def _config_ok(path: Path = CONFIG) -> bool:
     config doesn't point at the personal store (or has none) never runs maintenance."""
     if not path.exists():
         return False
-    txt = path.read_text(errors="replace")
-    return "CODING_MEMORY_SSH=" in txt or "DATABASE_URL=" in txt
+    for line in path.read_text(errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        if k.strip() in ("CODING_MEMORY_SSH", "DATABASE_URL") and v.strip():
+            return True
+    return False
 
 
 def _due(stamp_path: Path, today: str) -> bool:
     if not stamp_path.exists():
         return True
-    d = (
-        datetime.fromtimestamp(stamp_path.stat().st_mtime, tz=timezone.utc)
-        .date()
-        .isoformat()
-    )
+    # local date (matches the user's wall clock; avoids a double-run at the UTC boundary)
+    d = datetime.fromtimestamp(stamp_path.stat().st_mtime).date().isoformat()
     return d != today
 
 
@@ -56,10 +59,12 @@ def maybe_run(
     stamp_path=STAMP, today=None, config_ok=None, spawn_fn=_spawn, wrapper=WRAPPER
 ) -> bool:
     """Spawn daily maintenance if configured + due. Returns True if it spawned."""
-    today = today or datetime.now(timezone.utc).date().isoformat()
+    today = today or datetime.now().date().isoformat()  # local date
     ok = _config_ok() if config_ok is None else config_ok
     if not ok or not _due(stamp_path, today):
         return False
+    if not (Path(wrapper).exists() and os.access(str(wrapper), os.X_OK)):
+        return False  # can't run it -> don't stamp, so we retry next session
     spawn_fn(wrapper)
     stamp_path.parent.mkdir(parents=True, exist_ok=True)
     stamp_path.touch()
