@@ -872,14 +872,16 @@ def validate_runtime_smoke(value) -> dict:
     AC5 / issue #461). What this validator enforces:
 
     - ``status`` is one of PASS / FAIL / n/a (case-insensitive).
-    - ``status: PASS`` requires BOTH a non-empty ``command`` (what was run) and
-      non-empty ``evidence`` (the result).
-    - ``status: n/a`` requires non-empty ``evidence`` (the justification);
-      ``command`` is optional.
+    - ``status: PASS`` requires BOTH a non-empty STRING ``command`` (what was
+      run) and a non-empty STRING ``evidence`` (the result). Non-string types
+      (lists, dicts, bools) FAIL closed — they carry no real evidence (#460).
+    - ``status: n/a`` requires non-empty STRING ``evidence`` (the
+      justification); ``command`` is optional.
     - ``status: FAIL`` blocks — a failed smoke run cannot ship.
     - Absent / missing block blocks fail-CLOSED ("PROVE did not record it").
-    - A bare string (the #459 scalar form) is coerced to ``n/a`` with the string
-      itself as evidence — backward compatible, never blocks on its own.
+    - A NON-empty bare string (the #459 scalar form) is coerced to ``n/a`` with
+      the string itself as evidence — backward compatible, never blocks on its
+      own. An empty / whitespace-only scalar FAILs closed (no evidence, #460).
 
     Args:
         value: The ``runtime_smoke`` frontmatter value. May be a mapping
@@ -911,16 +913,30 @@ def validate_runtime_smoke(value) -> dict:
     def _empty(v) -> bool:
         return v is None or not str(v).strip()
 
+    def _nonempty_str(v) -> bool:
+        # command / evidence must be an actual non-empty STRING. Non-string
+        # types (lists, dicts, bools, ints) carry no recorded evidence and must
+        # NOT satisfy the "non-empty" requirement via repr coercion — that was
+        # the type-confusion bypass (#460 Codex review): ``command: []`` would
+        # stringify to ``"[]"`` and wrongly pass.
+        return isinstance(v, str) and bool(v.strip())
+
     if value is None:
         return _violation(
             "missing",
             "PROVE did not record runtime_smoke (Level 5) — re-run PROVE",
         )
 
-    # #459 backward-compat: a bare string is coerced to n/a with the string as
-    # evidence. Never blocks on its own.
+    # #459 backward-compat: a NON-empty bare string is coerced to n/a with the
+    # string as evidence — never blocks on its own. An empty / whitespace-only
+    # scalar carries no evidence and must FAIL closed (#460 Codex review).
     if isinstance(value, str):
-        return _ok()
+        if value.strip():
+            return _ok()
+        return _violation(
+            "n/a",
+            "runtime_smoke scalar is empty — no evidence recorded; re-run PROVE",
+        )
 
     if not isinstance(value, dict):
         return _violation(
@@ -948,19 +964,24 @@ def validate_runtime_smoke(value) -> dict:
         return _violation("fail", "runtime_smoke reported FAIL — smoke run failed")
 
     if status == "pass":
-        if _empty(evidence):
-            return _violation("pass", "runtime_smoke PASS requires non-empty evidence")
-        if _empty(command):
+        if not _nonempty_str(evidence):
             return _violation(
                 "pass",
-                "runtime_smoke PASS requires the command that was run (none recorded)",
+                "runtime_smoke PASS requires non-empty string evidence",
+            )
+        if not _nonempty_str(command):
+            return _violation(
+                "pass",
+                "runtime_smoke PASS requires the command that was run "
+                "(a non-empty string; none recorded)",
             )
         return _ok()
 
     # status == "n/a"
-    if _empty(evidence):
+    if not _nonempty_str(evidence):
         return _violation(
-            "n/a", "runtime_smoke n/a requires evidence (the justification)"
+            "n/a",
+            "runtime_smoke n/a requires non-empty string evidence (the justification)",
         )
     return _ok()
 

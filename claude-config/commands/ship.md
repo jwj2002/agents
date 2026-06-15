@@ -196,6 +196,7 @@ Exit-code contract (from `prove_gate.py`):
 | 3 | PASS but ac_audit has missing/partial (AC-FORBIDS-APPROVE) | **STOP** |
 | 4 | Orchestrate-tracked but PROVE never ran | **STOP** — run PROVE first |
 | 5 | Verdict unreadable (fail-closed) | **STOP** — fix the artifact |
+| 6 | PASS but runtime_smoke (Level 5) absent/FAIL/invalid (GATE_SMOKE_VIOLATION) | **STOP** — fix/re-run PROVE |
 
 On any non-zero exit: STOP, print the gate's reason line, do NOT merge.
 The only bypass is explicit: `--override-prove "<reason>"` reruns the gate

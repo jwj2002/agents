@@ -231,6 +231,73 @@ def test_smoke_non_mapping_non_string_is_violation():
     assert smoke["downgrade_to"] == "FAIL"
 
 
+# ── #460 Codex review: type-confusion + empty-scalar bypass closures ──────────
+
+
+def test_smoke_pass_with_list_command_and_evidence_is_violation():
+    """THE BYPASS: ``command: []`` / ``evidence: []`` stringified to a
+    non-empty repr and wrongly passed. Non-string types FAIL closed now."""
+    smoke = validate_runtime_smoke({"status": "PASS", "command": [], "evidence": []})
+    assert smoke["valid"] is False
+    assert smoke["downgrade_to"] == "FAIL"
+
+
+def test_smoke_pass_with_bool_command_is_violation():
+    """``command: False`` is not a string → FAIL (was a bypass via repr)."""
+    smoke = validate_runtime_smoke(
+        {"status": "PASS", "command": False, "evidence": "x"}
+    )
+    assert smoke["valid"] is False
+    assert smoke["downgrade_to"] == "FAIL"
+
+
+def test_smoke_pass_with_empty_string_command_is_violation():
+    """An empty-STRING command carries no record of what was run → FAIL."""
+    smoke = validate_runtime_smoke({"status": "PASS", "command": "", "evidence": "x"})
+    assert smoke["valid"] is False
+    assert smoke["downgrade_to"] == "FAIL"
+
+
+def test_smoke_na_with_list_evidence_is_violation():
+    """``status: n/a`` with non-string evidence → FAIL (no justification)."""
+    smoke = validate_runtime_smoke({"status": "n/a", "evidence": []})
+    assert smoke["valid"] is False
+    assert smoke["downgrade_to"] == "FAIL"
+
+
+def test_smoke_empty_scalar_is_violation():
+    """An empty scalar string carries no evidence → FAIL closed (was the
+    scalar backward-compat bypass)."""
+    smoke = validate_runtime_smoke("")
+    assert smoke["valid"] is False
+    assert smoke["downgrade_to"] == "FAIL"
+
+
+def test_smoke_whitespace_scalar_is_violation():
+    """A whitespace-only scalar is equivalent to empty → FAIL closed."""
+    smoke = validate_runtime_smoke("   ")
+    assert smoke["valid"] is False
+    assert smoke["downgrade_to"] == "FAIL"
+
+
+def test_smoke_nonempty_scalar_still_coerces_to_na_ok():
+    """Locked design preserved: a NON-empty legacy scalar still coerces to
+    n/a and never blocks."""
+    smoke = validate_runtime_smoke("ran uvicorn, 200 OK")
+    assert smoke["valid"] is True
+    assert smoke["downgrade_to"] is None
+
+
+def test_smoke_fully_valid_pass_block_ok_regression_guard():
+    """Regression guard: a well-formed PASS block still passes."""
+    smoke = validate_runtime_smoke(
+        {"status": "PASS", "command": "pytest -q", "evidence": "58 passed"}
+    )
+    assert smoke["valid"] is True
+    assert smoke["downgrade_to"] is None
+    assert smoke["missing"] == []
+
+
 # ── record_prove_audit ───────────────────────────────────────────────────────
 
 

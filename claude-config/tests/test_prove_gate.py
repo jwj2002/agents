@@ -222,3 +222,25 @@ def test_pass_with_smoke_scalar_string_proceeds(tmp_path):
         runtime_smoke="n/a (no runnable surface)",
     )
     assert G.check_gate(outputs, 42)[0] == G.GATE_PASS
+
+
+def test_pass_with_smoke_list_command_is_violation(tmp_path):
+    """#460 Codex review: a malformed PASS artifact whose ``command`` is a
+    real YAML list ([]) must be caught by the gate (GATE_SMOKE_VIOLATION),
+    not stringified-and-passed. Built via raw YAML so the value parses as an
+    actual list, not a quoted string."""
+    raw = (
+        "---\n"
+        "issue: 42\n"
+        "agent: PROVE\n"
+        "status: PASS\n"
+        "runtime_smoke:\n"
+        "  status: PASS\n"
+        "  command: []\n"
+        "  evidence: []\n"
+        'ac_audit:\n  - ac: "does the thing"\n    status: implemented\n'
+        '    evidence: "file.py:1"\n'
+        "---\n\n# body\n"
+    )
+    outputs = _artifact(tmp_path, "prove-42-060926.md", raw=raw)
+    assert G.check_gate(outputs, 42)[0] == G.GATE_SMOKE_VIOLATION
