@@ -392,29 +392,36 @@ def record_metrics(
             record["codex_overturned"] = dict(codex_overturned)
 
     if recall is not None:
-        _flag = recall.get("flag", "")
-        _fired = recall.get("fired")
-        _facts = recall.get("facts")
-        _n = recall.get("n")
-        if _flag not in _VALID_RECALL_FLAGS:
-            logging.warning(
-                "record_metrics: dropped recall with invalid flag %r", _flag
-            )
-        elif not isinstance(_fired, bool):
-            logging.warning(
-                "record_metrics: dropped recall with non-bool fired %r", _fired
-            )
-        elif not isinstance(_facts, list):
-            logging.warning(
-                "record_metrics: dropped recall with non-list facts %r", _facts
-            )
+        if not isinstance(recall, dict):
+            logging.warning("record_metrics: dropped non-dict recall %r", recall)
         else:
-            record["recall"] = {
-                "fired": _fired,
-                "n": max(0, int(_n)) if _n is not None else 0,
-                "facts": [str(f) for f in _facts],
-                "flag": _flag,
-            }
+            _flag = recall.get("flag", "")
+            _fired = recall.get("fired")
+            _facts = recall.get("facts")
+            _n = recall.get("n")
+            if _flag not in _VALID_RECALL_FLAGS:
+                logging.warning(
+                    "record_metrics: dropped recall with invalid flag %r", _flag
+                )
+            elif not isinstance(_fired, bool):
+                logging.warning(
+                    "record_metrics: dropped recall with non-bool fired %r", _fired
+                )
+            elif not isinstance(_facts, list):
+                logging.warning(
+                    "record_metrics: dropped recall with non-list facts %r", _facts
+                )
+            else:
+                try:
+                    _n_val = max(0, int(_n)) if _n is not None else 0
+                except (TypeError, ValueError):
+                    _n_val = 0
+                record["recall"] = {
+                    "fired": _fired,
+                    "n": _n_val,
+                    "facts": [str(f) for f in _facts],
+                    "flag": _flag,
+                }
 
     target = _memory_dir(project_dir) / "metrics.jsonl"
     try:

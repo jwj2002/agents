@@ -474,3 +474,38 @@ def test_recall_fired_false_with_empty_facts(project_dir):
     assert row["recall"]["fired"] is False
     assert row["recall"]["n"] == 0
     assert row["recall"]["facts"] == []
+
+
+# ── Tests 13–14: Codex R1 remediation (issue #456) ─────────────────────────
+
+
+def test_recall_non_dict_does_not_raise(project_dir):
+    """record_metrics with recall='not-a-dict' must not raise; recall omitted."""
+    record_metrics(
+        project_dir,
+        460,
+        "PASS",
+        "SIMPLE",
+        "backend",
+        [],
+        recall="not-a-dict",
+    )
+    rows = _read_metrics(project_dir)
+    assert len(rows) == 1
+    assert "recall" not in rows[0]
+
+
+def test_recall_non_int_n_does_not_raise(project_dir):
+    """record_metrics with n='abc' must not raise; n recorded as 0."""
+    record_metrics(
+        project_dir,
+        461,
+        "PASS",
+        "SIMPLE",
+        "backend",
+        [],
+        recall={"flag": "on", "fired": True, "facts": [], "n": "abc"},
+    )
+    rows = _read_metrics(project_dir)
+    assert len(rows) == 1
+    assert rows[0]["recall"]["n"] == 0

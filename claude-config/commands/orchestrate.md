@@ -574,15 +574,13 @@ if status == "PASS":
         status = "FAIL"
         print(f"PROVE PASS downgraded to FAIL: {downgrade_reason}")
 
-# Read recall sidecar written at Step 2.85 (fail-open: absent/malformed sidecar → no recall field)
-import glob as _glob
+# Read recall sidecar written at Step 2.85 using the EXACT current-run path.
+# Never glob: a glob could pick up an older run's sidecar if this run's write failed.
 _recall_kwarg = {}
 try:
-    _sidecar_candidates = sorted(
-        _glob.glob(".agents/outputs/recall-$ISSUE-*.json")
-    )
-    if _sidecar_candidates:
-        _sc = json.loads(Path(_sidecar_candidates[-1]).read_text(encoding="utf-8"))
+    _sidecar_path = Path(".agents/outputs/recall-$ISSUE-$MMDDYY.json")
+    if _sidecar_path.exists():
+        _sc = json.loads(_sidecar_path.read_text(encoding="utf-8"))
         _recall_kwarg = {"recall": _sc}
 except Exception:
     pass  # fail-open; record_metrics still runs, just without recall field
