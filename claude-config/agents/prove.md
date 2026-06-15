@@ -172,9 +172,67 @@ grep -rn 'Path(' <changed_files> | grep '~' | grep -v '.expanduser()'
 # Data handoff (DATA_HANDOFF, if sequential steps) — step N-1 output == step N input.
 ```
 
-#### Level 4: FUNCTIONAL
+#### Level 4: UNIT/BUILD
 
-Standard Gates from Section 1 (`ruff check`, `pytest`, `npm run lint`, `npm run build`).
+Standard Gates from Section 1 (`ruff check`, `pytest`, `npm run lint`,
+`npm run build`). This confirms the code compiles and existing tests pass, but
+does not boot any runnable surface.
+
+#### Level 5: RUNTIME (smoke) — MANDATORY for any change with a runnable surface
+
+Boot the changed entrypoint and confirm it starts and responds without error.
+PROVE records the result as `runtime_smoke` in the artifact frontmatter for
+future gate enforcement (see issue #460). Choose the recipe that matches the
+changed stack:
+
+**Backend (FastAPI / HTTP service)**
+```bash
+# Start app under TestClient; hit the changed route or health probe
+python - <<'PY'
+from fastapi.testclient import TestClient
+from <app_module> import app   # adjust import path
+client = TestClient(app)
+resp = client.get("/health")   # or the changed route
+assert resp.status_code < 500, f"Got {resp.status_code}"
+print("smoke: PASS")
+PY
+```
+Assert: response status < 500.
+
+**CLI (click / argparse / typer)**
+```bash
+python -m <module> --help           # must exit 0, print usage
+python -m <module> <real-arg>       # one real invocation against the changed command
+```
+Assert: exit code 0 on `--help`; no ImportError or traceback on real path.
+
+**Worker / background service**
+```bash
+python - <<'PY'
+# Import the entry module; confirm lifespan or ServiceContainer starts cleanly
+import importlib
+mod = importlib.import_module("<worker_module>")
+print("smoke: PASS — no import error")
+PY
+```
+Assert: no ImportError, no AttributeError on startup symbols.
+
+**Frontend (React / Next.js)**
+```bash
+# Use Playwright MCP to load the changed route
+# mcp__playwright__navigate to http://localhost:<port>/<changed-route>
+# mcp__playwright__console_messages — assert no errors
+```
+Assert: page loads (HTTP 200); zero console errors of severity ERROR.
+
+**Escape hatch** — use ONLY for pure refactors, docs, config, or rename changes
+where no entrypoint is exercised. Any change to a route handler, CLI command,
+worker startup, or rendered page requires a smoke run. Record in the PROVE
+artifact as:
+```
+runtime_smoke: n/a (no runnable surface)
+```
+Mirror the coverage escape hatch style: `coverage: n/a (no test infra)`.
 
 ### 3. Acceptance Criteria (per-AC audit — MANDATORY)
 
@@ -251,6 +309,7 @@ date: {YYYY-MM-DD}
 status: PASS            # PASS | FAIL | BLOCKED
 complexity: SIMPLE      # TRIVIAL | SIMPLE | COMPLEX
 stack: backend          # backend | frontend | fullstack
+runtime_smoke: "n/a (no runnable surface)"  # Level 5: PASS | FAIL | n/a (no runnable surface) — issue #460 binds the gate to this field
 root_cause: null        # MANDATORY if status=BLOCKED — use a code from _base.md §10
 blocking_agent: null    # MANDATORY if status=BLOCKED — usually "PROVE"
 # Issue #1612 — per-AC audit (mirrors buddy/prompts/codex-review-clauses.md):
@@ -304,7 +363,8 @@ order). Body skeleton:
 ### Commands Run
 (verbatim output: focused tests, full suite, lint/build)
 ### Verification Levels
-- Level 1 EXISTS / Level 2 SUBSTANTIVE / Level 3 WIRED / Level 4 FUNCTIONAL — ✅ or ❌ [detail]
+- Level 1 EXISTS / Level 2 SUBSTANTIVE / Level 3 WIRED / Level 4 UNIT/BUILD / Level 5 RUNTIME (smoke) — ✅ or ❌ [detail]
+- runtime_smoke: PASS | FAIL | n/a (no runnable surface)
 ### Acceptance Criteria
 (prose table; the authoritative copy is the frontmatter `ac_audit`)
 
@@ -334,11 +394,14 @@ steps, and a prevention recommendation. Do NOT approve. Return to orchestrator.
 
 ```markdown
 - [ ] Ran the applicable gates (ruff/pytest for backend; npm lint/build for frontend)
-- [ ] Levels 1–4 all pass (EXISTS, SUBSTANTIVE, WIRED, FUNCTIONAL) — WIRED items
+- [ ] Levels 1–4 all pass (EXISTS, SUBSTANTIVE, WIRED, UNIT/BUILD) — WIRED items
       per the Level 3 list above (reachability, callee existence, service
       registration, enum VALUE, expanduser, pipeline handoff)
-- [ ] Frontmatter has status + complexity + stack + `ac_audit` (one per AC bullet,
-      #1612) + `applicable_evals` + `eval_results`
+- [ ] Level 5 RUNTIME smoke: ran per-stack recipe OR recorded
+      `runtime_smoke: n/a (no runnable surface)` with justification (escape hatch
+      restricted to pure refactors/docs/config/renames)
+- [ ] Frontmatter has status + complexity + stack + `runtime_smoke` (Level 5) +
+      `ac_audit` (one per AC bullet, #1612) + `applicable_evals` + `eval_results`
 - [ ] If BLOCKED: frontmatter `root_cause` (§10) + `blocking_agent`, body
       `## Failure Details` (details/fix/prevention)
 - [ ] If FAIL (AC gap): prose AC table names which AC(s) are missing/partial and why
