@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # lib/ on path
+# scripts/ on path for format_recall_section import
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[2] / "claude-config" / "scripts")
+)
 
 from coding_memory import cli as C  # noqa: E402
 from coding_memory import parse as P  # noqa: E402
+from coding_memory import store as S  # noqa: E402
 
 
 def test_parse_full_frontmatter():
@@ -172,3 +180,143 @@ def test_embed_service_non_loopback_refused(monkeypatch):
     # residency: a non-loopback URL must never receive fact text -> fall back local
     monkeypatch.setenv("CODING_MEMORY_EMBED_URL", "http://example.com:8788")
     assert E._try_service(["x"], "doc") is None
+
+
+# ---- recall telemetry unit tests (#455) ----
+
+
+def test_log_recall_inserts_and_commits():
+    """log_recall calls INSERT and commits — happy path via mock conn."""
+    conn = MagicMock()
+    cursor_ctx = MagicMock()
+    cursor_obj = MagicMock()
+    cursor_ctx.__enter__ = MagicMock(return_value=cursor_obj)
+    cursor_ctx.__exit__ = MagicMock(return_value=False)
+    conn.cursor.return_value = cursor_ctx
+
+    S.log_recall(
+        conn,
+        origin="test-host",
+        kind="push",
+        mode="vector",
+        n_returned=5,
+        n_injected=3,
+        top_score=0.87,
+        facts=[{"ns": "agents", "name": "foo", "score": 0.87}],
+        latency_ms=42,
+    )
+
+    assert cursor_obj.execute.called
+    sql_arg = cursor_obj.execute.call_args[0][0]
+    assert "INSERT INTO recall_event" in sql_arg
+    conn.commit.assert_called_once()
+
+
+def test_log_recall_truncates_facts_to_5():
+    """log_recall stores at most 5 facts even when caller passes more."""
+    conn = MagicMock()
+    cursor_ctx = MagicMock()
+    cursor_obj = MagicMock()
+    cursor_ctx.__enter__ = MagicMock(return_value=cursor_obj)
+    cursor_ctx.__exit__ = MagicMock(return_value=False)
+    conn.cursor.return_value = cursor_ctx
+
+    facts_8 = [{"ns": "a", "name": f"f{i}", "score": 0.9} for i in range(8)]
+    S.log_recall(
+        conn,
+        origin="test-host",
+        kind="pull",
+        mode="hybrid",
+        n_returned=8,
+        n_injected=8,
+        top_score=0.9,
+        facts=facts_8,
+        latency_ms=10,
+    )
+
+    call_args = cursor_obj.execute.call_args[0]
+    params = call_args[1]  # second positional arg is the params tuple
+    facts_json_str = params[6]  # 7th param = facts JSONB
+    stored = json.loads(facts_json_str)
+    assert len(stored) == 5
+
+
+def test_recall_report_agg_returns_shape():
+    """recall_report_agg returns the expected dict shape via mock cursor."""
+    conn = MagicMock()
+    cursor_ctx = MagicMock()
+    cursor_obj = MagicMock()
+    cursor_ctx.__enter__ = MagicMock(return_value=cursor_obj)
+    cursor_ctx.__exit__ = MagicMock(return_value=False)
+    conn.cursor.return_value = cursor_ctx
+
+    # First fetchone (agg query): n_total, n_push, n_pull, n_inj, n_ret, p50
+    cursor_obj.fetchone.return_value = (10, 7, 3, 15, 20, 38.5)
+    # fetchall (top_facts query): [(ns, name, count), ...]
+    cursor_obj.fetchall.return_value = [("agents", "some-fact", 4)]
+
+    result = S.recall_report_agg(conn, days=7)
+
+    assert result["n_total"] == 10
+    assert result["n_push"] == 7
+    assert result["n_pull"] == 3
+    assert result["n_injected_total"] == 15
+    assert result["n_returned_total"] == 20
+    assert result["p50_latency_ms"] == 38
+    assert result["days"] == 7
+    assert len(result["top_facts"]) == 1
+    assert result["top_facts"][0]["ns"] == "agents"
+    assert result["top_facts"][0]["count"] == 4
+
+
+def test_format_recall_section_data_unavailable(monkeypatch):
+    """format_recall_section returns stub when subprocess exits non-zero."""
+    import cost_report_weekly as W
+
+    mock_result = MagicMock()
+    mock_result.returncode = 1
+    mock_result.stdout = ""
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: mock_result)
+
+    out = W.format_recall_section()
+    assert "data unavailable" in out
+    assert "## Recall" in out
+
+
+def test_format_recall_section_renders_table(monkeypatch):
+    """format_recall_section renders the markdown table when data is valid."""
+    import cost_report_weekly as W
+
+    payload = {
+        "n_total": 42,
+        "n_push": 30,
+        "n_pull": 12,
+        "n_injected_total": 25,
+        "n_returned_total": 30,
+        "p50_latency_ms": 55,
+        "top_facts": [{"ns": "agents", "name": "some-rule", "count": 7}],
+        "days": 7,
+    }
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = json.dumps(payload)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: mock_result)
+
+    out = W.format_recall_section()
+    assert "## Recall (last 7 days)" in out
+    assert "42" in out  # n_total
+    assert "some-rule" in out
+
+
+def test_format_recall_section_exception_returns_stub(monkeypatch):
+    """format_recall_section is fail-open even on subprocess.TimeoutExpired."""
+    import cost_report_weekly as W
+
+    def _raise(*a, **kw):
+        raise subprocess.TimeoutExpired(cmd="coding-memory", timeout=30)
+
+    monkeypatch.setattr(subprocess, "run", _raise)
+
+    out = W.format_recall_section()
+    assert "data unavailable" in out
