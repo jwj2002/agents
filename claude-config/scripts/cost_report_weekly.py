@@ -121,6 +121,79 @@ def _recall_correlation(metrics_path: Path) -> str:
         return ""  # fail-open — BLE001 exempt for scripts/
 
 
+def _recall_flag_delta(metrics_path: Path) -> str:
+    """Compute first-pass rate split by recall.flag (on vs off) from metrics.jsonl.
+
+    Returns a markdown subsection when each cohort (flag=="on" and flag=="off")
+    has N >= 3 qualifying records (records with both a recall.flag str AND a
+    first_pass_correct bool). Returns "" when the file is missing, unreadable,
+    or either cohort is below the minimum threshold. Returns a brief
+    "insufficient data" notice when ANY flag-bearing records exist but either
+    cohort is below threshold — so the report always shows experiment status
+    once data starts accumulating.
+
+    Fail-open: any I/O or parse error returns "". BLE001 exempt — scripts/.
+    """
+    try:
+        if not metrics_path.exists():
+            return ""
+        records = []
+        for line in metrics_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except Exception:
+                continue
+
+        on_pass = on_total = 0
+        off_pass = off_total = 0
+        for rec in records:
+            recall = rec.get("recall")
+            if not isinstance(recall, dict):
+                continue  # pre-L2 record — exclude
+            flag = recall.get("flag")
+            if flag not in ("on", "off"):
+                continue
+            fpc = rec.get("first_pass_correct")
+            if not isinstance(fpc, bool):
+                continue
+            if flag == "on":
+                on_total += 1
+                if fpc:
+                    on_pass += 1
+            else:
+                off_total += 1
+                if fpc:
+                    off_pass += 1
+
+        min_n = 3
+        if on_total < min_n or off_total < min_n:
+            if on_total + off_total > 0:
+                return (
+                    "### Flag delta (CODING_MEMORY_RECALL on vs off)\n\n"
+                    f"_insufficient data — on N={on_total}, off N={off_total} "
+                    f"(need ≥{min_n} each)_"
+                )
+            return ""
+
+        on_rate = f"{on_pass / on_total:.0%}"
+        off_rate = f"{off_pass / off_total:.0%}"
+
+        lines = [
+            "### Flag delta (CODING_MEMORY_RECALL on vs off)",
+            "",
+            "| cohort | issues | first-pass rate |",
+            "|--------|--------|-----------------|",
+            f"| recall on  | {on_total} | {on_rate} |",
+            f"| recall off | {off_total} | {off_rate} |",
+        ]
+        return "\n".join(lines)
+    except Exception:
+        return ""  # fail-open — BLE001 exempt for scripts/
+
+
 def format_recall_section(
     bin_path: Path | None = None,
     metrics_path: Path | None = None,
@@ -197,6 +270,13 @@ def format_recall_section(
             if corr:
                 lines.append("")
                 lines.extend(corr.splitlines())
+        except Exception:
+            pass  # fail-open — BLE001 exempt for scripts/
+        try:
+            flag_delta = _recall_flag_delta(metrics_path)
+            if flag_delta:
+                lines.append("")
+                lines.extend(flag_delta.splitlines())
         except Exception:
             pass  # fail-open — BLE001 exempt for scripts/
 
