@@ -103,7 +103,18 @@ def test_residency_rejects_path_outside_namespace_root(tmp_path):
 
 def test_residency_defaults_pass():
     out = C._sources_from_args(None)
-    assert set(out) == {"agents", "buddy"}
+    assert set(out) == {"agents", "buddy", "global"}
+
+
+def test_global_record_uses_shared_origin():
+    # git-synced global facts get a fixed origin so they dedupe across machines
+    rec = P._record("global", "/x/agents/memory/global/foo.md", "---\nname: f\n---\nb")
+    assert rec["origin"] == "shared"
+
+
+def test_project_record_uses_hostname_origin():
+    rec = P._record("agents", "/x/.claude/projects/p/memory/foo.md", "body")
+    assert rec["origin"] == P.current_origin()
 
 
 def test_embed_service_disabled_returns_none(monkeypatch):
