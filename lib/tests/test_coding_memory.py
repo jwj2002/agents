@@ -119,3 +119,11 @@ def test_embed_service_unreachable_returns_none(monkeypatch):
     # pointed at a dead port -> _try_service swallows the error and returns None
     monkeypatch.setenv("CODING_MEMORY_EMBED_URL", "http://127.0.0.1:1")
     assert E._try_service(["x"], "doc") is None
+
+
+def test_embed_service_non_loopback_refused(monkeypatch):
+    from coding_memory import embedder as E
+
+    # residency: a non-loopback URL must never receive fact text -> fall back local
+    monkeypatch.setenv("CODING_MEMORY_EMBED_URL", "http://example.com:8788")
+    assert E._try_service(["x"], "doc") is None

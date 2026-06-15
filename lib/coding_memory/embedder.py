@@ -14,9 +14,12 @@ from __future__ import annotations
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from . import DOC_PREFIX, EMBED_BATCH, EMBED_MAXCHARS, EMBED_MODEL, QUERY_PREFIX
+
+_LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
 
 _model = None
 _SERVICE_TIMEOUT = 30  # seconds; warm calls return in well under this
@@ -60,6 +63,10 @@ def _try_service(texts: list[str], kind: str) -> list[list[float]] | None:
     """POST to the warm embed service; return vectors, or None to fall back."""
     base = os.environ.get("CODING_MEMORY_EMBED_URL")
     if not base:
+        return None
+    # Residency: only ever POST memory text to a loopback service. A misconfigured
+    # (or hostile) non-local URL must never receive fact text — fall back to local.
+    if urllib.parse.urlparse(base).hostname not in _LOOPBACK:
         return None
     payload = json.dumps({"texts": texts, "kind": kind}).encode()
     req = urllib.request.Request(
