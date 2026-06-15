@@ -1,0 +1,22 @@
+# coding-memory warm embedding service (jns). Localhost-only; keeps the FastEmbed
+# model warm so query/ingest skip the ~5s cold start. The CLI opts in via
+# CODING_MEMORY_EMBED_URL and falls back to in-process embedding if this is down.
+# Deploy (jns): sudo cp claude-config/systemd/coding-memory-embed.service /etc/systemd/system/
+#               sudo systemctl daemon-reload && sudo systemctl enable --now coding-memory-embed
+[Unit]
+Description=coding-memory warm embedding service (localhost)
+After=network.target
+
+[Service]
+Type=simple
+User=jwj2002
+WorkingDirectory=/home/jwj2002/agents
+Environment=PYTHONPATH=/home/jwj2002/agents/lib
+Environment=FASTEMBED_CACHE=/home/jwj2002/buddy/memory/model_cache
+Environment=CODING_MEMORY_EMBED_PORT=8788
+ExecStart=/home/jwj2002/agents/.venv/bin/python -m coding_memory.embed_service
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
