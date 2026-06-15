@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -185,6 +186,22 @@ def cmd_query(args, cfg):
 
 _RECALL_HEADER = "## Recalled coding-memory (semantic; verify before trusting)"
 
+# This text is injected into phase prompts, so screen fact content for
+# instruction-injection (a fact could contain "ignore prior instructions" etc.).
+_INJECT_RE = re.compile(
+    r"(ignore|disregard)\b.*\b(previous|prior|above|earlier)\b.*\b(instruction|context|prompt)"
+    r"|you are now\b|system\s*prompt\s*:|\[/?INST\]|<\|im_start\|>",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _scrub_recall(text: str) -> str:
+    """Sanitize a recalled name/summary before it enters a prompt: drop control
+    chars, strip leading markdown structure (no fake headers/lists), and withhold
+    anything that looks like an instruction-injection attempt."""
+    t = _sanitize(text).lstrip("#>*-` \t")
+    return "[withheld — injection-like content]" if _INJECT_RE.search(t) else t
+
 
 def _prompt_block(rows, max_chars=700):
     """A bounded, prompt-ready recall block: header + one summary line per fact,
@@ -194,11 +211,11 @@ def _prompt_block(rows, max_chars=700):
         return ""
     lines = [_RECALL_HEADER]
     for r in rows:
-        summ = _sanitize((r.get("summary") or "").replace("\n", " "))
+        summ = _scrub_recall((r.get("summary") or "").replace("\n", " "))
         if len(summ) > 100:
             summ = summ[:97] + "..."
         lines.append(
-            f"- [{r['namespace']}] {_sanitize(r['name'])}"
+            f"- [{r['namespace']}] {_scrub_recall(r['name'])}"
             + (f" — {summ}" if summ else "")
         )
     block = "\n".join(lines)

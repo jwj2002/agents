@@ -337,8 +337,10 @@ cross-project `global` craft lessons.
 ```
 
 - **Budget (deliberately small — this rides inside every phase prompt):** top-3
-  facts, one summary line each, hard-capped block. Capture verbatim as
-  `{CODING_MEMORY_BLOCK}`. Summaries only — never bodies.
+  facts, one summary line each, **hard-capped at ~700 chars** total. Capture
+  verbatim as `{CODING_MEMORY_BLOCK}`. Summaries only — never bodies. Fact text is
+  injection-screened before it enters the block (instruction-injection content is
+  withheld).
 - **Fail-open:** if the command errors, times out, prints nothing, or the store
   is unreachable (e.g. jns down / offline), set `{CODING_MEMORY_BLOCK}` to empty
   and proceed. Recall must NEVER block or delay a phase.
