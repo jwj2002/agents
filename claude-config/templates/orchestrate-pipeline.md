@@ -49,6 +49,8 @@ tables below specify just the variables that change.
 ## Project Memory (relevant facts — Read the body of any that bear on your work)
 {PROJECT_MEMORY_BLOCK}
 
+{CODING_MEMORY_BLOCK}
+
 {PRIOR_FAILURE_BLOCK}
 
 ## Per-Run Instructions
@@ -67,6 +69,11 @@ End your response with `AGENT_RETURN: {ARTIFACT_NAME}`.
 > index of paths + descriptions, so it honors the Fresh Context Rule (agents
 > Read the bodies on demand). New phase agents inherit it automatically; no
 > per-agent edit needed.
+>
+> `{CODING_MEMORY_BLOCK}` is the **semantic** recall from the coding-memory store
+> (Step 2.85, `coding-memory query … --for-prompt`): a small, hard-capped block
+> (top-3, summaries only) injected the same way. Fail-open — empty if the store is
+> unreachable, never blocking a phase.
 
 ---
 

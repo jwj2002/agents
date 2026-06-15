@@ -324,6 +324,30 @@ the CLI:
   Context-Isolation rule in `templates/agent-prompt.md`).
 - On `--resume`, reuse the block if already captured; otherwise re-recall.
 
+### Step 2.85: Recall Coding-Memory (semantic; once per workflow)
+
+Complement the keyword recall above with **semantic** recall from the personal
+coding-memory store (pgvector). This is the high-signal "have I learned this
+before?" check — it surfaces the one prior lesson that prevents a re-do (e.g. a
+gotcha for the subsystem you're about to touch), drawn from all your machines +
+cross-project `global` craft lessons.
+
+```bash
+~/agents/bin/coding-memory query "<issue title + key nouns + changed paths>" -k 3 --for-prompt
+```
+
+- **Budget (deliberately small — this rides inside every phase prompt):** top-3
+  facts, one summary line each, **hard-capped at ~700 chars** total. Capture
+  verbatim as `{CODING_MEMORY_BLOCK}`. Summaries only — never bodies. Fact text is
+  injection-screened before it enters the block (instruction-injection content is
+  withheld).
+- **Fail-open:** if the command errors, times out, prints nothing, or the store
+  is unreachable (e.g. jns down / offline), set `{CODING_MEMORY_BLOCK}` to empty
+  and proceed. Recall must NEVER block or delay a phase.
+- Inject the block into MAP/MAP-PLAN, PLAN, PATCH, and PROVE phase prompts
+  (alongside `{PROJECT_MEMORY_BLOCK}`). Agents treat it as a hint to verify, not
+  ground truth. Reuse across phases; re-recall only on `--resume` if absent.
+
 ### Step 3: Spawn Agents (Task Tool)
 
 **CRITICAL**: Use the Task tool to spawn each phase agent via **native subagent
