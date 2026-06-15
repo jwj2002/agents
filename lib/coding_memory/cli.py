@@ -328,6 +328,41 @@ def _doctor(payload, cfg):
     return 0
 
 
+# ---------- eval (recall quality) ----------
+
+
+def cmd_eval(args, cfg):
+    if is_remote(cfg):
+        return _ssh(cfg, ["_eval"] + (["--json"] if args.json else []))
+    return _eval_run(args.json, cfg)
+
+
+def _eval_run(as_json, cfg):
+    from . import embedder, eval_recall, store
+
+    cache = cfg.get("FASTEMBED_CACHE")
+    conn = store.connect(cfg["DATABASE_URL"])
+    try:
+
+        def search_fn(query, mode, k):
+            qvec = embedder.embed_query(query, cache_dir=cache)
+            return store.search(conn, qvec, text=query, k=k, mode=mode)
+
+        result = eval_recall.score(search_fn)
+    finally:
+        conn.close()
+    if as_json:
+        print(json.dumps(result))
+        return 0
+    n = result["n"]
+    print(f"recall eval over {n} pairs   (hit@k)")
+    print(f"{'mode':<8}{'@1':>6}{'@3':>6}{'@5':>6}")
+    for m in eval_recall.MODES:
+        h = result[m]
+        print(f"{m:<8}{h[1]:>6}{h[3]:>6}{h[5]:>6}")
+    return 0
+
+
 def build_parser():
     p = argparse.ArgumentParser(
         prog="coding-memory", description="Personal coding-memory store (jns)."
@@ -368,6 +403,11 @@ def build_parser():
     )
     d.add_argument("--json", action="store_true")
 
+    ev = sub.add_parser(
+        "eval", help="recall-quality scoreboard (fixed query/fact pairs)"
+    )
+    ev.add_argument("--json", action="store_true")
+
     # internal (server-side on jns)
     sub.add_parser("_embed-store")
     qq = sub.add_parser("_query")
@@ -377,6 +417,8 @@ def build_parser():
     qq.add_argument("--namespace", action="append")
     sub.add_parser("_stats")
     sub.add_parser("_doctor")
+    _ev = sub.add_parser("_eval")
+    _ev.add_argument("--json", action="store_true")
     return p
 
 
@@ -391,6 +433,8 @@ def main(argv=None):
         return cmd_stats(args, cfg)
     if args.cmd == "doctor":
         return cmd_doctor(args, cfg)
+    if args.cmd == "eval":
+        return cmd_eval(args, cfg)
     if args.cmd == "_embed-store":
         return _embed_store(sys.stdin.read(), cfg)
     if args.cmd == "_query":
@@ -399,6 +443,8 @@ def main(argv=None):
         return cmd_stats(args, cfg)
     if args.cmd == "_doctor":
         return _doctor(sys.stdin.read(), cfg)
+    if args.cmd == "_eval":
+        return _eval_run(args.json, cfg)
     raise SystemExit(2)
 
 
