@@ -247,7 +247,8 @@ def _query(text, args, cfg):
     finally:
         conn.close()
     if for_prompt:
-        min_score = getattr(args, "min_score", None) or RECALL_MIN_SCORE
+        ms = getattr(args, "min_score", None)
+        min_score = ms if ms is not None else RECALL_MIN_SCORE  # allow explicit 0.0
         rows = [r for r in rows if r.get("score", 0.0) >= min_score]
         block = _prompt_block(rows)  # empty -> nothing injected (fail-open)
         if block:
