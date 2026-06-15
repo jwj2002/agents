@@ -20,6 +20,10 @@ import urllib.request
 from . import DOC_PREFIX, EMBED_BATCH, EMBED_MAXCHARS, EMBED_MODEL, QUERY_PREFIX
 
 _LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+# No-proxy opener: even a loopback URL could be routed off-box via HTTP_PROXY/
+# http_proxy env. ProxyHandler({}) disables all proxies so fact text never leaves
+# the host (residency).
+_NO_PROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 _model = None
 _SERVICE_TIMEOUT = 30  # seconds; warm calls return in well under this
@@ -76,7 +80,7 @@ def _try_service(texts: list[str], kind: str) -> list[list[float]] | None:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=_SERVICE_TIMEOUT) as resp:
+        with _NO_PROXY_OPENER.open(req, timeout=_SERVICE_TIMEOUT) as resp:
             vecs = json.loads(resp.read()).get("vectors")
         if isinstance(vecs, list) and len(vecs) == len(texts):
             return vecs
