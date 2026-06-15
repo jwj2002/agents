@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -53,6 +55,12 @@ def commit_file(work: Path, path: str = "tooling.txt", message: str = "feat(git)
     target.write_text("content\n", encoding="utf-8")
     git(["add", path], work)
     git(["commit", "-m", message], work)
+
+
+def write_log(tmp_path: Path, body: str = "pytest lib/tests/ -q\n... passed\n") -> Path:
+    log = tmp_path / "validation.log"
+    log.write_text(body, encoding="utf-8")
+    return log
 
 
 def test_preflight_fails_on_main_branch(tmp_path: Path) -> None:
@@ -163,6 +171,7 @@ def test_readiness_passes_with_issue_summary_tests_and_scope(tmp_path: Path) -> 
     work = make_repo(tmp_path)
     branch_for_issue(work, 42)
     commit_file(work, "src/tool.py")
+    log = write_log(tmp_path)
 
     result = readiness(
         work,
@@ -171,6 +180,7 @@ def test_readiness_passes_with_issue_summary_tests_and_scope(tmp_path: Path) -> 
         test_evidence=["pytest lib/tests/test_agent_git.py -q"],
         allowed_paths=["src/"],
         generate_pr_body=True,
+        validation_log=str(log),
     )
 
     assert result.ok
@@ -242,6 +252,7 @@ def test_readiness_cli_generates_pr_body(tmp_path: Path) -> None:
     work = make_repo(tmp_path)
     branch_for_issue(work, 42)
     commit_file(work, "src/tool.py")
+    log = write_log(tmp_path)
     script = Path(__file__).resolve().parents[2] / "bin" / "agent-git"
 
     completed = subprocess.run(
@@ -259,6 +270,8 @@ def test_readiness_cli_generates_pr_body(tmp_path: Path) -> None:
             "pytest lib/tests/test_agent_git.py -q",
             "--allowed-path",
             "src/",
+            "--validation-log",
+            str(log),
             "--generate-pr-body",
             "--json",
         ],
@@ -278,6 +291,7 @@ def test_ship_dry_run_passes_through_gates(tmp_path: Path) -> None:
     work = make_repo(tmp_path)
     branch_for_issue(work, 42)
     commit_file(work, "src/tool.py")
+    log = write_log(tmp_path)
 
     result = ship(
         work,
@@ -287,6 +301,7 @@ def test_ship_dry_run_passes_through_gates(tmp_path: Path) -> None:
         allowed_paths=["src/"],
         dry_run=True,
         no_fetch=True,
+        validation_log=str(log),
     )
 
     assert result.ok
@@ -336,6 +351,7 @@ def test_ship_cli_dry_run_json(tmp_path: Path) -> None:
     work = make_repo(tmp_path)
     branch_for_issue(work, 42)
     commit_file(work, "src/tool.py")
+    log = write_log(tmp_path)
     script = Path(__file__).resolve().parents[2] / "bin" / "agent-git"
 
     completed = subprocess.run(
@@ -353,6 +369,8 @@ def test_ship_cli_dry_run_json(tmp_path: Path) -> None:
             "pytest lib/tests/test_agent_git.py -q",
             "--allowed-path",
             "src/",
+            "--validation-log",
+            str(log),
             "--dry-run",
             "--no-fetch",
             "--json",
@@ -368,6 +386,222 @@ def test_ship_cli_dry_run_json(tmp_path: Path) -> None:
     assert payload["ok"] is True
     assert payload["dry_run"] is True
     assert "squash_merge" in payload["steps"]
+
+
+def test_readiness_runnable_without_log_errors(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/foo.py")
+
+    result = readiness(
+        work,
+        issue=42,
+        summary="add shared git tooling",
+        test_evidence=["pytest -q"],
+        allowed_paths=["src/"],
+        validation_log=None,
+    )
+
+    assert not result.ok
+    assert any("requires --validation-log" in error for error in result.errors)
+    assert result.validation_log_status == "absent"
+
+
+def test_readiness_runnable_missing_log_file_errors(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/foo.py")
+
+    result = readiness(
+        work,
+        issue=42,
+        summary="add shared git tooling",
+        test_evidence=["pytest -q"],
+        allowed_paths=["src/"],
+        validation_log=str(tmp_path / "nope.log"),
+    )
+
+    assert not result.ok
+    assert any("not found" in error for error in result.errors)
+    assert result.validation_log_status == "missing"
+
+
+def test_readiness_runnable_stale_log_errors(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/foo.py")
+    log = write_log(tmp_path, "ran the suite via pytest -q\n... passed\n")
+    old = time.time() - 3600
+    os.utime(log, (old, old))
+
+    result = readiness(
+        work,
+        issue=42,
+        summary="add shared git tooling",
+        test_evidence=["pytest -q"],
+        allowed_paths=["src/"],
+        validation_log=str(log),
+    )
+
+    assert not result.ok
+    assert any("stale" in error for error in result.errors)
+    assert result.validation_log_status == "stale"
+
+
+def test_readiness_runnable_fresh_log_with_pytest_passes(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/foo.py")
+    log = write_log(tmp_path)
+
+    result = readiness(
+        work,
+        issue=42,
+        summary="add shared git tooling",
+        test_evidence=["pytest -q"],
+        allowed_paths=["src/"],
+        validation_log=str(log),
+    )
+
+    assert result.ok
+    assert result.validation_log_status == "ok"
+
+
+def test_readiness_non_runnable_md_prose_passes(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "docs/guide.md", "docs(guide): add guide")
+
+    result = readiness(
+        work,
+        issue=42,
+        summary="add a guide",
+        test_evidence=["manual review"],
+        allowed_paths=["docs/"],
+        validation_log=None,
+    )
+
+    assert result.ok
+    assert result.validation_log_status is None
+
+
+def test_readiness_runnable_log_without_command_errors(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/foo.py")
+    log = write_log(tmp_path, "all good, ran the suite\n")
+
+    result = readiness(
+        work,
+        issue=42,
+        summary="add shared git tooling",
+        test_evidence=["pytest -q"],
+        allowed_paths=["src/"],
+        validation_log=str(log),
+    )
+
+    assert not result.ok
+    assert any("recognized test/lint command" in error for error in result.errors)
+    assert result.validation_log_status == "no_commands"
+
+
+def test_readiness_runnable_log_with_prose_only_command_errors(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/foo.py")
+    log = write_log(tmp_path, "we will run pytest later\n")
+
+    result = readiness(
+        work,
+        issue=42,
+        summary="add shared git tooling",
+        test_evidence=["pytest -q"],
+        allowed_paths=["src/"],
+        validation_log=str(log),
+    )
+
+    assert not result.ok
+    assert any("recognized test/lint command" in error for error in result.errors)
+    assert result.validation_log_status == "no_commands"
+
+
+def test_readiness_runnable_log_with_prompt_prefixed_command_passes(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/foo.py")
+    log = write_log(tmp_path, "$ pytest -q\n... 35 passed\n")
+
+    result = readiness(
+        work,
+        issue=42,
+        summary="add shared git tooling",
+        test_evidence=["pytest -q"],
+        allowed_paths=["src/"],
+        validation_log=str(log),
+    )
+
+    assert result.ok
+    assert result.validation_log_status == "ok"
+
+
+def test_readiness_runnable_fresh_via_sha_passes(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/foo.py")
+    sha = git(["rev-parse", "--short", "HEAD"], work).stdout.strip()
+    log = write_log(tmp_path, f"pytest -q\nvalidated at {sha}\n")
+    old = time.time() - 3600
+    os.utime(log, (old, old))
+
+    result = readiness(
+        work,
+        issue=42,
+        summary="add shared git tooling",
+        test_evidence=["pytest -q"],
+        allowed_paths=["src/"],
+        validation_log=str(log),
+    )
+
+    assert result.ok
+    assert result.validation_log_status == "ok"
+
+
+def test_readiness_cli_validation_log(tmp_path: Path) -> None:
+    work = make_repo(tmp_path)
+    branch_for_issue(work, 42)
+    commit_file(work, "src/tool.py")
+    log = write_log(tmp_path)
+    script = Path(__file__).resolve().parents[2] / "bin" / "agent-git"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "readiness",
+            "--repo",
+            str(work),
+            "--issue",
+            "42",
+            "--summary",
+            "add shared git tooling",
+            "--test-evidence",
+            "pytest lib/tests/test_agent_git.py -q",
+            "--allowed-path",
+            "src/",
+            "--validation-log",
+            str(log),
+            "--json",
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    payload = json.loads(completed.stdout)
+    assert payload["ok"] is True
+    assert payload["validation_log_status"] == "ok"
 
 
 def test_cleanup_deletes_merged_branch(tmp_path: Path) -> None:
