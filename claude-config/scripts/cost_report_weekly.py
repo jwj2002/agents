@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import socket
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,15 +26,20 @@ import usage_aggregator as A  # noqa: E402
 import usage_email as E  # noqa: E402
 import usage_report as R  # noqa: E402
 
-TELEMETRY_DIR = Path.home() / ".claude" / "telemetry"          # read_shards globs */usage.jsonl under here
+TELEMETRY_DIR = (
+    Path.home() / ".claude" / "telemetry"
+)  # read_shards globs */usage.jsonl under here
 REPORTS_DIR = Path.home() / ".claude" / "cost-reports"
-EMAIL_STATE = Path.home() / ".claude" / "cost-telemetry" / "email-state.json"  # email-only state (no collector races)
+EMAIL_STATE = (
+    Path.home() / ".claude" / "cost-telemetry" / "email-state.json"
+)  # email-only state (no collector races)
 
 
 def _host() -> str:
     try:
         sys.path.insert(0, str(Path.home() / "agents" / "lib"))
         from project_resolver import get_host_name
+
         return get_host_name()
     except Exception:
         return socket.gethostname().split(".")[0] or "unknown"
@@ -51,6 +57,63 @@ def _save_state(state: dict) -> None:
     EMAIL_STATE.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
 
 
+def format_recall_section(bin_path: Path | None = None) -> str:
+    """Shell out to coding-memory recall-report --json --days 7.
+
+    Fail-open: returns a one-line "data unavailable" notice on any error
+    so the weekly report still sends when jns is unreachable or the CLI
+    is absent. Broad catch is intentional (BLE001 exempted for scripts/).
+    Uses the absolute bin path so launchd's restricted PATH is not a problem.
+    """
+    if bin_path is None:
+        bin_path = Path.home() / "agents" / "bin" / "coding-memory"
+    stub = "## Recall (last 7 days)\n\n_data unavailable this week_"
+    try:
+        proc = subprocess.run(
+            [str(bin_path), "recall-report", "--json", "--days", "7"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return stub
+        data = json.loads(proc.stdout)
+    except Exception:
+        return stub
+
+    n_total = data.get("n_total", 0)
+    n_push = data.get("n_push", 0)
+    n_pull = data.get("n_pull", 0)
+    n_inj = data.get("n_injected_total", 0)
+    n_ret = data.get("n_returned_total", 0)
+    p50 = data.get("p50_latency_ms")
+    top_facts = data.get("top_facts", [])
+    days = data.get("days", 7)
+
+    eff_str = f"{n_inj / n_ret:.0%}" if n_ret else "n/a"
+    p50_str = f"{p50} ms" if p50 is not None else "n/a"
+
+    lines = [
+        f"## Recall (last {days} days)",
+        "",
+        "| metric | value |",
+        "|--------|-------|",
+        f"| total queries | {n_total} |",
+        f"| push (prompt inject) | {n_push} |",
+        f"| pull (interactive) | {n_pull} |",
+        f"| gate efficiency (injected/returned) | {eff_str} |",
+        f"| p50 latency | {p50_str} |",
+    ]
+    if top_facts:
+        lines += ["", "**Top surfaced facts:**", ""]
+        for f in top_facts:
+            lines.append(
+                f"- [{f.get('ns', '?')}] {f.get('name', '?')} ×{f.get('count', 0)}"
+            )
+
+    return "\n".join(lines)
+
+
 def main() -> int:
     now = datetime.now(timezone.utc)
     host = _host()
@@ -61,20 +124,33 @@ def main() -> int:
     agg = A.aggregate(records)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     html_path = REPORTS_DIR / f"cost-report-{host}-{wk}.html"
-    R.write_report(agg, html_path, records=records)          # writes .html + .md
-    md = html_path.with_suffix(".md").read_text(encoding="utf-8")  # email body = the local .md
-    kpi_section = KPI.format_kpi_section(KPI.compute_kpis(
-        metrics_path=Path.home() / ".claude" / "memory" / "metrics.jsonl",
-        prove_log_path=Path.home() / ".claude" / "memory" / "prove-log.jsonl",
-        overrides_paths=[Path.home() / ".agents" / "outputs" / "prove-overrides.jsonl"],
-    ))
+    R.write_report(agg, html_path, records=records)  # writes .html + .md
+    md = html_path.with_suffix(".md").read_text(
+        encoding="utf-8"
+    )  # email body = the local .md
+    kpi_section = KPI.format_kpi_section(
+        KPI.compute_kpis(
+            metrics_path=Path.home() / ".claude" / "memory" / "metrics.jsonl",
+            prove_log_path=Path.home() / ".claude" / "memory" / "prove-log.jsonl",
+            overrides_paths=[
+                Path.home() / ".agents" / "outputs" / "prove-overrides.jsonl"
+            ],
+        )
+    )
     if kpi_section:
         md = md + "\n\n" + kpi_section
+    recall_section = format_recall_section()
+    if recall_section:
+        md = md + "\n\n" + recall_section
     print(f"[{now.isoformat()}] local report: {html_path} ({len(records)} records)")
 
     state = _load_state()
     code, new_state = E.send_weekly(
-        md_summary=md, html_path=str(html_path), state=state, host=host, now=now,
+        md_summary=md,
+        html_path=str(html_path),
+        state=state,
+        host=host,
+        now=now,
     )
     if code == E.SENT_OR_SKIP and new_state != state:
         try:
