@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dev Prompt Architect"
+  short_description: "Turn rough development ideas into clarified, tool-ready prompts."
+  default_prompt: "Use dev-prompt-architect to turn my rough development request into a clarified prompt for Codex, Claude, Cursor, ChatGPT, or GitHub Copilot."

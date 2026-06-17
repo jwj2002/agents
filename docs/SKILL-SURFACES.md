@@ -20,11 +20,13 @@ This is intentional: `~/.codex/skills` preserves current local behavior, while
 
 | Skill source | Classification | Rule |
 |---|---|---|
+| `codex-config/skills/dev-prompt-architect` | Codex-native, Claude-paired | Codex packaging for the development prompt Q&A workflow |
 | `codex-config/skills/technical-spec-review` | Codex-native, shared-capable | Authored for Codex, usable where the task matches |
 | `claude-config/skills/action` | Shared | Thin CLI wrapper; passes portability lint |
 | `claude-config/skills/dashboard` | Shared | Thin CLI wrapper; passes portability lint |
 | `claude-config/skills/decision` | Shared | Thin CLI wrapper; passes portability lint |
 | `claude-config/skills/deep-review` | Shared | Instruction-only review workflow; passes portability lint |
+| `claude-config/skills/dev-prompt-architect` | Claude-native, Codex-paired | Claude packaging for the same development prompt Q&A workflow |
 | `claude-config/skills/email-digest` | Shared | Thin workflow wrapper; passes portability lint |
 | `claude-config/skills/pdf` | Shared | Tool workflow; passes portability lint |
 | `claude-config/skills/project` | Shared | Thin CLI wrapper; passes portability lint |
