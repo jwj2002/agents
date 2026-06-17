@@ -25,6 +25,7 @@ This is intentional: `~/.codex/skills` preserves current local behavior, while
 | `claude-config/skills/dashboard` | Shared | Thin CLI wrapper; passes portability lint |
 | `claude-config/skills/decision` | Shared | Thin CLI wrapper; passes portability lint |
 | `claude-config/skills/deep-review` | Shared | Instruction-only review workflow; passes portability lint |
+| `claude-config/skills/dev-prompt-architect` | Shared | Development prompt Q&A workflow; portable to Codex through install links |
 | `claude-config/skills/email-digest` | Shared | Thin workflow wrapper; passes portability lint |
 | `claude-config/skills/pdf` | Shared | Tool workflow; passes portability lint |
 | `claude-config/skills/project` | Shared | Thin CLI wrapper; passes portability lint |
