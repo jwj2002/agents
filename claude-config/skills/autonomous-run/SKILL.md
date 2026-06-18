@@ -43,7 +43,12 @@ For each issue in the queue, in order:
    {type}/issue-{N}-{slug} origin/main`). One branch = one PR = one issue.
 2. **Implement via `/orchestrate`** (it self-routes SIMPLE vs COMPLEX). Let it
    run PROVE; do not declare done on "files present" — the change must be wired
-   through its entrypoint and exercised with evidence.
+   through its entrypoint and exercised with evidence. Any per-issue work you
+   delegate *outside* `/orchestrate` (an ad-hoc coding spawn) goes to the
+   **`impl`** agent type, which carries the implementation flavor of
+   `rules/agent-delegation-contract.md` (derived from
+   `rules/code-quality-standards.md`) — so the same quality bar reaches ad-hoc
+   spawns, not just the orchestrate workers.
 3. **Complexity-gated review.** Before merge, classify the diff by
    `~/.claude/rules/implementation-routing.md` tier:
    - TRIVIAL / SIMPLE, no risk class → no mandatory review (spot-check only).
@@ -156,6 +161,10 @@ differently:
 
 - Operating model behind this skill: `~/projects/buddy/config/identity/BASE.md`
   (background-by-default, one-at-a-time, 70% context-gate, ship-by-default).
+- Delegation quality contract: typed agents (`impl`/`research`/`ops`) carry the
+  matching flavor of `rules/agent-delegation-contract.md`, which derives from
+  `rules/code-quality-standards.md`. Prefer the typed agent over a bare
+  `general-purpose` spawn so the standard is auto-applied.
 - The review gate is `adversarial-review-gated` — do not call
   `/codex:adversarial-review` directly in an unattended run (it has no fallback
   and will stall the gate if Codex is down).
