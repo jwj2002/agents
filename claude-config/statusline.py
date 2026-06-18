@@ -62,6 +62,31 @@ def main():
     context_window = input_data.get("context_window", {})
     used_percentage = context_window.get("used_percentage")
 
+    # Persist the live context % so the model can READ it on demand. The model
+    # never receives context_window in its own context — only this statusline
+    # does — so this file is the only reliable way for an agent (e.g. Mavis) to
+    # check its real usage at a trigger point. Fail-open: never break the
+    # statusline on a write error.
+    try:
+        session_id = input_data.get("session_id") or "default"
+        ctx_dir = os.path.join(home, ".claude", "ctx_state")
+        os.makedirs(ctx_dir, exist_ok=True)
+        tmp = os.path.join(ctx_dir, f".{session_id}.json.tmp")
+        final = os.path.join(ctx_dir, f"{session_id}.json")
+        with open(tmp, "w") as _cf:
+            json.dump(
+                {
+                    "session_id": session_id,
+                    "used_pct": used_percentage,
+                    "cwd": cwd_raw,
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                },
+                _cf,
+            )
+        os.replace(tmp, final)  # atomic
+    except Exception:
+        pass
+
     # Format context display (red when >75% — compaction danger zone)
     if used_percentage is not None:
         ctx_color = RED if used_percentage > 75 else GREEN
