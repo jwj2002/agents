@@ -76,6 +76,32 @@ concurrency, partial failure, or malicious input? For risk-class changes,
 explicitly check the named hazard (tenant isolation, money math, reversibility,
 secret exposure, enum/contract drift).
 
+BYPASS HUNT (required for risk-class diffs — migrations, auth, money,
+contracts): for every constraint, guard, trigger, index, check, or idempotency
+mechanism in the diff, NAME the input or path that DEFEATS it. If you cannot
+state why a bypass is impossible, that is a finding. Known classes that get
+approved while leaving a hole:
+- A partial UNIQUE / generated-column / filtered index is evaded by NULL or
+  missing source fields — the row drops out of the index. Require the linkage
+  be NOT NULL (CHECK), not merely indexed.
+- A row-level trigger (BEFORE UPDATE OR DELETE) does NOT fire on statement-level
+  ops (TRUNCATE) or COPY; a conditional REVOKE no-ops if the role is absent.
+  Enumerate EVERY mutation path, not just the obvious one.
+- Idempotency: IF NOT EXISTS on CREATE TABLE/INDEX but not on ADD COLUMN /
+  CREATE TRIGGER → re-apply after a partial failure breaks. Every statement
+  must converge on re-run.
+- ON CONFLICT keyed on a column whose unique index is partial (WHERE col IS NOT
+  NULL) silently no-ops its dedup when the key is NULL → duplicate accumulation.
+- Roles: protection that holds for the app role but not for table-owner /
+  superuser / migration roles is incomplete.
+- Fail-open error handling that swallows a failure so the caller proceeds on
+  empty/half-built state and reports a misleading success.
+
+REVIEW INTEGRITY: capture the diff and the full content of changed files at the
+START of the review — do not rely on re-reading the live working tree, which can
+change mid-review under parallel agents/worktrees. If the issue/ACs are not
+fetchable, derive ACs from the referenced spec sections and SAY SO explicitly.
+
 Output EXACTLY this shape:
   source: internal
   RISK: N/10
