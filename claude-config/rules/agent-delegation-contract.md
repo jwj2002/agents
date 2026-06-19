@@ -77,6 +77,28 @@ For any agent that writes to production: DBs, schemas, hosts, services, secrets.
 
 ---
 
+## Bounding & coordination (all spawns)
+
+- **Coordinator, not conductor.** Delegate the *orchestration* of a unit of work,
+  not just its implementation. Running a pipeline (`/orchestrate`, a multi-step
+  ops sequence, a review loop) inline makes you the per-project orchestrator —
+  itself a delegated role. Spawn a fresh agent to conduct it; stay at the
+  coordination layer. A fresh agent loads its contract front-of-context and does
+  not decay the way a long orchestrator session does — **delegation is a fidelity
+  mechanism, not just parallelism.**
+- **Bound every spawn outside a hardened pipeline.** `/orchestrate`, `/quick`,
+  `autonomous-run` encode termination + a test oracle; a raw `Agent`/Task spawn
+  does not. Give it: a STOP-condition + iteration cap, a test oracle or the EXACT
+  target spec (never make an agent *discover* a data shape/schema), pre-flighted
+  env deps, no unsupervised exploratory data/infra work, and a liveness tripwire
+  (stall + no matching process → kill, finish deterministically). Open-ended task
+  + no definition-of-done = hang. **Hardened pipelines are code-centric —
+  ops/data/glue have none, so bound them by hand.**
+- **Concurrency** (`rules/orchestration-concurrency.md`): per project ≤2
+  work-items in flight + a pull queue; ≤3 active projects; **one owner per mutable
+  resource** (branch/DB/file) — shared-resource work serializes; worktree-isolate
+  parallel code agents; soft tripwire ~6 concurrent agents.
+
 ## Honest reporting (all flavors)
 
 Every spawned agent ends its work the same way:
