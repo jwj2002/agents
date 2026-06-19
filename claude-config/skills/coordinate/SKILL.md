@@ -100,12 +100,16 @@ is a **new round** — re-dispatch a *fresh* agent for it; never conduct the fix
   (substrate / migrations before consumers).
 
 **How you merge (clean vs conflicted):**
-- **Clean, non-conflicting** → PERFORM directly with the canonical optimized
-  script: `~/agents/bin/agent-git ship --issue <N> --summary "<s>"
-  --test-evidence "<e>" --validation-log <log>` (preflight + ship gates +
-  squash-merge + verify + prune). Fall back to `gh pr merge --squash
-  --delete-branch` (`--admin` if CI is billing-blocked + local evidence green)
-  ONLY where no ship wrapper exists. Never hand-roll a merge that bypasses the gates.
+- **Clean, non-conflicting** → the coordinator merges the EXISTING PR
+  **server-side**: `gh pr merge <N> --squash --delete-branch` (`--admin` if CI is
+  billing-blocked and the agent's gates are already green). Server-side is correct
+  here because it touches **no local tree** — so it can't disturb a running
+  parallel agent or trip on a dirty/anomalous main tree. **Do NOT use
+  `agent-git ship` for the coordinator merge** — it requires a *clean* local tree
+  and operates on the *current branch*, so it is the AGENT's **self-ship** tool
+  (Step 3, ISOLATED case: the agent is in its own clean worktree), not the
+  coordinator's existing-PR merge. After merge: `~/agents/bin/agent-git cleanup
+  --branch <b>` to prune.
 - **Needs conflict resolution / non-trivial rebase** (= editing code) → DELEGATE
   to a fresh agent. You DECIDE the order and that a conflict exists; an agent
   RESOLVES it. Resolving a conflict inline in a long, decaying session is the trap.
