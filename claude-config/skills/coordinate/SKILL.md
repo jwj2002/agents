@@ -41,9 +41,12 @@ and spawn an agent — that is the whole point.
   overlapping files / DB write targets / branches (read the issue bodies; `grep`
   the likely paths). If two would write the SAME file → assign it to ONE owner,
   tell the other to import/avoid it. If they share a DB write target → SERIALIZE
-  them (not parallel). Disjoint units run in parallel.
+  them. Disjoint units run in parallel.
 - **≤ 3 active projects** across all coordinate runs.
-- Report the WIP plan + any single-owner assignments in one line before dispatch.
+- Classify each in-flight unit as **ISOLATED** (no file overlap with other
+  in-flight units) or **OVERLAPPING** — this sets its merge policy (Step 3/5).
+- Report the WIP plan + single-owner assignments + each unit's isolated/overlapping
+  classification in one line before dispatch.
 
 ### Step 3 — Dispatch one fresh orchestrator agent per in-flight unit
 Spawn via the Agent tool (≤2 concurrently):
@@ -57,38 +60,59 @@ prompt: <orchestrator template below, filled for this unit>
 
 **Orchestrator agent prompt template (fill per unit):**
 > You are the per-unit orchestrator for **<UNIT>** — own it end-to-end: ground →
-> implement → PROVE → adversarial review → STOP at merge-ready. Do NOT merge (the
-> coordinator sequences merges).
+> implement → PROVE → adversarial review → ship-or-stop (per merge policy below).
 > SETUP (worktree): `git fetch origin && git checkout -b <branch> origin/main`.
 > GROUND FIRST (read, cite path:line): the issue/spec + the code you'll touch.
 > SCOPE: <the unit's acceptance criteria>. SINGLE-OWNER: <file(s) assigned to or
 > kept away from this unit>.
 > PROVE: test on the LOCAL/test DB only (NEVER prod); apply the quality contract
-> (ruff, LR-001, real tests, completion gate).
+> (ruff, LR-001, real tests, completion gate). Save test/lint output to a
+> validation log for the ship gate.
 > REVIEW: Codex adversarial review — `unset CODEX_COMPANION_SESSION_ID
 > CLAUDE_PLUGIN_DATA` then `codex exec --skip-git-repo-check --sandbox read-only
 > "$(cat /tmp/r-<unit>.txt)" </dev/null > /tmp/r-<unit>-out.log 2>&1`. Risk-class
 > (auth/crypto/migrations/money/secrets/contracts) → MANDATORY. REVISE → fix
 > within scope (≤2 bounded attempts, else report) → re-review.
-> STOP at merge-ready: commit (conventional, `Closes #N`), push, open PR. Do NOT
-> merge; do NOT apply migrations to prod.
+> **MERGE POLICY (set by the coordinator):**
+> - **ISOLATED** → SELF-SHIP once PROVE PASS + review PROCEED, via the canonical
+>   ship script: `~/agents/bin/agent-git ship --issue <N> --summary "<s>"
+>   --test-evidence "<e>" --validation-log <log>` (preflight + ship gates +
+>   squash-merge + post-merge verify + prune). Do NOT use raw `gh pr merge` if the
+>   ship wrapper exists.
+> - **OVERLAPPING** → STOP at merge-ready: commit (conventional, `Closes #N`),
+>   push, open PR, do NOT merge (the coordinator integrates).
+> Either way: NEVER apply migrations to prod.
 > RETURN ≤1.5K tokens: PROVE result, review verdict (source/RISK/decision), the
-> EXACT files changed (for overlap-check), branch + PR URL, prod-untouched
-> confirmation. Verified-vs-assumed; surface blockers loudly.
+> EXACT files changed (for overlap-check), branch + PR URL (+ merge SHA if you
+> self-shipped), prod-untouched confirmation. Verified-vs-assumed; surface blockers loudly.
 
 ### Step 4 — Collect verdicts (stay at coordination)
 Record each verdict as the agent returns (you're notified). Do NOT implement or
 fix anything yourself. A unit whose own bounded attempts couldn't clear a REVISE
 is a **new round** — re-dispatch a *fresh* agent for it; never conduct the fix inline.
 
-### Step 5 — Integrate (the coordinator's job)
-- **Overlap-check** the returned file lists. Two PRs touching one file → merge one,
-  rebase the other.
-- Merge in dependency order (substrate/migrations before consumers):
-  `gh pr merge <N> --squash --delete-branch` (`--admin` if CI is billing-blocked
-  and local evidence is green).
-- Post-merge: verify each landed on main, close issues, tick any umbrella tracker,
-  prune worktrees, pull the next queued unit if a WIP slot freed.
+### Step 5 — Integrate (merge ownership follows the *view* required)
+**Who merges:**
+- **ISOLATED unit** → the orchestrator agent **self-shipped** (it has both gates +
+  the full view of its own change). You only **verify it landed** on main.
+- **OVERLAPPING units** → agents stopped at merge-ready; **you integrate** (only
+  you see both units): overlap-check the returned file lists, order the merges
+  (substrate / migrations before consumers).
+
+**How you merge (clean vs conflicted):**
+- **Clean, non-conflicting** → PERFORM directly with the canonical optimized
+  script: `~/agents/bin/agent-git ship --issue <N> --summary "<s>"
+  --test-evidence "<e>" --validation-log <log>` (preflight + ship gates +
+  squash-merge + verify + prune). Fall back to `gh pr merge --squash
+  --delete-branch` (`--admin` if CI is billing-blocked + local evidence green)
+  ONLY where no ship wrapper exists. Never hand-roll a merge that bypasses the gates.
+- **Needs conflict resolution / non-trivial rebase** (= editing code) → DELEGATE
+  to a fresh agent. You DECIDE the order and that a conflict exists; an agent
+  RESOLVES it. Resolving a conflict inline in a long, decaying session is the trap.
+- After ANY merge (self-shipped, performed, or delegated): verify it landed on
+  main, close the issue, tick any umbrella tracker, prune the worktree
+  (`~/agents/bin/agent-git cleanup --branch <b>`), pull the next queued unit if a
+  WIP slot freed.
 
 ### Step 6 — Report
 One compact status: merged / merge-ready / blocked per unit, with SHAs + any
@@ -96,8 +120,10 @@ follow-ups filed. Never a file dump.
 
 ## Hard rules (what this skill enforces)
 - You are the COORDINATOR — you do not implement or conduct. Tempted to edit code
-  or run a pipeline phase? Spawn an agent.
+  or run a pipeline phase (including resolving a merge conflict)? Spawn an agent.
 - Every spawned agent: **fresh, worktree-isolated, bounded** (stop-condition +
-  test oracle), **stops at merge-ready**.
-- WIP ≤2 units/project, ≤3 projects, single-owner per resource, integrate sequentially.
-- Never two concurrent merges into overlapping files.
+  test oracle). ISOLATED units self-ship; OVERLAPPING units stop at merge-ready.
+- Merges go through the canonical ship script (`agent-git ship` / `cleanup`),
+  not raw `gh pr merge`, wherever the repo provides it.
+- WIP ≤2 units/project, ≤3 projects, single-owner per resource, integrate
+  sequentially. Never two concurrent merges into overlapping files.
