@@ -6,6 +6,10 @@ Layered with permissions.deny in settings.json. Permissions.deny covers
 Read/Edit/Write tool calls. This hook covers Bash commands that could
 exfiltrate secrets (cat .env, grep KEY .env, sed/awk on key files).
 
+Shell *includes* (`source .env` / `. .env`) are intentionally ALLOWED:
+loading env vars into a shell session is not exfiltration. Only the
+non-include segments of a compound command are scanned.
+
 Exit code 2 blocks the tool call. Exit code 0 allows.
 """
 
@@ -39,6 +43,11 @@ SENSITIVE_TOKEN_PATTERNS = [
     re.compile(r"\.netrc$"),
 ]
 
+# Split a Bash command string into segments on shell control operators.
+# This splits on: && || ; | newline
+SEGMENT_SPLIT = re.compile(r"&&|\|\||[;|\n]")
+
+# Within a non-include segment, tokenize on whitespace and shell metacharacters.
 TOKEN_SPLIT = re.compile(r"[\s;&|<>()`'\"$]+")
 
 
@@ -47,16 +56,40 @@ def path_is_sensitive(path: str) -> bool:
     return any(p.search(path) for p in SENSITIVE_TOKEN_PATTERNS)
 
 
+def _is_shell_include(segment: str) -> bool:
+    """Return True if this shell segment is a `source` or `.` include.
+
+    Shell includes load env vars into the current shell and are explicitly
+    allowed — loading is not exfiltration. Only the first word matters:
+      source .env
+      . ./.env
+      source .env.production
+    """
+    stripped = segment.strip()
+    if not stripped:
+        return False
+    first_word = stripped.split()[0] if stripped.split() else ""
+    return first_word in ("source", ".")
+
+
 def bash_command_touches_secret(command: str) -> tuple[bool, str]:
-    """Tokenize a Bash command and check each token."""
-    for token in TOKEN_SPLIT.split(command):
-        if not token:
+    """Split a Bash command into segments, skip includes, scan the rest."""
+    segments = SEGMENT_SPLIT.split(command)
+    for segment in segments:
+        if _is_shell_include(segment):
+            # Shell include (source / .) — loading env vars is allowed.
             continue
-        # Strip leading flags like --foo=
-        if "=" in token:
-            token = token.split("=", 1)[1]
-        if path_is_sensitive(token):
-            return True, f"command references sensitive path '{token}': {command[:120]}"
+        for token in TOKEN_SPLIT.split(segment):
+            if not token:
+                continue
+            # Strip leading flags like --foo=
+            if "=" in token:
+                token = token.split("=", 1)[1]
+            if path_is_sensitive(token):
+                return (
+                    True,
+                    f"command references sensitive path '{token}': {command[:120]}",
+                )
     return False, ""
 
 
@@ -74,7 +107,7 @@ def deny(reason: str) -> None:
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
-    except Exception as e:
+    except (json.JSONDecodeError, ValueError) as e:
         logging.warning("could not parse stdin JSON: %s", e)
         return 0  # Don't block on parse errors
 
@@ -82,11 +115,7 @@ def main() -> int:
     tool_input = payload.get("tool_input", {}) or {}
 
     if tool_name in ("Read", "Edit", "Write", "MultiEdit", "NotebookEdit"):
-        path = (
-            tool_input.get("file_path")
-            or tool_input.get("notebook_path")
-            or ""
-        )
+        path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
         if path and path_is_sensitive(path):
             deny(f"{tool_name} on sensitive path: {path}")
 
