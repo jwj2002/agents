@@ -66,6 +66,15 @@
             "command": "python3 ~/.claude/hooks/ops_spawn_guard.py"
           }
         ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/secret_guard.py"
+          }
+        ]
       }
     ],
     "PreCompact": [
