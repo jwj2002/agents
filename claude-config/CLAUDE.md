@@ -128,6 +128,31 @@ configured here.
 
 ---
 
+## Google Workspace — Gmail / Calendar / Tasks (personal machines)
+
+Personal machines share **one** Google OAuth under `~/agents/google/` for every
+agent. Send mail: `~/agents/google/send_mail.py`
+(`--to/--cc/--bcc/--subject/--body/--attach`, attachments OK). Calendar
+read/write: `~/agents/google/gcal.py` (`agenda`/`add`/`quickadd`/`delete`). Tasks
+/ read-Gmail: build a client off `~/agents/google/auth.py:load_credentials()`.
+Detail: `~/.claude/rules/google-mail.md` (on-demand). Absence of
+`~/agents/google/token.json` signals it isn't set up here (work machines don't
+have it). **Use this — never hand-roll a send script or a separate token.**
+
+---
+
+## Microsoft To Do — personal task lists (personal machines)
+
+The user's task lists are in **Microsoft To Do** under their **personal** MS
+account. Agents read/write them via `~/agents/m365-todo/todo.py`
+(`lists` / `tasks <list>` / `add <list> <title>` / `complete <list> <title>`),
+or the shared token `~/agents/m365-todo/auth.py:get_token()` against Graph
+`/me/todo/...`. Delegated (device-code) auth, separate from Google Tasks and
+from the work M365 mail app. Detail: `~/.claude/rules/ms-todo.md` (on-demand).
+Absence of `~/agents/m365-todo/token.json` signals it isn't set up here.
+
+---
+
 ## Reference files (load on demand)
 
 | Rule | Loaded for |
@@ -149,6 +174,8 @@ configured here.
 | `spec-new-substrate-domain-sweep.md` | Auto-loads on `specs/**` — 5-question domain check for NEW substrates |
 | `post-merge-verification.md` | After `/pr --merge` |
 | `m365-graph.md` | On-demand — mail + SharePoint client docs via Microsoft Graph |
+| `google-mail.md` | On-demand — Gmail/Calendar/Tasks via the central `~/agents/google` token (personal machines) |
+| `ms-todo.md` | On-demand — Microsoft To Do (personal MS account) read/write via Graph (personal machines) |
 | `memory-promotion.md` | On-demand — promoting a project lesson to a global rule |
 
 ---
