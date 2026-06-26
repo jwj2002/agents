@@ -2,3 +2,4 @@ token.json
 flow.json
 .device_code.txt
 __pycache__/
+config.json

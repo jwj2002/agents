@@ -1,26 +1,45 @@
-"""Delegated Microsoft Graph auth for a personal Microsoft account — Microsoft To Do.
+"""Delegated Microsoft Graph auth for Microsoft To Do — per-machine profile.
 
-Device-code flow, public client (no client secret). The refresh token is cached
-at ``token.json`` next to this file — git-ignored, this-machine-only (mirrors the
-``~/agents/google`` pattern). Any agent that needs Microsoft To Do imports
-``get_token()``.
+Identity (client_id / authority / scopes / account) is read from a git-ignored
+``config.json`` next to this file, NOT hardcoded — so the SAME committed code runs
+as a personal profile on personal machines and a work profile on work machines.
+Copy ``config.example.json`` → ``config.json`` and fill it in to activate.
+
+The refresh token is cached at ``token.json`` (git-ignored, 0600, this-machine-only).
+Capability is active only where BOTH config.json and token.json exist; otherwise it
+fails closed. Any agent that needs Microsoft To Do imports ``get_token()``.
 """
 
 from __future__ import annotations
 
 import atexit
+import json
 import os
 from pathlib import Path
 
 import msal
 
-CLIENT_ID = "d9df9a09-f0ee-4093-90ab-2dbb319b4570"
-AUTHORITY = "https://login.microsoftonline.com/consumers"  # personal MS account
-SCOPES = ["Tasks.ReadWrite"]
-ACCOUNT_HINT = "jasonwadejob@gmail.com"
-
 _DIR = Path(__file__).resolve().parent
+CONFIG_PATH = _DIR / "config.json"
 TOKEN_PATH = _DIR / "token.json"
+
+
+def _config() -> dict:
+    if not CONFIG_PATH.exists():
+        raise RuntimeError(
+            "Microsoft To Do not configured on this machine — copy "
+            "`config.example.json` → `config.json` and fill in client_id / authority "
+            "/ account for this machine's profile (see rules/ms-todo.md)."
+        )
+    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+
+
+def scopes() -> list[str]:
+    return _config().get("scopes", ["Tasks.ReadWrite"])
+
+
+def account_hint() -> str:
+    return _config().get("account", "")
 
 
 def _load_cache() -> msal.SerializableTokenCache:
@@ -38,8 +57,9 @@ def _save_cache(cache: msal.SerializableTokenCache) -> None:
 
 
 def build_app(cache: msal.SerializableTokenCache | None = None) -> msal.PublicClientApplication:
+    cfg = _config()
     return msal.PublicClientApplication(
-        CLIENT_ID, authority=AUTHORITY, token_cache=cache or _load_cache()
+        cfg["client_id"], authority=cfg["authority"], token_cache=cache or _load_cache()
     )
 
 
@@ -49,11 +69,11 @@ def get_token() -> str:
     app = build_app(cache)
     accounts = app.get_accounts()
     if accounts:
-        result = app.acquire_token_silent(SCOPES, account=accounts[0])
+        result = app.acquire_token_silent(scopes(), account=accounts[0])
         if result and "access_token" in result:
             _save_cache(cache)
             return result["access_token"]
     raise RuntimeError(
         "Microsoft To Do not authorized on this machine — run "
-        "`~/agents/.venv/bin/python ~/agents/m365-todo/authorize.py start` (and `finish`)."
+        "`~/agents/.venv/bin/python ~/agents/m365-todo/authorize.py start` (then `finish`)."
     )

@@ -1,0 +1,26 @@
+{
+  "_comment": "Copy to config.json (git-ignored) and fill in for THIS machine's profile. Personal vs work differ only by client_id + authority + account — the code is identity-agnostic.",
+
+  "_personal_example": {
+    "client_id": "<your-personal-entra-app-client-id>",
+    "authority": "https://login.microsoftonline.com/consumers",
+    "scopes": ["Tasks.ReadWrite"],
+    "account": "you@personal-msa.example",
+    "profile": "personal"
+  },
+
+  "_work_example": {
+    "client_id": "<your-work-tenant-app-client-id>",
+    "authority": "https://login.microsoftonline.com/<work-tenant-id-or-domain>",
+    "scopes": ["Tasks.ReadWrite"],
+    "account": "you@work-tenant.example",
+    "profile": "work",
+    "_note": "Work tenant app needs delegated Tasks.ReadWrite; some tenants require admin consent. Use the tenant id/domain (not 'consumers') as the authority."
+  },
+
+  "client_id": "<fill-me>",
+  "authority": "<fill-me>",
+  "scopes": ["Tasks.ReadWrite"],
+  "account": "<fill-me>",
+  "profile": "<personal|work>"
+}

@@ -14,21 +14,35 @@ a **delegated** token (device-code flow, public client) under `~/agents/m365-tod
 This is separate from Google Tasks and from the work M365 mail app — different
 identity, different auth model. See [[google-mail]] and [[m365-graph]].
 
-## Per-machine gate
+## Per-machine profile + gate
 
-Configured **only where `~/agents/m365-todo/token.json` exists** (git-ignored,
-per-user, chmod 600). Absence = not set up on this machine. Mirrors the Google /
-M365 gates.
+Identity is **not** hardcoded — the committed code reads it from a git-ignored
+`~/agents/m365-todo/config.json` (copy `config.example.json`). So the same code
+runs as a **personal** profile on personal machines and a **work** profile on
+work machines:
+
+```
+personal machine → config.json (consumers + personal app) + token.json (personal)
+work machine     → config.json (work tenant + work app)   + token.json (work)
+```
+
+The capability is **active only where BOTH `config.json` and `token.json` exist**
+(both git-ignored, chmod 600 on the token) — otherwise it fails closed. Absence =
+not set up on this machine. Mirrors the Google (`oauth_client.json`/`token.json`)
+and M365-mail (`agent.json`) gates.
 
 ## Auth
 
-- Personal Microsoft account → authority `…/consumers`, delegated scope
-  `Tasks.ReadWrite`, **public client** (no secret, no admin consent).
-- App registration (Entra): client id `d9df9a09-f0ee-4093-90ab-2dbb319b4570`.
-- Re-authorize (token lost/revoked): two steps —
-  `~/agents/.venv/bin/python ~/agents/m365-todo/authorize.py start` (prints a
-  URL + code), then `… authorize.py finish` (blocks until you approve in the
-  browser). Validated live 2026-06-26: full read + write (create/update/delete).
+- **Personal** Microsoft account → `config.json` authority `…/consumers`,
+  delegated scope `Tasks.ReadWrite`, **public client** (no secret, no admin
+  consent). Validated live 2026-06-26: full read + write (create/update/delete).
+- **Work** (when set up) → register an app in the work tenant with delegated
+  `Tasks.ReadWrite`, put its client id + tenant authority (`…/<tenant>`, not
+  `consumers`) in that machine's `config.json`. Some tenants require admin
+  consent.
+- **Authorize / re-authorize** (any profile): two steps —
+  `~/agents/.venv/bin/python ~/agents/m365-todo/authorize.py start` (prints a URL
+  + code), then `… authorize.py finish` (blocks until you approve in the browser).
 
 ## Helpers
 

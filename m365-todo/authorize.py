@@ -20,7 +20,7 @@ CODE_PATH = Path(__file__).resolve().parent / ".device_code.txt"
 
 def start() -> int:
     app = auth.build_app()
-    flow = app.initiate_device_flow(scopes=auth.SCOPES)
+    flow = app.initiate_device_flow(scopes=auth.scopes())
     if "user_code" not in flow:
         print("FAILED to start device flow:", flow.get("error_description") or flow)
         return 2
