@@ -149,6 +149,8 @@ configured here.
 | `spec-new-substrate-domain-sweep.md` | Auto-loads on `specs/**` — 5-question domain check for NEW substrates |
 | `post-merge-verification.md` | After `/pr --merge` |
 | `m365-graph.md` | On-demand — mail + SharePoint client docs via Microsoft Graph |
+| `google-mail.md` | On-demand — Gmail/Calendar/Tasks via the central `~/agents/google` token (personal machines) |
+| `ms-todo.md` | On-demand — Microsoft To Do (personal MS account) read/write via Graph (personal machines) |
 | `memory-promotion.md` | On-demand — promoting a project lesson to a global rule |
 
 ---

@@ -1,5 +1,6 @@
 ---
 description: "Orchestration concurrency model — WIP caps + pull queue (kanban WIP), single-owner, coordinator-not-conductor, bounded fan-out, and why fresh agents beat long-session inline work. Referenced from agent-delegation-contract.md (always-loaded); read when orchestrating or running parallel agents."
+paths: ["**/.agents/**"]
 ---
 
 # Orchestration Concurrency
