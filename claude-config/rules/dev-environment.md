@@ -1,5 +1,5 @@
 ---
-paths: ["**"]
+paths: ["**/app-repos/**", "**/vitalailabs/**"]
 ---
 
 # Development Environment Routing

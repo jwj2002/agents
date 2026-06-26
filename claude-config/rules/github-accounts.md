@@ -1,5 +1,5 @@
 ---
-paths: ["**"]
+paths: ["**/.github/**"]
 ---
 
 # GitHub Multi-Account Setup
