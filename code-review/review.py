@@ -51,7 +51,7 @@ Return ONLY valid JSON with this structure:
 ### Critical (block commit)
 - SQL injection, XSS, command injection
 - Hardcoded secrets, API keys, passwords
-- Obvious null pointer / undefined access
+- Obvious null/None dereference evident within the diff
 - Infinite loops, resource leaks
 
 ### Warning (should fix)
@@ -76,6 +76,13 @@ Return ONLY valid JSON with this structure:
 - approved=false if ANY critical issues
 - approved=true if only info/warnings
 - Empty issues array if code looks good
+- SCOPE: you see ONLY the diff hunks, not whole files. A name used in the diff
+  (variable, function, import, attribute) may be defined ELSEWHERE in the file,
+  outside this hunk. Do NOT report "undefined variable", "undefined name",
+  "X is not defined", NameError-style, or "not imported" issues — you cannot
+  verify a definition you cannot see, and ruff's full-file static analysis
+  (run separately in the same pre-commit) already catches genuinely-undefined
+  names. Only flag an issue if it is FULLY evident within the diff itself.
 
 DIFF:
 '''
