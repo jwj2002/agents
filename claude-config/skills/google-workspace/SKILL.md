@@ -1,7 +1,7 @@
 ---
 name: google-workspace
 version: 1.0
-description: Send email via Gmail and read/write Google Calendar on personal machines, using the shared ~/agents/google OAuth (send_mail.py / gcal.py). Use whenever asked to send/draft an email, check the calendar, or add/move/delete a calendar event. You ARE authorized here — do not claim you lack Gmail access without checking for the token first.
+description: Read, search, and send email via Gmail and read/write Google Calendar on personal machines, using the shared ~/agents/google OAuth (gmail_read.py / send_mail.py / gcal.py). Use whenever asked to read/search the inbox, send/draft an email, check the calendar, or add/move/delete a calendar event. You ARE authorized here — do not claim you lack Gmail access without checking for the token first.
 ---
 
 # google-workspace
@@ -15,6 +15,16 @@ checking that token file exists. If it is absent, the capability isn't set up on
 ```
 PY=~/agents/.venv/bin/python
 ```
+
+## Read / search email
+```
+$PY ~/agents/google/gmail_read.py unread --max 10
+$PY ~/agents/google/gmail_read.py search "from:boss@x.com newer_than:7d" --max 20
+$PY ~/agents/google/gmail_read.py read <message_id>
+```
+`search` takes the normal Gmail query syntax. `unread`/`search` print id + from +
+subject + snippet; `read` prints headers + the plain-text body. This is the
+token path — **no MCP needed to read.**
 
 ## Send email
 ```
@@ -35,9 +45,11 @@ $PY ~/agents/google/gcal.py delete --event-id <id>
 Timezone auto-detects from the calendar; `--calendar` defaults to `primary`.
 
 ## Notes
-- This shared token is canonical — **never hand-roll a sender or a second token.**
-- Tasks / Contacts / reading Gmail have no CLI yet: build a client off
+- This shared token is canonical — **never hand-roll a sender/reader or a second token.**
+- Read + send + calendar all run off this one token (scopes: gmail.modify,
+  gmail.send, calendar). The claude.ai Gmail MCP is no longer needed for reading.
+- Google Tasks / Contacts have no CLI yet: build a client off
   `~/agents/google/auth.py:load_credentials()`.
 - Full detail + per-machine gate: `~/.claude/rules/google-mail.md`.
-- Microsoft To Do is a separate capability: `~/agents/m365-todo/todo.py`
-  (see `~/.claude/rules/ms-todo.md`).
+- Microsoft To Do (the user's real task lists) is a separate capability —
+  use the `ms-todo` skill / `~/agents/m365-todo/todo.py` (see `rules/ms-todo.md`).
