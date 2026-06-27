@@ -35,6 +35,7 @@ Validated live 2026-06-26 on this laptop: Gmail (account
 | **Send mail** (CLI) | `~/agents/google/send_mail.py` |
 | **Calendar read/write** (CLI) | `~/agents/google/gcal.py` (`calendars`/`agenda`/`add`/`quickadd`/`delete`) |
 | **Gmail read/search** (CLI) | `~/agents/google/gmail_read.py` (`unread`/`search`/`read`) |
+| **Contacts lookup** (CLI, read-only) | `~/agents/google/contacts.py` (`search "<name>"` → email/phone) |
 | Full reference | `~/agents/google/README.md` |
 
 ### Send mail (CLI)
@@ -74,20 +75,29 @@ $PY ~/agents/google/gmail_read.py read <message_id>
 Uses the token's `gmail.modify` scope (read included) — no re-auth. `search`
 takes normal Gmail query syntax; `read` prints headers + plain-text body.
 
-### Tasks / Contacts (no ready-made CLI yet)
+### Contacts lookup (CLI, read-only)
 
-For Google Tasks or Contacts, use the shared auth directly — the same token
-already authorizes them:
+```bash
+PY=~/agents/.venv/bin/python
+$PY ~/agents/google/contacts.py search "Bob Smith"      # name -> email/phone
+```
+Read-only (`contacts.readonly` scope). **Creating/editing contacts is NOT
+possible** with the current token — that needs the `contacts` (read-write) scope
+added to `auth.py:SCOPES` + a `reauth.py` re-consent.
+
+### Google Tasks (no ready-made CLI yet)
+
+For Google Tasks, use the shared auth directly (the token already authorizes it):
 
 ```python
 import sys; sys.path.insert(0, "/Users/jasonjob/agents/google")
 from auth import load_credentials
 from googleapiclient.discovery import build
-svc = build("tasks", "v1", credentials=load_credentials())   # or "people"
+svc = build("tasks", "v1", credentials=load_credentials())
 ```
 
 If you find yourself repeating one, promote it to a `~/agents/google/` CLI helper
-(mirroring `send_mail.py` / `gcal.py` / `gmail_read.py`) rather than re-pasting.
+(mirroring `send_mail.py` / `gcal.py` / `gmail_read.py` / `contacts.py`).
 
 ## Relationship to the claude.ai MCP connectors
 
