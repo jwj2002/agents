@@ -1,7 +1,7 @@
 ---
 name: google-workspace
 version: 1.0
-description: Read/search/send/label email via Gmail, read/write Google Calendar, and look up Google Contacts (name -> email/phone) on personal machines, using the shared ~/agents/google OAuth (gmail_read.py / send_mail.py / gmail_label.py / gcal.py / contacts.py). Use whenever asked to read/search the inbox, send/draft an email, label or triage a message, check the calendar, add/move/delete an event, or find someone's email/phone. You ARE authorized here — do not claim you lack Gmail access without checking for the token first.
+description: Read/search/send/label email via Gmail, read/write Google Calendar, and look up or add Google Contacts (name -> email/phone) on personal machines, using the shared ~/agents/google OAuth (gmail_read.py / send_mail.py / gmail_label.py / gcal.py / contacts.py). Use whenever asked to read/search the inbox, send/draft an email, label or triage a message, check the calendar, add/move/delete an event, or find/save someone's contact. You ARE authorized here — do not claim you lack Gmail access without checking for the token first.
 ---
 
 # google-workspace
@@ -52,16 +52,19 @@ $PY ~/agents/google/gcal.py delete --event-id <id>
 ```
 Timezone auto-detects from the calendar; `--calendar` defaults to `primary`.
 
-## Look up a contact (name → email/phone)
+## Contacts (look up / add)
 ```
-$PY ~/agents/google/contacts.py search "Bob Smith"
+$PY ~/agents/google/contacts.py search "Bob Smith"                       # name -> email/phone
+$PY ~/agents/google/contacts.py add "Bob Smith" --email bob@x.com --phone 555-1234
+$PY ~/agents/google/contacts.py delete people/c123...                    # resourceName from add/search
 ```
-Read-only. Handy to resolve a recipient before `send_mail.py`.
+Read/write (`contacts` scope). Pairs with email triage: after reading a new
+message, look up the sender or `add` them.
 
 ## Notes
 - This shared token is canonical — **never hand-roll a sender/reader or a second token.**
-- Read + send + calendar + contacts all run off this one token (scopes:
-  gmail.modify, gmail.send, calendar, contacts.readonly). No MCP needed for these.
+- Read + send + label + calendar + contacts all run off this one token (scopes:
+  gmail.modify, gmail.send, calendar, tasks, contacts). No MCP needed for these.
 - Google Tasks has no CLI yet: build a client off
   `~/agents/google/auth.py:load_credentials()`.
 - Full detail + per-machine gate: `~/.claude/rules/google-mail.md`.

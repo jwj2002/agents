@@ -22,7 +22,8 @@ on this machine — work machines do not have it. Mirrors the M365 gate
 
 ## Authorized scopes (one superset token covers all agents)
 
-`gmail.send`, `gmail.modify`, `calendar`, `tasks`, `contacts.readonly`.
+`gmail.send`, `gmail.modify`, `calendar`, `tasks`, `contacts` (read-write since
+the 2026-06-27 reauth).
 Validated live 2026-06-26 on this laptop: Gmail (account
 `jasonwadejob@gmail.com`), Calendar (read/write), Google Tasks all OK.
 
@@ -36,7 +37,7 @@ Validated live 2026-06-26 on this laptop: Gmail (account
 | **Calendar read/write** (CLI) | `~/agents/google/gcal.py` (`calendars`/`agenda`/`add`/`quickadd`/`delete`) |
 | **Gmail read/search** (CLI) | `~/agents/google/gmail_read.py` (`unread`/`search`/`read`) |
 | **Gmail label/triage** (CLI) | `~/agents/google/gmail_label.py` (`list`/`add`/`remove`; `gmail.modify`) |
-| **Contacts lookup** (CLI, read-only) | `~/agents/google/contacts.py` (`search "<name>"` → email/phone) |
+| **Contacts read/write** (CLI) | `~/agents/google/contacts.py` (`search`/`add`/`delete`) |
 | Full reference | `~/agents/google/README.md` |
 
 ### Send mail (CLI)
@@ -87,15 +88,16 @@ $PY ~/agents/google/gmail_label.py remove <message_id> "Follow up"
 Uses `gmail.modify` (already granted) — no re-auth. Message ids come from
 `gmail_read.py`.
 
-### Contacts lookup (CLI, read-only)
+### Contacts read/write (CLI)
 
 ```bash
 PY=~/agents/.venv/bin/python
 $PY ~/agents/google/contacts.py search "Bob Smith"      # name -> email/phone
+$PY ~/agents/google/contacts.py add "Bob Smith" --email bob@x.com --phone 555-1234
+$PY ~/agents/google/contacts.py delete people/c123...   # resourceName from add/search
 ```
-Read-only (`contacts.readonly` scope). **Creating/editing contacts is NOT
-possible** with the current token — that needs the `contacts` (read-write) scope
-added to `auth.py:SCOPES` + a `reauth.py` re-consent.
+Read **and** write (`contacts` scope, granted via reauth 2026-06-27). Pairs with
+email triage — look up or save a sender after reading a new message.
 
 ### Google Tasks (no ready-made CLI yet)
 
