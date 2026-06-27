@@ -1,7 +1,7 @@
 ---
 name: google-workspace
 version: 1.0
-description: Read, search, and send email via Gmail and read/write Google Calendar on personal machines, using the shared ~/agents/google OAuth (gmail_read.py / send_mail.py / gcal.py). Use whenever asked to read/search the inbox, send/draft an email, check the calendar, or add/move/delete a calendar event. You ARE authorized here — do not claim you lack Gmail access without checking for the token first.
+description: Read/search/send email via Gmail, read/write Google Calendar, and look up Google Contacts (name -> email/phone) on personal machines, using the shared ~/agents/google OAuth (gmail_read.py / send_mail.py / gcal.py / contacts.py). Use whenever asked to read/search the inbox, send/draft an email, check the calendar, add/move/delete an event, or find someone's email/phone. You ARE authorized here — do not claim you lack Gmail access without checking for the token first.
 ---
 
 # google-workspace
@@ -44,11 +44,17 @@ $PY ~/agents/google/gcal.py delete --event-id <id>
 ```
 Timezone auto-detects from the calendar; `--calendar` defaults to `primary`.
 
+## Look up a contact (name → email/phone)
+```
+$PY ~/agents/google/contacts.py search "Bob Smith"
+```
+Read-only. Handy to resolve a recipient before `send_mail.py`.
+
 ## Notes
 - This shared token is canonical — **never hand-roll a sender/reader or a second token.**
-- Read + send + calendar all run off this one token (scopes: gmail.modify,
-  gmail.send, calendar). The claude.ai Gmail MCP is no longer needed for reading.
-- Google Tasks / Contacts have no CLI yet: build a client off
+- Read + send + calendar + contacts all run off this one token (scopes:
+  gmail.modify, gmail.send, calendar, contacts.readonly). No MCP needed for these.
+- Google Tasks has no CLI yet: build a client off
   `~/agents/google/auth.py:load_credentials()`.
 - Full detail + per-machine gate: `~/.claude/rules/google-mail.md`.
 - Microsoft To Do (the user's real task lists) is a separate capability —
