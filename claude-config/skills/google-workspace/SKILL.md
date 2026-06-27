@@ -1,7 +1,7 @@
 ---
 name: google-workspace
 version: 1.0
-description: Read/search/send email via Gmail, read/write Google Calendar, and look up Google Contacts (name -> email/phone) on personal machines, using the shared ~/agents/google OAuth (gmail_read.py / send_mail.py / gcal.py / contacts.py). Use whenever asked to read/search the inbox, send/draft an email, check the calendar, add/move/delete an event, or find someone's email/phone. You ARE authorized here — do not claim you lack Gmail access without checking for the token first.
+description: Read/search/send/label email via Gmail, read/write Google Calendar, and look up Google Contacts (name -> email/phone) on personal machines, using the shared ~/agents/google OAuth (gmail_read.py / send_mail.py / gmail_label.py / gcal.py / contacts.py). Use whenever asked to read/search the inbox, send/draft an email, label or triage a message, check the calendar, add/move/delete an event, or find someone's email/phone. You ARE authorized here — do not claim you lack Gmail access without checking for the token first.
 ---
 
 # google-workspace
@@ -25,6 +25,14 @@ $PY ~/agents/google/gmail_read.py read <message_id>
 `search` takes the normal Gmail query syntax. `unread`/`search` print id + from +
 subject + snippet; `read` prints headers + the plain-text body. This is the
 token path — **no MCP needed to read.**
+
+## Label / triage an email
+```
+$PY ~/agents/google/gmail_label.py list
+$PY ~/agents/google/gmail_label.py add <message_id> "Follow up" [--create]
+$PY ~/agents/google/gmail_label.py remove <message_id> "Follow up"
+```
+Uses `gmail.modify` (no re-auth). Get the message id from `gmail_read.py`.
 
 ## Send email
 ```

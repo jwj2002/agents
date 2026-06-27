@@ -35,6 +35,7 @@ Validated live 2026-06-26 on this laptop: Gmail (account
 | **Send mail** (CLI) | `~/agents/google/send_mail.py` |
 | **Calendar read/write** (CLI) | `~/agents/google/gcal.py` (`calendars`/`agenda`/`add`/`quickadd`/`delete`) |
 | **Gmail read/search** (CLI) | `~/agents/google/gmail_read.py` (`unread`/`search`/`read`) |
+| **Gmail label/triage** (CLI) | `~/agents/google/gmail_label.py` (`list`/`add`/`remove`; `gmail.modify`) |
 | **Contacts lookup** (CLI, read-only) | `~/agents/google/contacts.py` (`search "<name>"` → email/phone) |
 | Full reference | `~/agents/google/README.md` |
 
@@ -74,6 +75,17 @@ $PY ~/agents/google/gmail_read.py read <message_id>
 
 Uses the token's `gmail.modify` scope (read included) — no re-auth. `search`
 takes normal Gmail query syntax; `read` prints headers + plain-text body.
+
+### Label / triage mail (CLI)
+
+```bash
+PY=~/agents/.venv/bin/python
+$PY ~/agents/google/gmail_label.py list
+$PY ~/agents/google/gmail_label.py add <message_id> "Follow up" --create
+$PY ~/agents/google/gmail_label.py remove <message_id> "Follow up"
+```
+Uses `gmail.modify` (already granted) — no re-auth. Message ids come from
+`gmail_read.py`.
 
 ### Contacts lookup (CLI, read-only)
 
