@@ -34,6 +34,7 @@ Validated live 2026-06-26 on this laptop: Gmail (account
 | Re-authorize ("reauth google") | `~/agents/.venv/bin/python ~/agents/google/reauth.py` |
 | **Send mail** (CLI) | `~/agents/google/send_mail.py` |
 | **Calendar read/write** (CLI) | `~/agents/google/gcal.py` (`calendars`/`agenda`/`add`/`quickadd`/`delete`) |
+| **Gmail read/search** (CLI) | `~/agents/google/gmail_read.py` (`unread`/`search`/`read`) |
 | Full reference | `~/agents/google/README.md` |
 
 ### Send mail (CLI)
@@ -61,32 +62,44 @@ Timezone auto-detects from the calendar (override with `--tz`); `--calendar`
 defaults to `primary`. Note the file is `gcal.py`, **not** `calendar.py` (that
 would shadow the stdlib `calendar` module).
 
-### Tasks / Contacts / read-Gmail (no ready-made CLI yet)
+### Read / search mail (CLI)
 
-For Google Tasks, Contacts, or reading Gmail, use the shared auth directly — the
-same token already authorizes them:
+```bash
+PY=~/agents/.venv/bin/python
+$PY ~/agents/google/gmail_read.py unread --max 10
+$PY ~/agents/google/gmail_read.py search "from:x@y.com newer_than:7d" --max 20
+$PY ~/agents/google/gmail_read.py read <message_id>
+```
+
+Uses the token's `gmail.modify` scope (read included) — no re-auth. `search`
+takes normal Gmail query syntax; `read` prints headers + plain-text body.
+
+### Tasks / Contacts (no ready-made CLI yet)
+
+For Google Tasks or Contacts, use the shared auth directly — the same token
+already authorizes them:
 
 ```python
 import sys; sys.path.insert(0, "/Users/jasonjob/agents/google")
 from auth import load_credentials
 from googleapiclient.discovery import build
-svc = build("tasks", "v1", credentials=load_credentials())   # or "gmail"/"people"
+svc = build("tasks", "v1", credentials=load_credentials())   # or "people"
 ```
 
-If you find yourself repeating one of these, promote it to a `~/agents/google/`
-CLI helper (mirroring `send_mail.py` / `gcal.py`) rather than re-pasting.
+If you find yourself repeating one, promote it to a `~/agents/google/` CLI helper
+(mirroring `send_mail.py` / `gcal.py` / `gmail_read.py`) rather than re-pasting.
 
 ## Relationship to the claude.ai MCP connectors
 
-The claude.ai **Gmail / Calendar / Drive** MCP connectors overlap with this
-token. Migration status toward dropping them:
+Goal: **no MCP** for Google. Status — the token CLI now covers everything except Drive:
 
-- **Calendar** — ✅ covered by `gcal.py` (read/write). The claude.ai Calendar MCP
-  is now redundant and can be disconnected.
-- **Google Tasks** — only reachable via this token (no Tasks MCP).
-- **Gmail send** — covered by `send_mail.py`. **Gmail read/search** has no CLI
-  helper yet — keep the claude.ai Gmail MCP until one exists, or you lose
-  read/search ergonomics.
-- **Drive** — still MCP-only; no `~/agents/google/` helper.
+- **Gmail read/search** — ✅ `gmail_read.py`. The claude.ai Gmail MCP is now
+  **redundant and can be disconnected.**
+- **Gmail send** — ✅ `send_mail.py` (the MCP never could send anyway).
+- **Calendar read/write** — ✅ `gcal.py`. The claude.ai Calendar MCP is redundant.
+- **Google Tasks / Contacts** — token-authorized; no CLI yet (use `auth.py`).
+- **Drive** — still MCP-only; no `~/agents/google/` helper (only remaining reason
+  to keep any claude.ai Google connector).
 
-There is no longer a local `gmail-send` MCP — that path is retired.
+There is no longer a local `gmail-send` MCP. Prefer the token CLIs above over any
+MCP for Gmail/Calendar.

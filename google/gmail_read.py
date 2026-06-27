@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Gmail read/search CLI on the shared ~/agents/google token.
+
+Uses the token's existing `gmail.modify` scope (which includes read) — no extra
+auth. Mirrors send_mail.py / gcal.py. This is the token-based replacement for the
+claude.ai Gmail MCP's read tools, so reading no longer depends on an MCP connector.
+
+    PY=~/agents/.venv/bin/python
+    $PY ~/agents/google/gmail_read.py unread --max 10
+    $PY ~/agents/google/gmail_read.py search "from:boss@x.com newer_than:7d" --max 20
+    $PY ~/agents/google/gmail_read.py read <message_id>
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import sys
+
+sys.path.insert(0, "/Users/jasonjob/agents/google")
+from auth import load_credentials  # noqa: E402
+from googleapiclient.discovery import build  # noqa: E402
+
+
+def service():
+    return build("gmail", "v1", credentials=load_credentials(), cache_discovery=False)
+
+
+def _hdr(headers: list[dict], name: str) -> str:
+    for h in headers:
+        if h.get("name", "").lower() == name.lower():
+            return h.get("value", "")
+    return ""
+
+
+def search(svc, query: str, maxn: int) -> list[dict]:
+    resp = svc.users().messages().list(userId="me", q=query, maxResults=maxn).execute()
+    out = []
+    for m in resp.get("messages", []):
+        msg = (
+            svc.users()
+            .messages()
+            .get(
+                userId="me",
+                id=m["id"],
+                format="metadata",
+                metadataHeaders=["From", "Subject", "Date"],
+            )
+            .execute()
+        )
+        h = msg.get("payload", {}).get("headers", [])
+        out.append(
+            {
+                "id": m["id"],
+                "from": _hdr(h, "From"),
+                "subject": _hdr(h, "Subject"),
+                "date": _hdr(h, "Date"),
+                "snippet": msg.get("snippet", ""),
+            }
+        )
+    return out
+
+
+def _extract_body(payload: dict) -> str:
+    """Walk MIME parts for text/plain; fall back to the top-level body."""
+    def walk(p: dict) -> str:
+        if p.get("mimeType") == "text/plain" and p.get("body", {}).get("data"):
+            return base64.urlsafe_b64decode(p["body"]["data"]).decode("utf-8", "replace")
+        for sub in p.get("parts", []) or []:
+            found = walk(sub)
+            if found:
+                return found
+        return ""
+
+    body = walk(payload)
+    if not body and payload.get("body", {}).get("data"):
+        body = base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8", "replace")
+    return body
+
+
+def read_msg(svc, mid: str) -> dict:
+    msg = svc.users().messages().get(userId="me", id=mid, format="full").execute()
+    h = msg.get("payload", {}).get("headers", [])
+    return {
+        "from": _hdr(h, "From"),
+        "to": _hdr(h, "To"),
+        "subject": _hdr(h, "Subject"),
+        "date": _hdr(h, "Date"),
+        "body": _extract_body(msg.get("payload", {})),
+    }
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Gmail read/search CLI (shared token)")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    ps = sub.add_parser("search")
+    ps.add_argument("query", help="Gmail search query (same syntax as the Gmail search box)")
+    ps.add_argument("--max", type=int, default=10, dest="maxn")
+    pu = sub.add_parser("unread")
+    pu.add_argument("--max", type=int, default=10, dest="maxn")
+    pr = sub.add_parser("read")
+    pr.add_argument("id")
+    a = ap.parse_args()
+
+    svc = service()
+    if a.cmd in ("search", "unread"):
+        q = a.query if a.cmd == "search" else "is:unread"
+        rows = search(svc, q, a.maxn)
+        if not rows:
+            print("(no matching messages)")
+        for m in rows:
+            print(f"[{m['id']}] {m['date']}")
+            print(f"  From: {m['from']}")
+            print(f"  Subj: {m['subject']}")
+            print(f"  {m['snippet'][:160]}\n")
+    elif a.cmd == "read":
+        m = read_msg(svc, a.id)
+        print(f"From: {m['from']}\nTo: {m['to']}\nDate: {m['date']}\nSubject: {m['subject']}\n")
+        print(m["body"][:4000])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
