@@ -84,6 +84,10 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/precompact_checkpoint.py"
+          },
+          {
+            "type": "command",
+            "command": "sh -c 'set -a; [ -f \"$HOME/.buddy/emit-env.sh\" ] && . \"$HOME/.buddy/emit-env.sh\"; [ -f \"$PWD/.buddy-emit-project\" ] && BUDDY_EMIT_PROJECT_ID=\"$(cat \"$PWD/.buddy-emit-project\")\"; [ -f \"$HOME/projects/buddy/scripts/hooks/project_event_session.py\" ] && PYTHONPATH=\"$HOME/projects/buddy/src\" python3 \"$HOME/projects/buddy/scripts/hooks/project_event_session.py\" || true'"
           }
         ]
       }
@@ -138,6 +142,10 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/capture_session_telemetry.py"
+          },
+          {
+            "type": "command",
+            "command": "sh -c 'set -a; [ -f \"$HOME/.buddy/emit-env.sh\" ] && . \"$HOME/.buddy/emit-env.sh\"; [ -f \"$PWD/.buddy-emit-project\" ] && BUDDY_EMIT_PROJECT_ID=\"$(cat \"$PWD/.buddy-emit-project\")\"; [ -f \"$HOME/projects/buddy/scripts/hooks/project_event_session.py\" ] && PYTHONPATH=\"$HOME/projects/buddy/src\" python3 \"$HOME/projects/buddy/scripts/hooks/project_event_session.py\" || true'"
           }
         ]
       }
@@ -153,6 +161,10 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/edit_quality_feedback.py"
+          },
+          {
+            "type": "command",
+            "command": "sh -c 'set -a; [ -f \"$HOME/.buddy/emit-env.sh\" ] && . \"$HOME/.buddy/emit-env.sh\"; [ -f \"$PWD/.buddy-emit-project\" ] && BUDDY_EMIT_PROJECT_ID=\"$(cat \"$PWD/.buddy-emit-project\")\"; [ -f \"$HOME/projects/buddy/scripts/hooks/project_event_posttooluse.py\" ] && PYTHONPATH=\"$HOME/projects/buddy/src\" python3 \"$HOME/projects/buddy/scripts/hooks/project_event_posttooluse.py\" || true'"
           }
         ]
       }
