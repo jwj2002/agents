@@ -5,6 +5,7 @@ Usage:
     $PY ~/agents/m365-todo/todo.py lists
     $PY ~/agents/m365-todo/todo.py tasks "Tasks"            # list name (default list is "Tasks")
     $PY ~/agents/m365-todo/todo.py add "Tasks" "Buy milk"
+    $PY ~/agents/m365-todo/todo.py add "Tasks" "Pay rent" --due 2026-07-05
     $PY ~/agents/m365-todo/todo.py complete "Tasks" "Buy milk"
 """
 
@@ -18,6 +19,9 @@ import requests
 from auth import get_token
 
 GRAPH = "https://graph.microsoft.com/v1.0"
+
+# Windows time-zone id Graph accepts; covers both PST and PDT (project runs Pacific).
+DEFAULT_TIMEZONE = "Pacific Standard Time"
 
 
 def _headers() -> dict:
@@ -50,12 +54,16 @@ def get_tasks(list_name: str, include_done: bool = False) -> list[dict]:
     return items
 
 
-def add_task(list_name: str, title: str) -> dict:
+def add_task(list_name: str, title: str, due: str | None = None) -> dict:
     lid = _resolve_list_id(list_name)
+    body: dict = {"title": title}
+    if due:
+        # Graph expects an ISO local dateTime + a time zone; a bare date starts at midnight.
+        body["dueDateTime"] = {"dateTime": f"{due}T00:00:00", "timeZone": DEFAULT_TIMEZONE}
     r = requests.post(
         f"{GRAPH}/me/todo/lists/{lid}/tasks",
         headers=_headers(),
-        json={"title": title},
+        json=body,
         timeout=30,
     )
     r.raise_for_status()
@@ -87,6 +95,7 @@ def main() -> int:
     p_add = sub.add_parser("add")
     p_add.add_argument("list")
     p_add.add_argument("title")
+    p_add.add_argument("--due", help="due date, YYYY-MM-DD (Pacific)")
     p_done = sub.add_parser("complete")
     p_done.add_argument("list")
     p_done.add_argument("title")
@@ -101,7 +110,7 @@ def main() -> int:
             mark = "x" if t.get("status") == "completed" else " "
             print(f"[{mark}] {t['title']}")
     elif a.cmd == "add":
-        t = add_task(a.list, a.title)
+        t = add_task(a.list, a.title, due=a.due)
         print(f"ADDED: {t['title']}  [{t['id']}]")
     elif a.cmd == "complete":
         t = complete_task(a.list, a.title)
